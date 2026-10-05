@@ -545,6 +545,90 @@ impl Store {
         )
     }
 
+    /// What to notify about from now on, earliest first: reminders set on
+    /// tasks, reminders derived from due dates, and daily summaries for the
+    /// coming week. At most 60, which fits what the platforms let an app schedule.
+    pub fn planned_notifications(&self, settings: NotifySettings) -> Result<Vec<PlannedNotification>> {
+        if !settings.enabled {
+            return Ok(vec![]);
+        }
+        let inner = self.lock();
+        let now = inner.now();
+        let clock = |value: &Option<String>| {
+            value
+                .as_deref()
+                .and_then(|v| chrono::NaiveTime::parse_from_str(v, "%H:%M").ok())
+        };
+        let all_day = clock(&settings.all_day_at);
+        let moment = |value: &str| NaiveDateTime::parse_from_str(value, MOMENT_FMT).ok();
+        let tasks = query_tasks(
+            &inner.conn,
+            &format!(
+                "WHERE {LIVE} AND {NOT_ARCHIVED} AND t.done IS NULL AND (t.remind IS NOT NULL OR t.due IS NOT NULL)"
+            ),
+            &[],
+        )?;
+        let mut out = Vec::new();
+        for task in &tasks {
+            let planned = match (&task.remind, &task.due) {
+                // A reminder without a time of day follows the all-day setting, nine o'clock failing that.
+                (Some(remind), _) => moment(remind)
+                    .or_else(|| {
+                        recur::split(remind).map(|(d, _)| {
+                            d.and_time(
+                                all_day.unwrap_or_else(|| chrono::NaiveTime::from_hms_opt(9, 0, 0).expect("valid")),
+                            )
+                        })
+                    })
+                    .map(|at| (NotificationKind::Reminder, at)),
+                (None, Some(due)) if due.len() > 10 => settings.lead_minutes.and_then(|lead| {
+                    moment(due).map(|at| (NotificationKind::Due, at - chrono::Duration::minutes(i64::from(lead))))
+                }),
+                (None, Some(due)) => {
+                    all_day.and_then(|time| recur::split(due).map(|(d, _)| (NotificationKind::Due, d.and_time(time))))
+                }
+                (None, None) => None,
+            };
+            if let Some((kind, at)) = planned.filter(|(_, at)| *at > now) {
+                out.push(PlannedNotification {
+                    key: format!("task:{}", task.id),
+                    kind,
+                    at: at.format(MOMENT_FMT).to_string(),
+                    task_id: Some(task.id.clone()),
+                    title: task.title.clone(),
+                    due: task.due.clone(),
+                    count: 0,
+                });
+            }
+        }
+        if let Some(time) = clock(&settings.summary_at) {
+            for offset in 0..7 {
+                let day = now.date() + chrono::Duration::days(offset);
+                let at = day.and_time(time);
+                let key = day.format(DATE_FMT).to_string();
+                // Everything due by that day, as things stand now.
+                let count = tasks
+                    .iter()
+                    .filter(|t| t.due.as_deref().is_some_and(|d| d[..10] <= *key))
+                    .count() as u32;
+                if at > now && count > 0 {
+                    out.push(PlannedNotification {
+                        key: format!("summary:{key}"),
+                        kind: NotificationKind::Summary,
+                        at: at.format(MOMENT_FMT).to_string(),
+                        task_id: None,
+                        title: String::new(),
+                        due: None,
+                        count,
+                    });
+                }
+            }
+        }
+        out.sort_by(|a, b| (&a.at, &a.key).cmp(&(&b.at, &b.key)));
+        out.truncate(60);
+        Ok(out)
+    }
+
     pub fn tags(&self) -> Result<Vec<TagCount>> {
         let inner = self.lock();
         let mut stmt = inner.conn.prepare_cached(&format!(

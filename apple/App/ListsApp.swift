@@ -184,6 +184,7 @@ struct SettingsView: View {
     @Environment(AppModel.self) private var model
 
     private enum Kind: Hashable { case off, webdav, caldav, folder }
+    private static let times = ["07:00", "08:00", "09:00", "10:00", "12:00", "18:00", "20:00"]
 
     @State private var kind = Kind.off
     @State private var url = ""
@@ -202,6 +203,28 @@ struct SettingsView: View {
                 Picker(L("Typeface"), selection: $model.fontDesign) {
                     ForEach(AppFont.designs, id: \.1) { name, value in Text(L(name)).tag(value) }
                 }
+            }
+            Section(L("Notifications")) {
+                @Bindable var model = model
+                Toggle(L("Show notifications"), isOn: $model.notifyEnabled)
+                Picker(L("Task due at a time"), selection: $model.notifyLead) {
+                    Text(L("Off")).tag(-1)
+                    Text(L("At the due time")).tag(0)
+                    ForEach([5, 15, 30, 60, 120, 1440], id: \.self) { minutes in
+                        Text(minutes < 60 ? L("%@ min before", "\(minutes)") : minutes == 1440 ? L("A day before") : L("%@ h before", "\(minutes / 60)")).tag(minutes)
+                    }
+                }
+                Picker(L("Task due on a day"), selection: $model.notifyAllDay) {
+                    Text(L("Off")).tag("")
+                    ForEach(Self.times, id: \.self) { Text(L("At %@", $0)).tag($0) }
+                }
+                Picker(L("Summary of the day"), selection: $model.notifySummary) {
+                    Text(L("Off")).tag("")
+                    ForEach(Self.times, id: \.self) { Text(L("At %@", $0)).tag($0) }
+                }
+                Toggle(L("Play a sound"), isOn: $model.notifySound)
+                Text(L("A reminder set on a task is always shown. These settings apply to this Mac only."))
+                    .font(AppFont.style(.caption)).foregroundStyle(.secondary)
             }
             Section(L("Quick Entry")) {
                 KeyboardShortcuts.Recorder(L("Shortcut:"), name: .quickEntry)

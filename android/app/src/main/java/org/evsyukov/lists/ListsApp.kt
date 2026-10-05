@@ -28,6 +28,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import uniffi.lists_core.NotificationKind
+import uniffi.lists_core.NotifySettings
 import uniffi.lists_core.Store
 import uniffi.lists_core.SyncConfig
 import uniffi.lists_core.SyncReport
@@ -108,7 +110,33 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
     }
 }
 
-/** Mirrors reminders of open tasks into alarms that post a notification. */
+/** Notification settings of this device; not synced. */
+object NotifyPrefs {
+    private const val PREFS = "notify"
+    val times = listOf("07:00", "08:00", "09:00", "10:00", "12:00", "18:00", "20:00")
+    val leads = listOf(-1, 0, 5, 15, 30, 60, 120, 1440)
+
+    private fun prefs(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    fun enabled(context: Context) = prefs(context).getBoolean("enabled", true)
+    /** Minutes before a timed due date; -1 turns these reminders off. */
+    fun lead(context: Context) = prefs(context).getInt("lead", 15)
+    /** `HH:MM`, empty for off. */
+    fun allDay(context: Context) = prefs(context).getString("allDay", "09:00").orEmpty()
+    fun summary(context: Context) = prefs(context).getString("summary", "").orEmpty()
+
+    fun save(context: Context, enabled: Boolean, lead: Int, allDay: String, summary: String) {
+        prefs(context).edit().putBoolean("enabled", enabled).putInt("lead", lead).putString("allDay", allDay).putString("summary", summary).apply()
+    }
+
+    fun settings(context: Context) = NotifySettings(
+        enabled = enabled(context),
+        leadMinutes = lead(context).takeIf { it >= 0 }?.toUInt(),
+        allDayAt = allDay(context).ifEmpty { null },
+        summaryAt = summary(context).ifEmpty { null },
+    )
+}
+
+/** Turns the core's notification plan into alarms that post a notification. */
 object Reminders {
     private const val CHANNEL = "reminders"
     private const val PREFS = "reminders"
@@ -120,16 +148,17 @@ object Reminders {
         for (id in prefs.getStringSet(KEY, emptySet()).orEmpty()) {
             alarms.cancel(pending(context, id, "", ""))
         }
-        val tasks = runCatching { Repo.store.reminders() }.getOrDefault(emptyList())
-        val now = System.currentTimeMillis()
+        val plan = runCatching { Repo.store.plannedNotifications(NotifyPrefs.settings(context)) }.getOrDefault(emptyList())
         val scheduled = mutableSetOf<String>()
-        for (task in tasks) {
-            val at = task.remind?.let(::parseMoment)?.atZone(ZoneId.systemDefault())?.toInstant()?.toEpochMilli() ?: continue
-            if (at <= now) continue
-            val body = task.due?.let { str(R.string.due_at, dateLabel(it).lowercase()) }.orEmpty()
+        for (item in plan) {
+            val at = parseMoment(item.at)?.atZone(ZoneId.systemDefault())?.toInstant()?.toEpochMilli() ?: continue
+            val (title, body) = when (item.kind) {
+                NotificationKind.SUMMARY -> context.getString(R.string.app_name) to str(R.string.summary_body, item.count.toString())
+                else -> item.title to item.due?.let { str(R.string.due_at, dateLabel(it).lowercase()) }.orEmpty()
+            }
             // Inexact on purpose: exact alarms need a special permission a to-do list should not ask for.
-            alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pending(context, task.id, task.title, body))
-            scheduled += task.id
+            alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pending(context, item.taskId ?: item.key, title, body))
+            scheduled += item.taskId ?: item.key
         }
         prefs.edit().putStringSet(KEY, scheduled).apply()
     }

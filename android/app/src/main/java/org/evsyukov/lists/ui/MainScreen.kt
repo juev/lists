@@ -240,7 +240,7 @@ fun MainScreen(model: MainViewModel, onReminderSet: () -> Unit) {
     if (creatingList) ListDialog(null, model) { creatingList = false }
     editingFilter?.let { FilterDialog(it, state, model) { editingFilter = null } }
     if (creatingFilter) FilterDialog(null, state, model) { creatingFilter = false }
-    if (settings) SettingsDialog(model) { settings = false }
+    if (settings) SettingsDialog(model, onReminderSet) { settings = false }
     if (confirmEmptyTrash) {
         AlertDialog(
             onDismissRequest = { confirmEmptyTrash = false },

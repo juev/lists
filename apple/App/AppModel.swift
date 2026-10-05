@@ -45,6 +45,33 @@ final class AppModel {
     /// False while `alert` carries a report rather than a failure.
     var alertIsError = true
 
+    // Notification settings of this Mac; not synced.
+    var notifyEnabled: Bool = UserDefaults.standard.object(forKey: "notifyEnabled") as? Bool ?? true { didSet { saveNotify() } }
+    /// Minutes before a timed due date; -1 turns these reminders off.
+    var notifyLead: Int = UserDefaults.standard.object(forKey: "notifyLead") as? Int ?? 15 { didSet { saveNotify() } }
+    /// `HH:MM`, empty for off.
+    var notifyAllDay: String = UserDefaults.standard.string(forKey: "notifyAllDay") ?? "09:00" { didSet { saveNotify() } }
+    var notifySummary: String = UserDefaults.standard.string(forKey: "notifySummary") ?? "" { didSet { saveNotify() } }
+    var notifySound: Bool = UserDefaults.standard.object(forKey: "notifySound") as? Bool ?? true { didSet { saveNotify() } }
+
+    var notifySettings: NotifySettings {
+        NotifySettings(
+            enabled: notifyEnabled,
+            leadMinutes: notifyLead < 0 ? nil : UInt32(notifyLead),
+            allDayAt: notifyAllDay.isEmpty ? nil : notifyAllDay,
+            summaryAt: notifySummary.isEmpty ? nil : notifySummary)
+    }
+
+    private func saveNotify() {
+        let defaults = UserDefaults.standard
+        defaults.set(notifyEnabled, forKey: "notifyEnabled")
+        defaults.set(notifyLead, forKey: "notifyLead")
+        defaults.set(notifyAllDay, forKey: "notifyAllDay")
+        defaults.set(notifySummary, forKey: "notifySummary")
+        defaults.set(notifySound, forKey: "notifySound")
+        Reminders.shared.refresh(store, settings: notifySettings, sound: notifySound)
+    }
+
     @ObservationIgnored private var syncDebounce: DispatchWorkItem?
     @ObservationIgnored private var timer: Timer?
     @ObservationIgnored weak var undoManager: UndoManager?
@@ -140,7 +167,7 @@ final class AppModel {
                 loaded[id] = try store.subtasks(parentId: id)
             }
             children = loaded
-            Reminders.shared.refresh(store)
+            Reminders.shared.refresh(store, settings: notifySettings, sound: notifySound)
         } catch {
             alert = describe(error)
         }

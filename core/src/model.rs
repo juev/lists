@@ -316,3 +316,40 @@ pub struct SyncStatus {
     pub last_ok: Option<String>,
     pub last_error: Option<String>,
 }
+
+/// How this device wants to be notified. Kept by the app, not synced:
+/// a phone and a desktop rarely want the same.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct NotifySettings {
+    pub enabled: bool,
+    /// For a task due at a time and without a reminder of its own: notify this
+    /// many minutes before. `None` turns these off; 0 means at the due time.
+    pub lead_minutes: Option<u32>,
+    /// For a task due on a day without a time: notify at this time (`HH:MM`) on that day.
+    pub all_day_at: Option<String>,
+    /// A summary of the day at this time (`HH:MM`), when there is anything due.
+    pub summary_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum NotificationKind {
+    /// The reminder set on the task.
+    Reminder,
+    /// Derived from the due date by the settings.
+    Due,
+    /// The summary of a day; `count` tasks are due or overdue.
+    Summary,
+}
+
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct PlannedNotification {
+    /// Stable across calls, so the app can replace what it scheduled before.
+    pub key: String,
+    pub kind: NotificationKind,
+    /// `YYYY-MM-DDTHH:MM`, local time.
+    pub at: String,
+    pub task_id: Option<String>,
+    pub title: String,
+    pub due: Option<String>,
+    pub count: u32,
+}

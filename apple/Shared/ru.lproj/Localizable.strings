@@ -243,3 +243,16 @@
 "Import…" = "Импорт…";
 "A 2Do backup (.2dodb), a Todoist CSV, a Trello board JSON or Microsoft To Do lists as JSON" = "Резервная копия 2Do (.2dodb), CSV из Todoist, JSON доски Trello или списки Microsoft To Do в JSON";
 "Imported from %@: %@ lists, %@ tasks, %@ attachments." = "Импорт из %1$@: списков — %2$@, задач — %3$@, вложений — %4$@.";
+"Tasks due today or overdue: %@" = "Задач на сегодня и просроченных: %@";
+"Notifications" = "Уведомления";
+"Show notifications" = "Показывать уведомления";
+"Task due at a time" = "Задача со сроком по времени";
+"At the due time" = "В момент срока";
+"%@ min before" = "За %@ мин";
+"A day before" = "За день";
+"%@ h before" = "За %@ ч";
+"Task due on a day" = "Задача со сроком на день";
+"At %@" = "В %@";
+"Summary of the day" = "Сводка дня";
+"Play a sound" = "Со звуком";
+"A reminder set on a task is always shown. These settings apply to this Mac only." = "Напоминание, заданное у задачи, показывается всегда. Эти настройки действуют только на этом Mac.";

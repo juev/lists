@@ -103,34 +103,42 @@ final class QuickEntryPanel: NSPanel {
     }
 }
 
-/// Mirrors reminders of open tasks into local notifications.
+/// Turns the core's notification plan into local notifications.
 @MainActor
 final class Reminders {
     static let shared = Reminders()
-    private var scheduled: [String: String] = [:]
+    private var scheduled: [String] = []
 
     /// Takes the store as an argument: it is called while `AppModel.shared` is still being built.
-    func refresh(_ store: Store?) {
-        guard let store, let tasks = try? store.reminders() else { return }
-        let wanted = Dictionary(uniqueKeysWithValues: tasks.compactMap { task in task.remind.map { (task.id, "\($0)|\(task.title)") } })
-        guard wanted != scheduled else { return }
-        scheduled = wanted
+    func refresh(_ store: Store?, settings: NotifySettings, sound: Bool) {
+        guard let store, let plan = try? store.plannedNotifications(settings: settings) else { return }
+        let signature = plan.map { "\($0.key)|\($0.at)|\($0.title)|\($0.count)|\(sound)" }
+        guard signature != scheduled else { return }
+        scheduled = signature
 
         let center = UNUserNotificationCenter.current()
-        guard !tasks.isEmpty else { return center.removeAllPendingNotificationRequests() }
+        guard !plan.isEmpty else { return center.removeAllPendingNotificationRequests() }
+        let requests: [UNNotificationRequest] = plan.compactMap { item in
+            guard let date = Moment.date(item.at) else { return nil }
+            let content = UNMutableNotificationContent()
+            switch item.kind {
+            case .summary:
+                content.title = "Lists"
+                content.body = L("Tasks due today or overdue: %@", "\(item.count)")
+            case .reminder, .due:
+                content.title = item.title
+                if let due = item.due { content.body = L("Due: %@", Moment.label(due).lowercased()) }
+            }
+            if sound { content.sound = .default }
+            if let task = item.taskId { content.userInfo = ["task": task] }
+            let parts = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: date)
+            return UNNotificationRequest(identifier: item.key, content: content, trigger: UNCalendarNotificationTrigger(dateMatching: parts, repeats: false))
+        }
+        // Permission is asked the first time there is something to show.
         center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
             guard granted else { return }
             center.removeAllPendingNotificationRequests()
-            for task in tasks {
-                guard let remind = task.remind, let date = Moment.date(remind), date > Date() else { continue }
-                let content = UNMutableNotificationContent()
-                content.title = task.title
-                if let due = task.due { content.body = L("Due: %@", "\(Moment.label(due).lowercased())") }
-                content.sound = .default
-                let parts = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: date)
-                let trigger = UNCalendarNotificationTrigger(dateMatching: parts, repeats: false)
-                center.add(UNNotificationRequest(identifier: task.id, content: content, trigger: trigger))
-            }
+            requests.forEach { center.add($0) }
         }
     }
 }

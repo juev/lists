@@ -85,6 +85,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.evsyukov.lists.R
 import org.evsyukov.lists.str
 import org.evsyukov.lists.ordinal
+import org.evsyukov.lists.NotifyPrefs
 import org.evsyukov.lists.Repo
 import org.evsyukov.lists.Secrets
 import org.evsyukov.lists.dateLabel
@@ -661,7 +662,7 @@ fun ListDialog(list: TaskList?, model: MainViewModel, onDismiss: () -> Unit) {
 }
 
 @Composable
-fun SettingsDialog(model: MainViewModel, onDismiss: () -> Unit) {
+fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss: () -> Unit) {
     val state by model.state.collectAsStateWithLifecycle()
     val syncing by Repo.syncing.collectAsStateWithLifecycle()
     val saved = remember { runCatching { Repo.store.syncConfig() }.getOrNull() }
@@ -673,6 +674,24 @@ fun SettingsDialog(model: MainViewModel, onDismiss: () -> Unit) {
     val context = LocalContext.current
     var password by remember { mutableStateOf(if (enabled) Secrets.load(context).orEmpty() else "") }
     var error by remember { mutableStateOf<String?>(null) }
+    var notifyOn by remember { mutableStateOf(NotifyPrefs.enabled(context)) }
+    var lead by remember { mutableStateOf(NotifyPrefs.lead(context)) }
+    var allDay by remember { mutableStateOf(NotifyPrefs.allDay(context)) }
+    var summary by remember { mutableStateOf(NotifyPrefs.summary(context)) }
+    var choosing by remember { mutableStateOf<String?>(null) }
+    fun saveNotify() {
+        NotifyPrefs.save(context, notifyOn, lead, allDay, summary)
+        if (notifyOn) onNotifications()
+        Repo.changed()
+    }
+    fun leadLabel(minutes: Int) = when {
+        minutes < 0 -> str(R.string.sync_off)
+        minutes == 0 -> str(R.string.at_due_time)
+        minutes < 60 -> str(R.string.min_before, minutes.toString())
+        minutes == 1440 -> str(R.string.day_before)
+        else -> str(R.string.h_before, (minutes / 60).toString())
+    }
+    fun timeLabel(time: String) = if (time.isEmpty()) str(R.string.sync_off) else str(R.string.at_time, time)
     val pickImport = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             onDismiss()
@@ -682,9 +701,18 @@ fun SettingsDialog(model: MainViewModel, onDismiss: () -> Unit) {
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(str(R.string.sync)) },
+        title = { Text(str(R.string.settings)) },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
+                Text(str(R.string.notifications), style = MaterialTheme.typography.labelLarge)
+                SwitchRow(str(R.string.show_notifications), notifyOn) { notifyOn = it; saveNotify() }
+                if (notifyOn) {
+                    SettingRow(str(R.string.due_at_time_setting), leadLabel(lead)) { choosing = "lead" }
+                    SettingRow(str(R.string.due_on_day_setting), timeLabel(allDay)) { choosing = "allDay" }
+                    SettingRow(str(R.string.summary_setting), timeLabel(summary)) { choosing = "summary" }
+                }
+                HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                Text(str(R.string.sync), style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(bottom = 4.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     for ((value, label) in listOf("off" to str(R.string.sync_off), "webdav" to "WebDAV", "caldav" to "CalDAV")) {
                         FilterChip(selected = kind == value, onClick = { kind = value }, label = { Text(label) })
@@ -733,6 +761,19 @@ fun SettingsDialog(model: MainViewModel, onDismiss: () -> Unit) {
             }
         },
     )
+    when (choosing) {
+        "lead" -> ChoiceDialog(str(R.string.due_at_time_setting), NotifyPrefs.leads.map(::leadLabel), NotifyPrefs.leads.indexOf(lead), { choosing = null }) { lead = NotifyPrefs.leads[it]; saveNotify() }
+        "allDay" -> ChoiceDialog(str(R.string.due_on_day_setting), (listOf("") + NotifyPrefs.times).map(::timeLabel), (listOf("") + NotifyPrefs.times).indexOf(allDay), { choosing = null }) { allDay = (listOf("") + NotifyPrefs.times)[it]; saveNotify() }
+        "summary" -> ChoiceDialog(str(R.string.summary_setting), (listOf("") + NotifyPrefs.times).map(::timeLabel), (listOf("") + NotifyPrefs.times).indexOf(summary), { choosing = null }) { summary = (listOf("") + NotifyPrefs.times)[it]; saveNotify() }
+    }
+}
+
+@Composable
+private fun SettingRow(label: String, value: String, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, Modifier.weight(1f))
+        Text(value, color = MaterialTheme.colorScheme.primary)
+    }
 }
 
 /** A saved view: which dates, lists, tags, priority and status it lets through. */

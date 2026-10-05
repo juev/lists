@@ -814,3 +814,102 @@ fn derived_tables_are_rebuilt_when_their_shape_changes() {
     assert_eq!((got.title.as_str(), got.is_project), ("переживёт", true));
     assert_eq!(got.tags, ["тег"]);
 }
+
+fn notify() -> NotifySettings {
+    NotifySettings {
+        enabled: true,
+        lead_minutes: Some(15),
+        all_day_at: Some("09:00".into()),
+        summary_at: None,
+    }
+}
+
+#[test]
+fn notifications_follow_reminders_due_dates_and_settings() {
+    let d = device(); // now is 2026-10-05T10:00
+    let mk = |title: &str, due: Option<&str>, remind: Option<&str>| {
+        let t = d
+            .create_task(NewTask {
+                title: title.into(),
+                due: due.map(str::to_string),
+                ..NewTask::default()
+            })
+            .unwrap();
+        if let Some(r) = remind {
+            d.set_remind(t.id.clone(), Some(r.into())).unwrap();
+        }
+        t
+    };
+    mk(
+        "со своим напоминанием",
+        Some("2026-10-06T18:00"),
+        Some("2026-10-06T12:00"),
+    );
+    mk("срок со временем", Some("2026-10-05T18:30"), None);
+    mk("срок на день", Some("2026-10-07"), None);
+    mk("срок сегодня без времени", Some("2026-10-05"), None);
+    mk("напоминание в прошлом", None, Some("2026-10-05T09:00"));
+    let done = mk("выполнена", Some("2026-10-06T10:00"), None);
+    d.complete_task(done.id).unwrap();
+    mk("без дат", None, None);
+
+    let plan = |s: NotifySettings| {
+        d.planned_notifications(s)
+            .unwrap()
+            .into_iter()
+            .map(|n| (n.title, n.at, n.kind))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        plan(notify()),
+        [
+            ("срок со временем".to_string(), "2026-10-05T18:15".to_string(), NotificationKind::Due),
+            ("со своим напоминанием".to_string(), "2026-10-06T12:00".to_string(), NotificationKind::Reminder),
+            ("срок на день".to_string(), "2026-10-07T09:00".to_string(), NotificationKind::Due),
+        ],
+        "past moments, completed tasks and tasks without dates produce nothing; a reminder of its own replaces the derived one"
+    );
+    // Each kind of derived reminder can be turned off; a task's own reminder stays.
+    assert_eq!(
+        plan(NotifySettings {
+            lead_minutes: None,
+            all_day_at: None,
+            ..notify()
+        })
+        .len(),
+        1
+    );
+    assert_eq!(
+        plan(NotifySettings {
+            lead_minutes: Some(0),
+            ..notify()
+        })[0]
+            .1,
+        "2026-10-05T18:30"
+    );
+    assert!(plan(NotifySettings {
+        enabled: false,
+        ..notify()
+    })
+    .is_empty());
+
+    let summary: Vec<(String, u32)> = d
+        .planned_notifications(NotifySettings {
+            lead_minutes: None,
+            all_day_at: None,
+            summary_at: Some("08:00".into()),
+            ..notify()
+        })
+        .unwrap()
+        .into_iter()
+        .filter(|n| n.kind == NotificationKind::Summary)
+        .map(|n| (n.at, n.count))
+        .collect();
+    assert_eq!(
+        summary[0],
+        ("2026-10-06T08:00".to_string(), 3),
+        "today's eight o'clock has passed; tomorrow counts everything due by then"
+    );
+    assert_eq!(summary[1], ("2026-10-07T08:00".to_string(), 4));
+    assert_eq!(summary.len(), 6);
+}
