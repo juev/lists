@@ -114,26 +114,55 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
 object NotifyPrefs {
     private const val PREFS = "notify"
     val times = listOf("07:00", "08:00", "09:00", "10:00", "12:00", "18:00", "20:00")
-    val leads = listOf(-1, 0, 5, 15, 30, 60, 120, 1440)
+    val leads = listOf(0, 5, 15, 30, 60, 120, 1440)
 
     private fun prefs(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     fun enabled(context: Context) = prefs(context).getBoolean("enabled", true)
-    /** Minutes before a timed due date; -1 turns these reminders off. */
-    fun lead(context: Context) = prefs(context).getInt("lead", 15)
+    /**
+     * Minutes before a timed due date, one notification for each; empty turns
+     * these reminders off. Before several were allowed there was one, kept
+     * under `lead`, with -1 for off.
+     */
+    fun leads(context: Context): List<Int> {
+        val prefs = prefs(context)
+        prefs.getString("leads", null)?.let { saved -> return saved.split(',').mapNotNull { it.toIntOrNull() }.sorted() }
+        return listOf(prefs.getInt("lead", 15)).filter { it >= 0 }
+    }
     /** `HH:MM`, empty for off. */
     fun allDay(context: Context) = prefs(context).getString("allDay", "09:00").orEmpty()
     fun summary(context: Context) = prefs(context).getString("summary", "").orEmpty()
 
-    fun save(context: Context, enabled: Boolean, lead: Int, allDay: String, summary: String) {
-        prefs(context).edit().putBoolean("enabled", enabled).putInt("lead", lead).putString("allDay", allDay).putString("summary", summary).apply()
+    fun save(context: Context, enabled: Boolean, leads: List<Int>, allDay: String, summary: String) {
+        prefs(context).edit().putBoolean("enabled", enabled).putString("leads", leads.sorted().joinToString(",")).putString("allDay", allDay).putString("summary", summary).apply()
     }
 
     fun settings(context: Context) = NotifySettings(
         enabled = enabled(context),
-        leadMinutes = listOfNotNull(lead(context).takeIf { it >= 0 }?.toUInt()),
+        leadMinutes = leads(context).map { it.toUInt() },
         allDayAt = allDay(context).ifEmpty { null },
         summaryAt = summary(context).ifEmpty { null },
     )
+}
+
+/** How new tasks are entered on this device; not synced. */
+object EntryPrefs {
+    private fun prefs(context: Context) = context.getSharedPreferences("entry", Context.MODE_PRIVATE)
+
+    /** `inbox`, `last` or a list id. */
+    fun newTaskList(context: Context) = prefs(context).getString("newTaskList", "inbox") ?: "inbox"
+    fun setNewTaskList(context: Context, value: String) = prefs(context).edit().putString("newTaskList", value).apply()
+    fun noteUsedList(context: Context, id: String) = prefs(context).edit().putString("lastUsedList", id).apply()
+
+    /** Whether dates, priority, tags and a list are picked out of the typed title. */
+    fun parse(context: Context) = prefs(context).getBoolean("parse", true)
+    fun setParse(context: Context, value: Boolean) = prefs(context).edit().putBoolean("parse", value).apply()
+
+    /** The list for a task entered where no list is implied. */
+    fun defaultListId(context: Context, lists: List<uniffi.lists_core.TaskList>): String {
+        val choice = newTaskList(context)
+        val id = if (choice == "last") prefs(context).getString("lastUsedList", "inbox") ?: "inbox" else choice
+        return if (lists.any { it.id == id && !it.archived }) id else "inbox"
+    }
 }
 
 /** Turns the core's notification plan into alarms that post a notification. */

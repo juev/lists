@@ -36,6 +36,7 @@ import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
@@ -86,6 +87,7 @@ import org.evsyukov.lists.R
 import org.evsyukov.lists.str
 import org.evsyukov.lists.ordinal
 import org.evsyukov.lists.NotifyPrefs
+import org.evsyukov.lists.EntryPrefs
 import org.evsyukov.lists.Repo
 import org.evsyukov.lists.Secrets
 import org.evsyukov.lists.dateLabel
@@ -165,6 +167,8 @@ fun EditorSheet(editing: Editing, state: UiState, model: MainViewModel, onRemind
     var dialog by remember(task.id) { mutableStateOf<String?>(null) }
     var menu by remember { mutableStateOf(false) }
     var addMenu by remember { mutableStateOf(false) }
+    // Subtasks are not mentioned until the task has one or the user asks for the field.
+    var subtaskField by remember(task.id) { mutableStateOf(false) }
     val pickFiles = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
         if (uris.isNotEmpty()) model.act { store -> attach(context, store, task.id, uris) }
     }
@@ -226,12 +230,16 @@ fun EditorSheet(editing: Editing, state: UiState, model: MainViewModel, onRemind
                     Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
+                    // Both dates are always on show: when the work begins and when it is due.
+                    AssistChip(
+                        onClick = { dialog = "start" },
+                        label = { Text(task.start?.let { str(R.string.start_at, dateLabel(it).lowercase()) } ?: str(R.string.start)) },
+                    )
                     val overdue = task.due?.let { isOverdue(it) && task.done == null } == true
                     AssistChip(
                         onClick = { dialog = "due" },
-                        label = { Text(task.due?.let(::dateLabel) ?: str(R.string.due), color = if (overdue) MaterialTheme.colorScheme.error else Color.Unspecified) },
+                        label = { Text(task.due?.let { str(R.string.due_at, dateLabel(it).lowercase()) } ?: str(R.string.due), color = if (overdue) MaterialTheme.colorScheme.error else Color.Unspecified) },
                     )
-                    task.start?.let { AssistChip(onClick = { dialog = "start" }, label = { Text(str(R.string.start_at, dateLabel(it).lowercase())) }) }
                     task.repeat?.let { AssistChip(onClick = { dialog = "repeat" }, label = { Text(it.summary()) }) }
                     task.remind?.let { AssistChip(onClick = { dialog = "remind" }, label = { Text(str(R.string.remind_at, dateLabel(it).lowercase())) }) }
                     AssistChip(
@@ -252,10 +260,10 @@ fun EditorSheet(editing: Editing, state: UiState, model: MainViewModel, onRemind
                             @Composable
                             fun item(label: String, action: () -> Unit) =
                                 DropdownMenuItem(text = { Text(label) }, onClick = { addMenu = false; action() })
-                            if (task.start == null) item(str(R.string.start_date)) { dialog = "start" }
                             if (task.repeat == null) item(str(R.string.repeat)) { dialog = "repeat" }
                             if (task.remind == null) item(str(R.string.reminder)) { dialog = "remind" }
                             item(str(R.string.tag)) { dialog = "tag" }
+                            if (editing.subtasks.isEmpty() && !subtaskField) item(str(R.string.subtask)) { subtaskField = true }
                             item(str(R.string.file_or_image)) { pickFiles.launch("*/*") }
                         }
                     }
@@ -282,11 +290,12 @@ fun EditorSheet(editing: Editing, state: UiState, model: MainViewModel, onRemind
                 }
             }
 
-            if (editing.subtasks.isNotEmpty() || !locked) HorizontalDivider(Modifier.padding(vertical = 8.dp))
+            val showSubtasks = editing.subtasks.isNotEmpty() || subtaskField
+            if (showSubtasks) HorizontalDivider(Modifier.padding(vertical = 8.dp))
             for (sub in editing.subtasks) {
                 TaskRow(sub, state, onToggle = { model.toggleDone(sub) }, onOpen = { model.open(sub.id) }, model = model, showOrigin = false)
             }
-            if (!locked) SubtaskField { model.addSubtask(task.id, it) }
+            if (showSubtasks && !locked) SubtaskField { model.addSubtask(task.id, it) }
         }
     }
 
@@ -390,6 +399,29 @@ fun ChoiceDialog(title: String, options: List<String>, selected: Int, onDismiss:
         },
         confirmButton = {},
         dismissButton = { TextButton(onClick = onDismiss) { Text(str(R.string.cancel)) } },
+    )
+}
+
+/** Several options can be on at once; each tap is applied right away. */
+@Composable
+fun MultiChoiceDialog(title: String, options: List<String>, selected: List<Boolean>, onDismiss: () -> Unit, onToggle: (Int, Boolean) -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                options.forEachIndexed { index, option ->
+                    Row(
+                        Modifier.fillMaxWidth().clickable { onToggle(index, !selected[index]) },
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Checkbox(checked = selected[index], onCheckedChange = { onToggle(index, it) })
+                        Text(option)
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text(str(R.string.done)) } },
     )
 }
 
@@ -675,17 +707,18 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
     var password by remember { mutableStateOf(if (enabled) Secrets.load(context).orEmpty() else "") }
     var error by remember { mutableStateOf<String?>(null) }
     var notifyOn by remember { mutableStateOf(NotifyPrefs.enabled(context)) }
-    var lead by remember { mutableStateOf(NotifyPrefs.lead(context)) }
+    var leads by remember { mutableStateOf(NotifyPrefs.leads(context)) }
+    var newTaskList by remember { mutableStateOf(EntryPrefs.newTaskList(context)) }
+    var parse by remember { mutableStateOf(EntryPrefs.parse(context)) }
     var allDay by remember { mutableStateOf(NotifyPrefs.allDay(context)) }
     var summary by remember { mutableStateOf(NotifyPrefs.summary(context)) }
     var choosing by remember { mutableStateOf<String?>(null) }
     fun saveNotify() {
-        NotifyPrefs.save(context, notifyOn, lead, allDay, summary)
+        NotifyPrefs.save(context, notifyOn, leads, allDay, summary)
         if (notifyOn) onNotifications()
         Repo.changed()
     }
     fun leadLabel(minutes: Int) = when {
-        minutes < 0 -> str(R.string.sync_off)
         minutes == 0 -> str(R.string.at_due_time)
         minutes < 60 -> str(R.string.min_before, minutes.toString())
         minutes == 1440 -> str(R.string.day_before)
@@ -707,10 +740,25 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
                 Text(str(R.string.notifications), style = MaterialTheme.typography.labelLarge)
                 SwitchRow(str(R.string.show_notifications), notifyOn) { notifyOn = it; saveNotify() }
                 if (notifyOn) {
-                    SettingRow(str(R.string.due_at_time_setting), leadLabel(lead)) { choosing = "lead" }
+                    SettingRow(
+                        str(R.string.due_at_time_setting),
+                        if (leads.isEmpty()) str(R.string.sync_off) else leads.joinToString(", ") { leadLabel(it) },
+                    ) { choosing = "lead" }
                     SettingRow(str(R.string.due_on_day_setting), timeLabel(allDay)) { choosing = "allDay" }
                     SettingRow(str(R.string.summary_setting), timeLabel(summary)) { choosing = "summary" }
                 }
+                HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                Text(str(R.string.new_tasks_setting), style = MaterialTheme.typography.labelLarge)
+                val listChoices = state.lists.filter { !it.archived && it.id != "inbox" }
+                SettingRow(
+                    str(R.string.default_list),
+                    when (newTaskList) {
+                        "inbox" -> str(R.string.inbox)
+                        "last" -> str(R.string.last_used_list)
+                        else -> listChoices.firstOrNull { it.id == newTaskList }?.name ?: str(R.string.inbox)
+                    },
+                ) { choosing = "newTaskList" }
+                SwitchRow(str(R.string.parse_title), parse) { parse = it; EntryPrefs.setParse(context, it) }
                 HorizontalDivider(Modifier.padding(vertical = 8.dp))
                 Text(str(R.string.sync), style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(bottom = 4.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -762,7 +810,18 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
         },
     )
     when (choosing) {
-        "lead" -> ChoiceDialog(str(R.string.due_at_time_setting), NotifyPrefs.leads.map(::leadLabel), NotifyPrefs.leads.indexOf(lead), { choosing = null }) { lead = NotifyPrefs.leads[it]; saveNotify() }
+        "lead" -> MultiChoiceDialog(str(R.string.due_at_time_setting), NotifyPrefs.leads.map(::leadLabel), NotifyPrefs.leads.map { it in leads }, { choosing = null }) { index, on ->
+            leads = if (on) (leads + NotifyPrefs.leads[index]).distinct().sorted() else leads - NotifyPrefs.leads[index]
+            saveNotify()
+        }
+        "newTaskList" -> {
+            val lists = state.lists.filter { !it.archived && it.id != "inbox" }
+            val values = listOf("inbox", "last") + lists.map { it.id }
+            ChoiceDialog(str(R.string.default_list), listOf(str(R.string.inbox), str(R.string.last_used_list)) + lists.map { it.name }, values.indexOf(newTaskList), { choosing = null }) {
+                newTaskList = values[it]
+                EntryPrefs.setNewTaskList(context, values[it])
+            }
+        }
         "allDay" -> ChoiceDialog(str(R.string.due_on_day_setting), (listOf("") + NotifyPrefs.times).map(::timeLabel), (listOf("") + NotifyPrefs.times).indexOf(allDay), { choosing = null }) { allDay = (listOf("") + NotifyPrefs.times)[it]; saveNotify() }
         "summary" -> ChoiceDialog(str(R.string.summary_setting), (listOf("") + NotifyPrefs.times).map(::timeLabel), (listOf("") + NotifyPrefs.times).indexOf(summary), { choosing = null }) { summary = (listOf("") + NotifyPrefs.times)[it]; saveNotify() }
     }

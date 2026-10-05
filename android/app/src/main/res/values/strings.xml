@@ -193,4 +193,9 @@
     <string name="h_before">%1$s h before</string>
     <string name="at_time">At %1$s</string>
     <string name="summary_body">Tasks due today or overdue: %1$s</string>
+    <string name="start">Start</string>
+    <string name="new_tasks_setting">New tasks</string>
+    <string name="default_list">Default list</string>
+    <string name="last_used_list">Last used list</string>
+    <string name="parse_title">Recognize dates, priority, tags and lists in the title</string>
 </resources>

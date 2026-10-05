@@ -81,6 +81,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -97,6 +98,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.graphics.toColorInt
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.evsyukov.lists.R
+import org.evsyukov.lists.EntryPrefs
 import org.evsyukov.lists.str
 import org.evsyukov.lists.Repo
 import org.evsyukov.lists.dateLabel
@@ -342,7 +344,7 @@ private fun AddBar(onAdd: (String) -> Unit) {
 /** What the quick-entry parser recognised in the line being typed. */
 @Composable
 fun QuickChips(text: String, modifier: Modifier = Modifier) {
-    if (text.isBlank()) return
+    if (text.isBlank() || !EntryPrefs.parse(LocalContext.current)) return
     val parsed: QuickParse = remember(text) { Repo.store.parseQuick(text) }
     val parts = buildList {
         parsed.due?.let { add(dateLabel(it)) }

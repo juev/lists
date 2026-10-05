@@ -5,6 +5,8 @@ import androidx.lifecycle.viewModelScope
 import org.evsyukov.lists.R
 import org.evsyukov.lists.str
 import org.evsyukov.lists.Repo
+import org.evsyukov.lists.EntryPrefs
+import org.evsyukov.lists.ListsApp
 import org.evsyukov.lists.dateLabel
 import org.evsyukov.lists.dayHeading
 import org.evsyukov.lists.dayOf
@@ -198,7 +200,14 @@ class MainViewModel : ViewModel() {
                 store.quickAddUnder(line, it.id)
                 return@act
             }
-            val task = store.quickAdd(line, state.targetListId)
+            val context = ListsApp.instance
+            val listId = when (state.scope) {
+                Scope.Inbox -> "inbox"
+                is Scope.List -> state.targetListId
+                else -> EntryPrefs.defaultListId(context, state.lists)
+            }
+            val task = if (EntryPrefs.parse(context)) store.quickAdd(line, listId) else store.createTask(NewTask(title = line, listId = listId))
+            EntryPrefs.noteUsedList(context, task.listId)
             // A task typed into Today belongs to today unless the line says otherwise.
             if (state.scope == Scope.Today && task.due == null) store.setDue(task.id, today())
             (state.scope as? Scope.Tag)?.let { store.addTag(task.id, it.name) }
