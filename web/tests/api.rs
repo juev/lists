@@ -318,3 +318,34 @@ fn import_through_the_web() {
         .send_string("a,b\n");
     assert_eq!(status(bad), 400);
 }
+
+#[test]
+fn icons_are_served_before_login() {
+    // The browser asks for them on the login page, and iOS when the page is
+    // put on the home screen; none of that carries a session.
+    let web = web(Some("secret"));
+    for (path, kind, magic) in [
+        ("/icon.svg", "image/svg+xml", &b"<svg"[..]),
+        ("/icon-32.png", "image/png", &b"\x89PNG"[..]),
+        ("/favicon.ico", "image/png", &b"\x89PNG"[..]),
+        ("/icon-180.png", "image/png", &b"\x89PNG"[..]),
+        ("/apple-touch-icon.png", "image/png", &b"\x89PNG"[..]),
+        ("/icon-192.png", "image/png", &b"\x89PNG"[..]),
+        ("/icon-512.png", "image/png", &b"\x89PNG"[..]),
+    ] {
+        let response = ureq::get(&format!("{}{path}", web.base)).call().unwrap();
+        assert_eq!(response.content_type(), kind, "{path}");
+        let mut body = Vec::new();
+        std::io::Read::read_to_end(&mut response.into_reader(), &mut body).unwrap();
+        assert!(body.starts_with(magic), "{path}");
+    }
+    let manifest: Value = ureq::get(&format!("{}/manifest.json", web.base))
+        .call()
+        .unwrap()
+        .into_json()
+        .unwrap();
+    for icon in manifest["icons"].as_array().unwrap() {
+        let src = icon["src"].as_str().unwrap();
+        assert_eq!(status(ureq::get(&format!("{}{src}", web.base)).call()), 200, "{src}");
+    }
+}

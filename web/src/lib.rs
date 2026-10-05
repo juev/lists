@@ -26,6 +26,12 @@ use tiny_http::{Header, Method, Request, Response, Server};
 const INDEX: &str = include_str!("index.html");
 const MANIFEST: &str = include_str!("manifest.json");
 const ICON: &str = include_str!("icon.svg");
+// Bitmaps for what cannot use the SVG: the iOS home screen, the install
+// prompt, and browsers that only take a PNG for the tab.
+const ICON_32: &[u8] = include_bytes!("icon-32.png");
+const ICON_180: &[u8] = include_bytes!("icon-180.png");
+const ICON_192: &[u8] = include_bytes!("icon-192.png");
+const ICON_512: &[u8] = include_bytes!("icon-512.png");
 const COOKIE: &str = "lists_session";
 /// Request bodies above this are refused; it bounds one uploaded attachment.
 const MAX_BODY: usize = 64 * 1024 * 1024;
@@ -424,6 +430,12 @@ impl App {
             }
             (Method::Get, "/manifest.json") => return reply(200, "application/manifest+json", MANIFEST),
             (Method::Get, "/icon.svg") => return reply(200, "image/svg+xml", ICON),
+            (Method::Get, "/icon-32.png") | (Method::Get, "/favicon.ico") => return reply(200, "image/png", ICON_32),
+            (Method::Get, "/icon-180.png") | (Method::Get, "/apple-touch-icon.png") => {
+                return reply(200, "image/png", ICON_180)
+            }
+            (Method::Get, "/icon-192.png") => return reply(200, "image/png", ICON_192),
+            (Method::Get, "/icon-512.png") => return reply(200, "image/png", ICON_512),
             (Method::Post, "/api/login") => {
                 let body = match Self::body(request) {
                     Ok(b) => b,
