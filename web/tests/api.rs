@@ -1,0 +1,242 @@
+//! The web server over HTTP: login, the session cookie, and a task's life
+//! through the JSON interface.
+
+use lists_core::SyncConfig;
+use lists_web::{start, Config};
+use serde_json::{json, Value};
+
+struct Web {
+    base: String,
+    _dir: tempfile::TempDir,
+}
+
+fn web(password: Option<&str>) -> Web {
+    let dir = tempfile::tempdir().unwrap();
+    let running = start(Config {
+        data_dir: dir.path().to_string_lossy().into_owned(),
+        listen: "127.0.0.1:0".into(),
+        password: password.map(str::to_string),
+        sync: SyncConfig::Off,
+        sync_password: None,
+    })
+    .unwrap();
+    Web {
+        base: format!("http://{}", running.addr),
+        _dir: dir,
+    }
+}
+
+fn status(result: Result<ureq::Response, ureq::Error>) -> u16 {
+    match result {
+        Ok(r) => r.status(),
+        Err(ureq::Error::Status(code, _)) => code,
+        Err(e) => panic!("{e}"),
+    }
+}
+
+fn login(web: &Web, password: &str) -> Option<String> {
+    let response = ureq::post(&format!("{}/api/login", web.base))
+        .send_json(json!({ "password": password }))
+        .ok()?;
+    let cookie = response.header("Set-Cookie")?.split(';').next()?.to_string();
+    assert!(
+        response.header("Set-Cookie").unwrap().contains("HttpOnly")
+            && response.header("Set-Cookie").unwrap().contains("SameSite=Strict")
+    );
+    Some(cookie)
+}
+
+fn call(web: &Web, cookie: &str, body: Value) -> Value {
+    ureq::post(&format!("{}/api/call", web.base))
+        .set("Cookie", cookie)
+        .set("X-Lists", "1")
+        .send_json(body)
+        .unwrap()
+        .into_json()
+        .unwrap()
+}
+
+fn get(web: &Web, cookie: &str, path: &str) -> Value {
+    ureq::get(&format!("{}{path}", web.base))
+        .set("Cookie", cookie)
+        .call()
+        .unwrap()
+        .into_json()
+        .unwrap()
+}
+
+#[test]
+fn nothing_is_served_without_a_session() {
+    let web = web(Some("secret"));
+    assert_eq!(
+        status(ureq::get(&format!("{}/", web.base)).call()),
+        200,
+        "the page itself is public"
+    );
+    assert_eq!(status(ureq::get(&format!("{}/api/overview", web.base)).call()), 401);
+    assert_eq!(
+        status(ureq::get(&format!("{}/api/tasks?scope=inbox", web.base)).call()),
+        401
+    );
+    assert_eq!(
+        status(
+            ureq::post(&format!("{}/api/call", web.base))
+                .set("X-Lists", "1")
+                .send_json(json!({ "op": "emptyTrash" }))
+        ),
+        401
+    );
+    assert!(login(&web, "wrong").is_none());
+    assert_eq!(
+        status(
+            ureq::get(&format!("{}/api/overview", web.base))
+                .set("Cookie", "lists_session=guess")
+                .call()
+        ),
+        401
+    );
+
+    let cookie = login(&web, "secret").unwrap();
+    assert_eq!(
+        status(
+            ureq::get(&format!("{}/api/overview", web.base))
+                .set("Cookie", &cookie)
+                .call()
+        ),
+        200
+    );
+    // A cross-site form can send the cookie-less POST but not the header.
+    assert_eq!(
+        status(
+            ureq::post(&format!("{}/api/call", web.base))
+                .set("Cookie", &cookie)
+                .send_json(json!({ "op": "emptyTrash" }))
+        ),
+        400
+    );
+
+    assert_eq!(
+        status(
+            ureq::post(&format!("{}/api/logout", web.base))
+                .set("Cookie", &cookie)
+                .set("X-Lists", "1")
+                .call()
+        ),
+        200
+    );
+    assert_eq!(
+        status(
+            ureq::get(&format!("{}/api/overview", web.base))
+                .set("Cookie", &cookie)
+                .call()
+        ),
+        401,
+        "the session is gone"
+    );
+}
+
+#[test]
+fn a_task_from_quick_entry_to_the_trash() {
+    let web = web(Some("secret"));
+    let cookie = login(&web, "secret").unwrap();
+
+    let list = call(&web, &cookie, json!({ "op": "createList", "name": "Работа" }));
+    let scope = format!("list:{}", list["id"].as_str().unwrap());
+    let task = call(
+        &web,
+        &cookie,
+        json!({ "op": "quickAdd", "text": "отчёт завтра 10:00 !! #квартал", "scope": scope }),
+    );
+    let id = task["id"].as_str().unwrap().to_string();
+    assert_eq!(task["title"], "отчёт");
+    assert_eq!(task["priority"], 2);
+    assert_eq!(task["tags"], json!(["квартал"]));
+    assert!(task["due"].as_str().unwrap().ends_with("T10:00"));
+
+    call(
+        &web,
+        &cookie,
+        json!({ "op": "setNotes", "id": id, "value": "черновик готов" }),
+    );
+    call(
+        &web,
+        &cookie,
+        json!({ "op": "setRepeat", "id": id, "value": { "freq": "weekly", "interval": 1 } }),
+    );
+    call(
+        &web,
+        &cookie,
+        json!({ "op": "addSubtask", "parent": id, "title": "собрать цифры" }),
+    );
+    let detail = get(&web, &cookie, &format!("/api/task?id={id}"));
+    assert_eq!(detail["task"]["notes"], "черновик готов");
+    assert_eq!(detail["task"]["repeat"]["freq"], "weekly");
+    assert_eq!(detail["subtasks"][0]["title"], "собрать цифры");
+
+    let listed = get(
+        &web,
+        &cookie,
+        &format!("/api/tasks?scope={}", scope.replace(':', "%3A")),
+    );
+    assert_eq!(listed.as_array().unwrap().len(), 1);
+    let overview = get(&web, &cookie, "/api/overview");
+    assert_eq!(overview["lists"][1]["name"], "Работа");
+    assert_eq!(overview["lists"][1]["open"], 1);
+    assert_eq!(overview["tags"][0]["name"], "квартал");
+
+    // Typed into Today without a date: it is due today.
+    let quick = call(
+        &web,
+        &cookie,
+        json!({ "op": "quickAdd", "text": "позвонить", "scope": "today", "today": "2026-10-05" }),
+    );
+    assert_eq!(quick["due"], "2026-10-05");
+
+    call(&web, &cookie, json!({ "op": "delete", "id": id }));
+    assert_eq!(
+        get(&web, &cookie, "/api/tasks?scope=trash").as_array().unwrap().len(),
+        1
+    );
+    assert_eq!(call(&web, &cookie, json!({ "op": "emptyTrash" }))["removed"], 1);
+
+    let bad = ureq::post(&format!("{}/api/call", web.base))
+        .set("Cookie", &cookie)
+        .set("X-Lists", "1")
+        .send_json(json!({ "op": "noSuchThing" }));
+    assert_eq!(status(bad), 400);
+    assert_eq!(
+        status(
+            ureq::get(&format!("{}/api/tasks?scope=bogus", web.base))
+                .set("Cookie", &cookie)
+                .call()
+        ),
+        400
+    );
+}
+
+#[test]
+fn attachments_upload_and_download_as_files() {
+    let web = web(None);
+    let task = call(&web, "", json!({ "op": "quickAdd", "text": "с файлом" }));
+    let id = task["id"].as_str().unwrap();
+    let uploaded: Value = ureq::post(&format!("{}/api/upload?task={id}&name=page.html", web.base))
+        .set("X-Lists", "1")
+        .send_bytes(b"<script>alert(1)</script>")
+        .unwrap()
+        .into_json()
+        .unwrap();
+    assert_eq!(uploaded["name"], "page.html");
+
+    let file = ureq::get(&format!(
+        "{}/api/file?task={id}&id={}",
+        web.base,
+        uploaded["id"].as_str().unwrap()
+    ))
+    .call()
+    .unwrap();
+    // Served as a download, never as a page of this origin.
+    assert_eq!(file.header("Content-Type"), Some("application/octet-stream"));
+    assert!(file.header("Content-Disposition").unwrap().starts_with("attachment"));
+    assert_eq!(file.header("X-Content-Type-Options"), Some("nosniff"));
+    assert_eq!(file.into_string().unwrap(), "<script>alert(1)</script>");
+}

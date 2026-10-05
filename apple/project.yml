@@ -1,0 +1,58 @@
+name: Lists
+options:
+  bundleIdPrefix: org.evsyukov
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+  developmentLanguage: en
+packages:
+  KeyboardShortcuts:
+    url: https://github.com/sindresorhus/KeyboardShortcuts
+    from: 2.0.0
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    ARCHS: arm64
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    # Rust core: C module map and static library produced by scripts/build-apple.sh
+    SWIFT_INCLUDE_PATHS: $(SRCROOT)/Generated
+    LIBRARY_SEARCH_PATHS: $(SRCROOT)/Generated/lib
+    OTHER_LDFLAGS: -llists_core
+    DEVELOPMENT_TEAM: ${LISTS_TEAM_ID}
+    CODE_SIGN_STYLE: Manual
+    CODE_SIGN_IDENTITY: ${LISTS_SIGN_IDENTITY}
+    ENABLE_HARDENED_RUNTIME: NO
+    LISTS_APP_GROUP: $(DEVELOPMENT_TEAM).org.evsyukov.lists
+targets:
+  Lists:
+    type: application
+    platform: macOS
+    sources:
+      - App
+      - Shared
+      - path: Generated/lists_core.swift
+        group: Generated
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.evsyukov.lists
+        INFOPLIST_FILE: App/Info.plist
+        CODE_SIGN_ENTITLEMENTS: App/Lists.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    dependencies:
+      - package: KeyboardShortcuts
+      - target: ListsShare
+        embed: true
+  ListsShare:
+    type: app-extension
+    platform: macOS
+    sources:
+      - ShareExtension
+      - Shared
+      - path: Generated/lists_core.swift
+        group: Generated
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.evsyukov.lists.share
+        INFOPLIST_FILE: ShareExtension/Info.plist
+        CODE_SIGN_ENTITLEMENTS: ShareExtension/ListsShare.entitlements

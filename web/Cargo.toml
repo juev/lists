@@ -1,0 +1,22 @@
+[package]
+name = "lists-web"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Self-hosted web interface for Lists: one more device in the sync, reachable from a browser"
+
+[dependencies]
+lists-core = { path = "../core" }
+serde_json = "1"
+sha2 = "0.10"
+tiny_http = "0.12"
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+tempfile = "3"
+ureq = { version = "2.12", default-features = false, features = ["json"] }
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true

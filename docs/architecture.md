@@ -1,0 +1,91 @@
+# Lists: архитектурные решения
+
+Состояние: решения приняты 2026-10-05, реализация начата. Источники: запрос автора проекта, документация 2Do, RFC 5545/6578/8607, документация UniFFI, Kotlin Multiplatform, Flutter и Tauri, разборы Actual Budget и «Local, first, forever» (ссылки в конце).
+
+## Название
+
+**Lists.** Выбрано автором проекта 2026-10-05 вместо первого варианта, «Galka», который показался просторечным. Название описывает содержимое буквально и не требует объяснений. Известное совпадение — Microsoft Lists; публикация в магазинах не планируется, поэтому оно принято.
+
+Рассматривались: Jackdaw, Otmetka, Marque (свободны в App Store и на GitHub), Kvit, Tally, Tessera, Nota, Signum, Vesper (заняты).
+
+Идентификаторы: bundle id и Android application id — `org.evsyukov.lists`, Rust-крейт — `lists-core`.
+
+## Языки: три, каждый на своём месте
+
+| Слой | Язык | Что в нём живёт |
+|---|---|---|
+| Ядро | Rust | модель данных, SQLite, слияние изменений, синхронизация, повторы, разбор строки быстрого ввода |
+| macOS | Swift, SwiftUI | окна, строка меню, глобальная горячая клавиша, Share Extension |
+| Android | Kotlin, Jetpack Compose | экраны, share target, плитка быстрых настроек, ярлыки |
+
+Ядро подключается к обеим оболочкам через UniFFI: он генерирует Swift- и Kotlin-обёртки по аннотациям в Rust-коде.
+
+Почему не один язык. Всё, что определяет корректность данных, должно существовать в одном экземпляре: два независимо написанных слияния изменений рано или поздно разойдутся в мелочи, и устройства перестанут сходиться к одному состоянию. Интерфейс, наоборот, выгодно писать на языке платформы, потому что точки быстрого ввода (расширение «Поделиться», строка меню, глобальная клавиша, плитка, ярлыки) — это системные API, к которым кроссплатформенные наборы компонентов дают доступ либо с опозданием, либо через тот же Swift и Kotlin.
+
+Рассмотренные замены:
+
+- **Kotlin Multiplatform + Compose Multiplatform.** Один язык на всё, но на macOS Compose работает только как JVM-приложение: нативной цели macOS в таблице поддерживаемых платформ нет. Это не нативное приложение, и расширение «Поделиться» в нём всё равно пришлось бы писать на Swift.
+- **Flutter.** Интерфейс рисует собственный движок; расширение пишется на Swift, глобальная клавиша держится на стороннем пакете, который не обновлялся около двух лет.
+- **Swift на обеих платформах.** Официальный Swift SDK для Android вышел в Swift 6.3 (март 2026), но это общий слой логики без интерфейса. Слишком молодо для хранилища данных.
+- **Tauri 2.** Интерфейс в системном webview.
+
+Цена выбранного варианта: UniFFI не дошёл до версии 1.0 и ломает совместимость между минорными версиями, поэтому версия закреплена точно, а граница между ядром и оболочками сделана узкой — только записи, перечисления и синхронные методы одного объекта.
+
+## Репозиторий: один
+
+```
+core/      Rust-крейт lists-core и его тесты
+apple/     проект Xcode (описан в project.yml для xcodegen), приложение и расширение
+android/   проект Gradle, модуль app
+scripts/   сборка ядра под каждую платформу и генерация обёрток
+docs/      решения и спецификации
+```
+
+Формат данных, схема базы и интерфейс ядра меняются вместе с экранами, которые ими пользуются. В одном репозитории такое изменение — один коммит, и он либо собирается на обеих платформах, либо нет. В трёх репозиториях то же изменение превращается в три согласованных выпуска с версиями ядра, а у проекта с одним разработчиком нет потребителей, ради которых это стоило бы делать.
+
+## Хранение на устройстве
+
+Данные лежат в SQLite-файле, вложения — отдельными файлами рядом, по имени SHA-256 содержимого. SQLite вшит в ядро (rusqlite с `bundled`), поэтому версия одна на всех платформах.
+
+- macOS: каталог App Group. Только он доступен одновременно приложению и расширению «Поделиться».
+- Android: внутренний `filesDir` приложения. Закрыт от других приложений, с Android 10 зашифрован, разрешений не требует.
+
+База открывается в режиме WAL: расширение и приложение на macOS пишут в один файл из двух процессов.
+
+## Синхронизация: журнал изменений поверх WebDAV; CalDAV — открытый вопрос
+
+Что сделано. Каждое поле каждой записи — регистр «последняя запись побеждает» с меткой гибридных логических часов (техника называется CRDT, conflict-free replicated data type). Правки разных полей одной задачи с разных устройств сливаются без потерь, а итог не зависит от порядка доставки. Устройства обмениваются неизменяемыми файлами изменений через «тупое» хранилище: каталог WebDAV или обычную папку. Каждое устройство пишет только файлы со своим именем, так что конфликтов записи на сервере не бывает и блокировки не нужны. Формат и правила — в [specs/sync.md](specs/sync.md).
+
+Готовые библиотеки отклонены: у Automerge нет операции перемещения (issue открыт с 2022 года), cr-sqlite не выпускал релизов с января 2024, Loro умеет перемещаемое дерево, но хранит собственный двоичный документ рядом с SQLite, а не вместо него. Для записей со скалярными полями регистры по полям проще и проверяемы тестами целиком.
+
+Что с CalDAV. Первая версия этого раздела отклоняла CalDAV целиком; проверка 2026-10-05 показала, что это было слишком категорично. Собственные данные приложения можно класть в `X-`-свойства VTODO, и вопрос сводится к тому, переживут ли они сервер и чужие клиенты:
+
+| Что нужно | Что проверено |
+|---|---|
+| Сервер возвращает объект с неизвестными `X-`-свойствами | sabre/dav и Nextcloud хранят тело как прислано. Radicale пересобирает объект через vobject — сохранность не проверена. Cyrus (предположительно Fastmail) вырезает часть `X-`-свойств. iCloud, Synology, Baikal не проверены. |
+| Чужие клиенты не теряют эти свойства при правке | Tasks.org и DAVx5/jtx Board хранят неизвестные свойства; Nextcloud Tasks правит свойства по одному. По Thunderbird и Apple прямых подтверждений нет. |
+| Настройки списка сверх цвета и порядка | Произвольные свойства коллекции принимают Nextcloud и Radicale; в sabre/dav это отдельный плагин, выключенный по умолчанию. |
+| Вложения | Объект ограничен 10 МБ (sabre/dav, Nextcloud, Radicale), то есть inline-вложение — примерно до 7 МБ. Управляемые вложения (RFC 8607) есть у iCloud и Cyrus. Крупные файлы потребуют WebDAV рядом. |
+| Обнаружение конфликта и быстрая сверка | `If-Match` и `sync-collection` есть в sabre/dav и Radicale. |
+
+Чего CalDAV не даёт сам: объект заменяется целиком, поэтому слияние по полям остаётся за приложением. Это решается тем же способом, что и сейчас: метки полей хранятся в `X-`-свойстве, а запись идёт с `If-Match` и повтором после слияния. Повторы при этом записываются стандартным `RRULE`, а «выполнен один повтор» по-прежнему выражается сдвигом срока.
+
+Итог: CalDAV годится как второй транспорт для серверов класса Nextcloud, с пользой в виде совместимости с другими клиентами и серверами без WebDAV. Делать ли его и в каком объёме — решение автора проекта; до него работает только журнал поверх WebDAV и папки.
+
+## Веб вместо iOS
+
+Публиковать приложение для iOS автор проекта не планирует, поэтому телефон обслуживает веб-интерфейс. Чисто браузерное приложение невозможно: WebDAV- и CalDAV-серверы не отдают CORS-заголовков (проверено на Fastmail и iCloud; Nextcloud открывает DAV чужому origin только со сторонним приложением). Поэтому веб-интерфейс идёт вместе с небольшим сервером `lists-web`: тот же крейт ядра, своя копия данных, синхронизация наравне с приложениями. Он ставится на домашний сервер и открывается с телефона как страница или значок на экране «Домой».
+
+## Секреты
+
+Пароль WebDAV не попадает в базу. На macOS он лежит в связке ключей (`Keychain.swift`), на Android зашифрован ключом из Android Keystore (`Secrets.kt`); ядро получает его в память после открытия базы (`Store::set_sync_password`). Так же поступают Cyberduck (связка ключей) и Tasks.org (Android Keystore); DAVx5 использует AccountManager.
+
+## Источники
+
+- 2Do: <https://www.2doapp.com/docs/macos/task-editor>, <https://www.2doapp.com/docs/macos/repeating-tasks>, <https://www.2doapp.com/docs/macos/sync-with-caldav>, <https://www.2doapp.com/docs/ios/sync-with-caldav>, <https://www.2doapp.com/docs/macos/sync-with-webdav>
+- CalDAV: <https://www.rfc-editor.org/rfc/rfc5545>, <https://www.rfc-editor.org/rfc/rfc8607>, <https://standards.calconnect.org/cc/cc-s0505-2005.html>, <https://sabre.io/dav/building-a-caldav-client/>
+- Стек: <https://mozilla.github.io/uniffi-rs/latest/>, <https://kotlinlang.org/docs/multiplatform/supported-platforms.html>, <https://docs.flutter.dev/platform-integration/ios/app-extensions>, <https://www.swift.org/blog/swift-6.3-released/>, <https://v2.tauri.app/start/>
+- CalDAV, проверка X-свойств: <https://github.com/sabre-io/dav/blob/master/lib/CalDAV/Plugin.php>, <https://github.com/nextcloud/server/blob/master/apps/dav/lib/DAV/CustomPropertiesBackend.php>, <https://github.com/Kozea/Radicale/blob/master/radicale/storage/multifilesystem/upload.py>, <https://github.com/cyrusimap/cyrus-imapd/blob/master/imap/ical_support.c>, <https://github.com/tasks/tasks/blob/main/kmp/src/commonMain/kotlin/org/tasks/icalendar/VTodo.kt>, <https://github.com/bitfireAT/synctools/blob/main/lib/src/main/kotlin/at/bitfire/ical4android/JtxICalObject.kt>
+- Секреты: <https://docs.cyberduck.io/cyberduck/connection/>, <https://github.com/tasks/tasks/blob/main/kmp/src/androidMain/kotlin/org/tasks/security/AndroidKeyStoreEncryption.kt>, <https://github.com/bitfireAT/davx5-ose/blob/main-ose/core/src/main/kotlin/at/bitfire/davdroid/settings/AccountManagerSettingsStore.kt>
+- Синхронизация: <https://archive.jlongster.com/using-crdts-in-the-wild>, <https://tonsky.me/blog/crdt-filesync/>, <https://martin.kleppmann.com/2021/10/07/crdt-tree-move-operation.html>, <https://github.com/automerge/automerge/issues/352>, <https://github.com/vlcn-io/cr-sqlite>
+- Платформы: <https://developer.apple.com/documentation/xcode/configuring-app-groups>, <https://www.sqlite.org/wal.html>, <https://developer.android.com/training/data-storage/app-specific>, <https://github.com/sindresorhus/KeyboardShortcuts>

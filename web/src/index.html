@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Lists">
+<meta name="theme-color" content="#2f6fed">
+<link rel="manifest" href="/manifest.json">
+<link rel="icon" href="/icon.svg">
+<link rel="apple-touch-icon" href="/icon.svg">
+<title>Lists</title>
+<style>
+:root {
+  --bg: #ffffff; --panel: #f4f5f7; --text: #1c1d21; --muted: #6d7078; --line: #e3e5ea;
+  --accent: #2f6fed; --danger: #d93a3a; --warn: #e8890c; --hover: rgba(0,0,0,.05);
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #17181c; --panel: #1f2126; --text: #ececf0; --muted: #9a9da6; --line: #2e3037; --hover: rgba(255,255,255,.07); }
+}
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; margin: 0; }
+body { background: var(--bg); color: var(--text); font: 16px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+button, input, select, textarea { font: inherit; color: inherit; }
+button { background: none; border: 0; cursor: pointer; padding: 0; }
+#app { display: flex; height: 100%; }
+#side { width: 250px; flex: none; background: var(--panel); border-right: 1px solid var(--line); overflow-y: auto; padding: 12px 8px calc(12px + env(safe-area-inset-bottom)); }
+#main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+header { display: flex; align-items: center; gap: 10px; padding: calc(10px + env(safe-area-inset-top)) 16px 10px; border-bottom: 1px solid var(--line); }
+header h1 { font-size: 20px; margin: 0; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+header input { border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; background: var(--bg); width: 180px; max-width: 40vw; }
+#menu { display: none; font-size: 22px; width: 32px; }
+#sync { color: var(--muted); font-size: 13px; }
+#sync.bad { color: var(--warn); }
+#tasks { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 6px 8px 20px; }
+.row input[type=text] { border: 0; outline: 0; background: transparent; flex: 1; min-width: 0; }
+#add { display: flex; gap: 8px; padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); }
+#add input { flex: 1; border: 0; outline: 0; background: transparent; }
+.nav { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; padding: 7px 10px; border-radius: 8px; }
+.nav:hover { background: var(--hover); }
+.nav.on { background: var(--hover); font-weight: 600; }
+.nav .n { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; font-weight: 400; }
+.nav .n.bad { color: var(--danger); }
+.dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); flex: none; }
+.side-title { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; padding: 14px 10px 4px; }
+.section { color: var(--accent); font-size: 13px; font-weight: 600; padding: 14px 10px 4px; }
+.section.bad { color: var(--danger); }
+.task { border-radius: 10px; padding: 2px 0; }
+.task.open { background: var(--panel); margin: 4px 0; padding-bottom: 10px; }
+.row { display: flex; align-items: flex-start; gap: 10px; padding: 7px 10px; border-radius: 10px; cursor: pointer; }
+.row:hover { background: var(--hover); }
+.check { width: 22px; height: 22px; border: 2px solid var(--accent); border-radius: 50%; flex: none; margin-top: 1px; display: grid; place-items: center; color: #fff; font-size: 13px; }
+.check.done { background: var(--muted); border-color: var(--muted); }
+.title { min-width: 0; flex: 1; }
+.title .t.done { text-decoration: line-through; color: var(--muted); }
+.meta { color: var(--muted); font-size: 13px; display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.meta .bad { color: var(--danger); }
+.prio { color: var(--warn); font-weight: 700; }
+.edit { padding: 0 12px 0 42px; display: grid; gap: 8px; min-width: 0; }
+.edit > * { min-width: 0; }
+.edit input[type=text], .edit textarea { width: 100%; border: 0; outline: 0; background: transparent; resize: vertical; }
+.edit .name { font-weight: 600; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-width: 0; }
+.chip { border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; font-size: 14px; background: var(--bg); display: inline-flex; gap: 6px; align-items: center; }
+.chip input, .chip select { border: 0; background: transparent; outline: 0; max-width: 46vw; }
+.chip.bad { border-color: var(--danger); color: var(--danger); }
+.link { color: var(--accent); font-size: 14px; }
+.link.danger { color: var(--danger); }
+.sub { margin-left: 30px; }
+.empty { color: var(--muted); text-align: center; padding: 22vh 20px 0; }
+#login { max-width: 320px; margin: 22vh auto 0; padding: 0 20px; display: grid; gap: 10px; }
+#login input, #login button { padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); }
+#login button { background: var(--accent); color: #fff; border-color: var(--accent); }
+#toast { position: fixed; left: 50%; bottom: 84px; transform: translateX(-50%); background: var(--text); color: var(--bg); padding: 8px 14px; border-radius: 10px; font-size: 14px; display: none; max-width: 90vw; }
+#shade { display: none; }
+@media (max-width: 720px) {
+  #side { position: fixed; z-index: 3; top: 0; bottom: 0; left: 0; transform: translateX(-102%); transition: transform .18s; width: 82vw; max-width: 320px; padding-top: calc(12px + env(safe-area-inset-top)); }
+  #app.drawer #side { transform: none; }
+  #app.drawer #shade { display: block; position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 2; }
+  #menu { display: block; }
+  header input { width: 96px; }
+  #sync { display: none; }
+  .edit { padding-left: 14px; }
+}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<div id="toast"></div>
+<script>
+"use strict";
+const RU = {
+  "Inbox": "Входящие", "Today": "Сегодня", "Upcoming": "Предстоящие", "All": "Все", "Completed": "Выполненные", "Trash": "Корзина",
+  "Lists": "Списки", "Tags": "Теги", "New list": "Новый список", "List name": "Название списка", "Search": "Поиск", "New task": "Новая задача",
+  "Overdue": "Просрочено", "Tomorrow": "Завтра", "Yesterday": "Вчера", "Title": "Название", "Notes": "Заметка", "Due": "Срок", "Start": "Начало",
+  "Reminder": "Напоминание", "Priority": "Приоритет", "No priority": "Без приоритета", "Low": "Низкий", "Medium": "Средний", "High": "Высокий",
+  "Repeat": "Повтор", "Does not repeat": "Не повторяется", "Every day": "Каждый день", "On weekdays": "По будням", "Every week": "Каждую неделю",
+  "Every two weeks": "Каждые две недели", "Every month": "Каждый месяц", "Every quarter": "Каждый квартал", "Every year": "Каждый год", "Custom": "Свой вариант",
+  "Tag": "Тег", "Subtask": "Подзадача", "Attach file": "Прикрепить файл", "Move to": "Переместить в", "Duplicate": "Дублировать", "Delete": "Удалить",
+  "Restore": "Восстановить", "Empty Trash": "Очистить корзину", "Delete everything in the trash for good?": "Удалить всё из корзины навсегда?",
+  "Password": "Пароль", "Sign in": "Войти", "Wrong password": "Неверный пароль", "Sign out": "Выйти", "All done for today": "На сегодня всё",
+  "No tasks": "Задач нет", "Nothing found": "Ничего не найдено", "Synced": "Синхронизировано", "Sync failed": "Синхронизация не удалась",
+  "waiting": "ожидает отправки", "Deleted": "Удалено", "Undo": "Отменить", "Task completed": "Выполнено", "Moved to the next occurrence": "Перенесено на следующий повтор",
+  "downloads on the next sync": "загрузится при синхронизации", "from": "с", "Delete list": "Удалить список", "Delete this list and move its tasks to the trash?": "Удалить список и отправить его задачи в корзину?",
+  "Sort": "Сортировка", "Manually": "Вручную", "By due date": "По сроку", "By priority": "По приоритету", "By title": "По названию", "Rename": "Переименовать", "time": "время"
+};
+const ru = (navigator.language || "en").toLowerCase().startsWith("ru");
+const t = s => (ru && RU[s]) || s;
+const locale = ru ? "ru" : "en";
+const $ = (tag, props = {}, ...kids) => {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (k === "class") el.className = v; else if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
+    else if (v !== false && v != null) el.setAttribute(k, v === true ? "" : v);
+  }
+  for (const kid of kids.flat(Infinity)) if (kid != null && kid !== false) el.append(kid);
+  return el;
+};
+const state = { scope: "today", search: "", overview: null, tasks: [], open: new Set(), details: {}, drawer: false, typing: false };
+const root = document.getElementById("root");
+
+async function api(path, options) {
+  const res = await fetch(path, options);
+  if (res.status === 401) { showLogin(); throw new Error("login"); }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) { toast(data.error || res.statusText); throw new Error(data.error); }
+  return data;
+}
+const call = (op, args = {}) => api("/api/call", { method: "POST", headers: { "Content-Type": "application/json", "X-Lists": "1" }, body: JSON.stringify({ op, ...args }) });
+
+let toastTimer;
+function toast(text, undo) {
+  const el = document.getElementById("toast");
+  el.replaceChildren(text, undo ? $("button", { class: "link", style: "margin-left:12px;color:inherit;text-decoration:underline", onclick: () => { el.style.display = "none"; undo(); } }, t("Undo")) : "");
+  el.style.display = "block";
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => (el.style.display = "none"), 4000);
+}
+
+const pad = n => String(n).padStart(2, "0");
+const iso = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const today = () => iso(new Date());
+const plus = n => { const d = new Date(); d.setDate(d.getDate() + n); return iso(d); };
+const dayOf = v => (v || "").slice(0, 10);
+const parseDay = v => { const [y, m, d] = dayOf(v).split("-").map(Number); return new Date(y, m - 1, d); };
+function dateLabel(v) {
+  const diff = Math.round((parseDay(v) - parseDay(today())) / 86400000);
+  let text = diff === 0 ? t("Today") : diff === 1 ? t("Tomorrow") : diff === -1 ? t("Yesterday")
+    : parseDay(v).toLocaleDateString(locale, { weekday: "short", day: "numeric", month: "short" });
+  return v.length > 10 ? `${text}, ${v.slice(11)}` : text;
+}
+const overdue = v => v.length > 10 ? new Date(v) < new Date() : dayOf(v) < today();
+const marks = p => "!".repeat(p);
+const PRESETS = [
+  ["Every day", { freq: "daily", interval: 1 }], ["On weekdays", { freq: "weekly", interval: 1, weekdays: [1, 2, 3, 4, 5] }],
+  ["Every week", { freq: "weekly", interval: 1 }], ["Every two weeks", { freq: "weekly", interval: 2 }],
+  ["Every month", { freq: "monthly", interval: 1 }], ["Every quarter", { freq: "monthly", interval: 3 }], ["Every year", { freq: "yearly", interval: 1 }]
+];
+const sameRule = (a, b) => a.freq === b.freq && a.interval === b.interval && JSON.stringify(a.weekdays || []) === JSON.stringify(b.weekdays || [])
+  && !a.nth && !a.from_done && a.count == null && !a.until;
+const presetIndex = r => (r ? PRESETS.findIndex(([, p]) => sameRule(r, p)) : -1);
+
+function scopeTitle() {
+  if (state.search) return t("Search");
+  const s = state.scope;
+  if (s.startsWith("list:")) { const l = state.overview.lists.find(l => "list:" + l.id === s); return l ? l.name : t("Lists"); }
+  if (s.startsWith("tag:")) return "#" + s.slice(4);
+  return t({ inbox: "Inbox", today: "Today", upcoming: "Upcoming", all: "All", completed: "Completed", trash: "Trash" }[s]);
+}
+const listName = id => { const l = state.overview.lists.find(l => l.id === id); return !l ? "" : l.id === "inbox" ? t("Inbox") : l.name; };
+const readOnly = () => state.search || ["completed", "trash"].includes(state.scope);
+
+async function load() {
+  const scope = state.search ? "search:" + state.search : state.scope;
+  const [overview, tasks] = await Promise.all([api("/api/overview"), api("/api/tasks?scope=" + encodeURIComponent(scope))]);
+  state.overview = overview; state.tasks = tasks;
+  writeHash();
+  await Promise.all([...state.open].map(async id => {
+    try { state.details[id] = await api("/api/task?id=" + encodeURIComponent(id)); } catch { state.open.delete(id); delete state.details[id]; }
+  }));
+  render();
+}
+const act = async (op, args, note, undo) => { await call(op, args); if (note) toast(note, undo); await load(); };
+
+function sections() {
+  const tasks = state.tasks, s = state.search ? "search" : state.scope;
+  const runs = (key, title) => { const out = []; for (const x of tasks) { const k = key(x); if (out.length && out.at(-1).key === k) out.at(-1).tasks.push(x); else out.push({ key: k, title: title(k), tasks: [x] }); } return out; };
+  if (s === "today") {
+    const late = tasks.filter(x => dayOf(x.due || x.start || today()) < today()), rest = tasks.filter(x => !late.includes(x));
+    return late.length ? [{ key: "late", title: t("Overdue"), bad: true, tasks: late }, { key: "today", title: t("Today"), tasks: rest }].filter(x => x.tasks.length) : [{ key: "today", tasks: rest }];
+  }
+  if (s === "upcoming") return runs(x => dayOf(x.due || x.start), k => { const d = parseDay(k).toLocaleDateString(locale, { weekday: "long", day: "numeric", month: "long" }); return k === plus(1) ? `${t("Tomorrow")} · ${d}` : d; });
+  if (s === "all") return runs(x => x.list, listName);
+  if (s === "completed") return runs(x => dayOf(x.done), dateLabel);
+  return [{ key: "all", tasks }];
+}
+
+function summary(x, origin) {
+  const out = [];
+  if (x.due) out.push($("span", { class: !x.done && overdue(x.due) ? "bad" : "" }, dateLabel(x.due)));
+  else if (x.start) out.push($("span", {}, `${t("from")} ${dateLabel(x.start).toLowerCase()}`));
+  if (x.repeat) out.push($("span", {}, "↻"));
+  if (x.subtasks) out.push($("span", {}, `☑ ${x.subtasksDone}/${x.subtasks}`));
+  if (x.attachments) out.push($("span", {}, `📎 ${x.attachments}`));
+  for (const tag of x.tags) out.push($("span", {}, "#" + tag));
+  if (origin) out.push($("span", {}, x.parentTitle ? `${listName(x.list)} › ${x.parentTitle}` : listName(x.list)));
+  return out.length ? $("div", { class: "meta" }, out) : null;
+}
+
+function taskNode(x, origin) {
+  const open = state.open.has(x.id), locked = x.deleted || x.log;
+  const toggle = e => {
+    e.stopPropagation();
+    if (locked) return;
+    if (x.done) return act("reopen", { id: x.id });
+    act("complete", { id: x.id }, t(x.repeat ? "Moved to the next occurrence" : "Task completed"), x.repeat ? null : () => act("reopen", { id: x.id }));
+  };
+  const row = $("div", { class: "row", onclick: () => { open ? state.open.delete(x.id) : state.open.add(x.id); load(); } },
+    $("button", { class: "check" + (x.done ? " done" : ""), "aria-label": x.done ? "reopen" : "complete", onclick: toggle }, x.done ? "✓" : ""),
+    $("div", { class: "title" },
+      // An open task shows its title once, as the editable field below.
+      open && !locked ? $("div", { class: "meta" }, x.priority ? $("span", { class: "prio" }, marks(x.priority)) : "", listName(x.list)) :
+        $("div", { class: "t" + (x.done ? " done" : "") }, x.priority ? $("span", { class: "prio" }, marks(x.priority) + " ") : "", x.title),
+      open ? null : summary(x, origin)));
+  return $("div", { class: "task" + (open ? " open" : "") }, row, open && state.details[x.id] ? editor(state.details[x.id]) : null);
+}
+
+function commit(el, op, id, current) {
+  el.addEventListener("focus", () => (state.typing = true));
+  el.addEventListener("blur", () => { state.typing = false; const v = el.value.trim(); if (v !== current && (op !== "setTitle" || v)) act(op, { id, value: v }); });
+  if (el.tagName === "INPUT") el.addEventListener("keydown", e => { if (e.key === "Enter") el.blur(); });
+  return el;
+}
+
+function moment(label, value, op, id, withTime) {
+  const date = $("input", { type: "date", value: dayOf(value), "aria-label": label }), time = $("input", { type: "time", value: (value || "").slice(11), "aria-label": t("time") });
+  const save = () => act(op, { id, value: date.value ? (time.value ? `${date.value}T${time.value}` : date.value) : "" });
+  date.addEventListener("change", save); time.addEventListener("change", save);
+  return $("label", { class: "chip" + (op === "setDue" && value && overdue(value) ? " bad" : "") }, label, date, (withTime || value) ? time : null);
+}
+
+function editor(d) {
+  const x = d.task, id = x.id, locked = x.deleted || x.log;
+  if (locked) return $("div", { class: "edit" }, x.notes ? $("div", {}, x.notes) : null,
+    x.deleted ? $("button", { class: "link", onclick: () => act("restore", { id }) }, t("Restore")) : null);
+  const title = commit($("input", { type: "text", class: "name", value: x.title, placeholder: t("Title") }), "setTitle", id, x.title);
+  const notes = commit($("textarea", { rows: Math.min(8, Math.max(1, x.notes.split("\n").length)), placeholder: t("Notes") }), "setNotes", id, x.notes);
+  notes.value = x.notes;
+  const prio = $("select", { "aria-label": t("Priority"), onchange: e => act("setPriority", { id, value: Number(e.target.value) }) },
+    ["No priority", "Low", "Medium", "High"].map((name, i) => $("option", { value: i, selected: x.priority === i }, t(name))));
+  const pi = presetIndex(x.repeat);
+  const repeat = $("select", { "aria-label": t("Repeat"), onchange: e => { const v = e.target.value; if (v !== "custom") act("setRepeat", { id, value: v === "" ? null : PRESETS[Number(v)][1] }); } },
+    $("option", { value: "", selected: !x.repeat }, t("Does not repeat")),
+    PRESETS.map(([name], i) => $("option", { value: i, selected: pi === i }, t(name))),
+    x.repeat && pi < 0 ? $("option", { value: "custom", selected: true }, t("Custom")) : null);
+  const tag = $("input", { type: "text", placeholder: "#" + t("Tag").toLowerCase(), style: "width:90px", onkeydown: e => { if (e.key === "Enter" && e.target.value.trim()) act("addTag", { id, value: e.target.value.trim() }); } });
+  const move = $("select", { "aria-label": t("Move to"), onchange: e => e.target.value && act("moveToList", { id, list: e.target.value }) },
+    $("option", { value: "" }, t("Move to") + "…"), state.overview.lists.filter(l => !l.archived).map(l => $("option", { value: l.id }, listName(l.id))));
+  const file = $("input", { type: "file", multiple: true, style: "display:none", onchange: async e => {
+    for (const f of e.target.files) await api(`/api/upload?task=${encodeURIComponent(id)}&name=${encodeURIComponent(f.name)}`, { method: "POST", headers: { "X-Lists": "1" }, body: f });
+    load();
+  } });
+  const sub = $("input", { type: "text", placeholder: t("Subtask"), onkeydown: e => { if (e.key === "Enter" && e.target.value.trim()) act("addSubtask", { parent: id, title: e.target.value.trim() }); } });
+  return $("div", {},
+    $("div", { class: "edit" }, title, notes,
+      $("div", { class: "chips" },
+        moment(t("Due"), x.due, "setDue", id), moment(t("Start"), x.start, "setStart", id), moment(t("Reminder"), x.remind, "setRemind", id, true),
+        $("span", { class: "chip" }, prio), $("span", { class: "chip" }, repeat),
+        x.tags.map(g => $("button", { class: "chip", title: t("Delete"), onclick: () => act("removeTag", { id, value: g }) }, `#${g} ×`)),
+        $("span", { class: "chip" }, tag)),
+      d.attachments.map(a => $("div", { class: "meta" },
+        a.present ? $("a", { class: "link", href: `/api/file?task=${encodeURIComponent(id)}&id=${encodeURIComponent(a.id)}` }, a.name) : $("span", {}, `${a.name} — ${t("downloads on the next sync")}`),
+        $("button", { class: "link danger", onclick: () => act("removeAttachment", { id: a.id }) }, "×"))),
+      $("div", { class: "chips" },
+        $("button", { class: "link", onclick: () => file.click() }, t("Attach file")), file, $("span", { class: "chip" }, move),
+        $("button", { class: "link", onclick: () => act("duplicate", { id }) }, t("Duplicate")),
+        $("button", { class: "link danger", onclick: () => { state.open.delete(id); act("delete", { id }, t("Deleted"), () => act("restore", { id })); } }, t("Delete")))),
+    $("div", { class: "sub" }, d.subtasks.map(s => taskNode(s, false)), $("div", { class: "row" }, $("span", { class: "check", style: "border-style:dashed" }), sub)));
+}
+
+function nav(scope, label, count, opts = {}) {
+  return $("button", { class: "nav" + (state.scope === scope && !state.search ? " on" : ""), onclick: () => { state.scope = scope; state.search = ""; state.open.clear(); state.drawer = false; load(); } },
+    opts.color !== undefined ? $("span", { class: "dot", style: /^#[0-9a-f]{6}$/i.test(opts.color) ? `background:${opts.color}` : "" }) : null, $("span", {}, label),
+    count ? $("span", { class: "n" + (opts.bad ? " bad" : "") }, count) : null);
+}
+
+function listTools(l) {
+  const sort = $("select", { "aria-label": t("Sort"), onchange: e => act("setListSort", { id: l.id, value: e.target.value }) },
+    [["manual", "Manually"], ["due", "By due date"], ["priority", "By priority"], ["title", "By title"]].map(([v, n]) => $("option", { value: v, selected: l.sort === v }, t(n))));
+  return [$("span", { class: "chip" }, sort),
+    l.id === "inbox" ? null : $("button", { class: "link", onclick: () => { const name = prompt(t("List name"), l.name); if (name && name.trim()) act("renameList", { id: l.id, value: name.trim() }); } }, t("Rename")),
+    l.id === "inbox" ? null : $("button", { class: "link danger", onclick: () => { if (confirm(t("Delete this list and move its tasks to the trash?"))) { state.scope = "inbox"; act("deleteList", { id: l.id }); } } }, t("Delete list"))];
+}
+
+function render() {
+  if (state.typing) return; // never rebuild the page under the user's cursor
+  const o = state.overview, c = o.counts, secs = sections(), origin = state.search || ["today", "upcoming", "completed", "trash"].includes(state.scope) || state.scope.startsWith("tag:");
+  const empty = secs.every(s => !s.tasks.length);
+  const current = state.scope.startsWith("list:") ? o.lists.find(l => "list:" + l.id === state.scope) : state.scope === "inbox" ? o.lists.find(l => l.id === "inbox") : null;
+  const syncText = !o.sync.configured ? "" : o.sync.lastError ? t("Sync failed") : o.sync.pending ? `${o.sync.pending} ${t("waiting")}` : t("Synced");
+  const search = $("input", { type: "search", placeholder: t("Search"), value: state.search, oninput: e => { state.search = e.target.value; clearTimeout(search.timer); search.timer = setTimeout(async () => { await load(); const again = document.querySelector("header input"); again.focus(); again.setSelectionRange(again.value.length, again.value.length); }, 250); } });
+  const add = $("input", { type: "text", placeholder: t("New task"), enterkeyhint: "done", onkeydown: async e => { if (e.key === "Enter" && e.target.value.trim()) { const text = e.target.value; e.target.value = ""; await act("quickAdd", { text, scope: state.scope, today: today() }); document.querySelector("#add input").focus(); } } });
+  root.replaceChildren($("div", { id: "app", class: state.drawer ? "drawer" : "" },
+    $("nav", { id: "side" },
+      nav("inbox", t("Inbox"), c.inbox), nav("today", t("Today"), c.today, { bad: c.overdue > 0 }), nav("upcoming", t("Upcoming"), c.upcoming),
+      nav("all", t("All")), nav("completed", t("Completed")), c.trash ? nav("trash", t("Trash"), c.trash) : null,
+      $("div", { class: "side-title" }, t("Lists")),
+      o.lists.filter(l => l.id !== "inbox" && !l.archived).map(l => nav("list:" + l.id, l.name, l.open, { color: l.color })),
+      $("button", { class: "nav", style: "color:var(--muted)", onclick: () => { const name = prompt(t("List name")); if (name && name.trim()) call("createList", { name: name.trim() }).then(l => { state.scope = "list:" + l.id; load(); }); } }, "+ " + t("New list")),
+      o.tags.length ? $("div", { class: "side-title" }, t("Tags")) : null, o.tags.map(g => nav("tag:" + g.name, "#" + g.name, g.open)),
+      $("div", { class: "side-title" }), $("button", { class: "nav", style: "color:var(--muted)", onclick: () => api("/api/logout", { method: "POST", headers: { "X-Lists": "1" } }).then(showLogin) }, t("Sign out"))),
+    $("div", { id: "shade", onclick: () => { state.drawer = false; render(); } }),
+    $("div", { id: "main" },
+      $("header", {}, $("button", { id: "menu", "aria-label": "menu", onclick: () => { state.drawer = true; render(); } }, "☰"), $("h1", {}, scopeTitle()),
+        $("button", { id: "sync", class: o.sync.lastError ? "bad" : "", title: o.sync.lastError || "", onclick: () => call("sync").then(load, load) }, syncText), search),
+      $("div", { id: "tasks" },
+        current && !state.search ? $("div", { class: "chips", style: "padding:8px 10px 0" }, listTools(current)) : null,
+        empty ? $("div", { class: "empty" }, t(state.search ? "Nothing found" : state.scope === "today" ? "All done for today" : "No tasks"))
+          : secs.map(s => [s.title ? $("div", { class: "section" + (s.bad ? " bad" : "") }, s.title) : null, s.tasks.map(x => taskNode(x, origin))]),
+        state.scope === "trash" && !empty ? $("div", { style: "text-align:right;padding:14px" }, $("button", { class: "link danger", onclick: () => confirm(t("Delete everything in the trash for good?")) && act("emptyTrash") }, t("Empty Trash"))) : null),
+      readOnly() ? null : $("div", { id: "add" }, $("span", { style: "color:var(--muted)" }, "+"), add))));
+}
+
+function showLogin() {
+  const input = $("input", { type: "password", placeholder: t("Password"), autocomplete: "current-password" });
+  const form = $("form", { id: "login", onsubmit: async e => {
+    e.preventDefault();
+    const res = await fetch("/api/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: input.value }) });
+    if (res.ok) load(); else { toast(t("Wrong password")); input.select(); }
+  } }, $("h1", { style: "margin:0" }, "Lists"), input, $("button", {}, t("Sign in")));
+  root.replaceChildren(form);
+  input.focus();
+}
+
+// The address keeps the place: `#scope=today&open=<task id>` survives a reload and can be bookmarked.
+function readHash() {
+  const p = new URLSearchParams(location.hash.slice(1));
+  if (p.get("scope")) state.scope = p.get("scope");
+  state.open = new Set(p.getAll("open"));
+}
+function writeHash() {
+  const p = new URLSearchParams({ scope: state.scope });
+  for (const id of state.open) p.append("open", id);
+  history.replaceState(null, "", "#" + p);
+}
+document.documentElement.lang = locale;
+readHash();
+load().catch(() => {});
+// Changes made on other devices arrive through the server's own sync.
+setInterval(() => { if (!document.hidden && state.overview && !state.typing) load().catch(() => {}); }, 20000);
+</script>
+</body>
+</html>

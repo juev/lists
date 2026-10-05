@@ -1,0 +1,20 @@
+//! Shared core of Lists: storage, merge of concurrent edits, sync, recurrence
+//! and quick-entry parsing. The apps reach it through the UniFFI bindings
+//! generated from this crate.
+
+uniffi::setup_scaffolding!();
+
+mod caldav;
+mod db;
+mod error;
+mod hlc;
+mod model;
+mod order;
+mod quickadd;
+mod recur;
+mod store;
+pub mod sync;
+
+pub use error::{AppError, Result};
+pub use model::*;
+pub use store::{days_between, shift_date, Store};
