@@ -1,7 +1,7 @@
 # Lists
 
 [![CI](https://github.com/juev/lists/actions/workflows/ci.yml/badge.svg)](https://github.com/juev/lists/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/juev/lists)](https://github.com/juev/lists/releases/latest)
+[![Release](https://img.shields.io/github/v/release/juev/lists?include_prereleases)](https://github.com/juev/lists/releases)
 
 A local-first to-do list with native apps for macOS and Android, a self-hosted web interface, and sync through storage you already own: a WebDAV folder, a CalDAV server or a plain directory. No account, no service to subscribe to.
 
@@ -17,7 +17,7 @@ More screenshots are in [docs/screenshots](docs/screenshots/).
 
 ## Install
 
-Every release on the [Releases page](https://github.com/juev/lists/releases/latest) carries the macOS disk image, the Android APK and a `SHA256SUMS` file; the web server is published as a Docker image.
+Every release on the [Releases page](https://github.com/juev/lists/releases) carries the macOS disk image, the Android APK and a `SHA256SUMS` file; the web server is published as a Docker image.
 
 ### macOS
 
@@ -141,7 +141,7 @@ This serves a folder over WebDAV and CalDAV with user `user` and password `secre
 
 ## Status
 
-Version 0.1.0. What is implemented and how each part was checked is listed at the end of [docs/specs/product.md](docs/specs/product.md).
+Version 0.1.0-rc.1, a release candidate. What is implemented and how each part was checked is listed at the end of [docs/specs/product.md](docs/specs/product.md).
 
 Known gaps:
 
