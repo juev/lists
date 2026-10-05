@@ -7,50 +7,19 @@ extension KeyboardShortcuts.Name {
     static let quickEntry = Self("quickEntry", default: .init(.space, modifiers: [.control, .option]))
 }
 
-/// The field shared by the floating quick-entry panel and the menu bar window.
+/// The new-task card shared by the floating quick-entry panel and the menu bar window.
 struct QuickEntryField: View {
     @Environment(AppModel.self) private var model
     var onDone: () -> Void
-    @State private var text = ""
-    @State private var listId = "inbox"
-    @FocusState private var focused: Bool
+    var onResize: () -> Void = {}
+    @State private var draft = TaskDraft()
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                Image(systemName: "checkmark.circle").font(AppFont.style(.title2)).foregroundStyle(.secondary)
-                TextField(L("New task"), text: $text)
-                    .textFieldStyle(.plain)
-                    .font(AppFont.style(.title3))
-                    .focused($focused)
-                    .onSubmit(save)
-            }
-            HStack(spacing: 6) {
-                QuickChips(text: text)
-                Spacer()
-                Picker("", selection: $listId) {
-                    ForEach(model.lists.filter { !$0.archived }, id: \.id) { Text(model.listName($0)).tag($0.id) }
-                }
-                .labelsHidden()
-                .fixedSize()
-                .controlSize(.small)
-            }
-        }
-        .onAppear {
-            listId = model.defaultListId
-            focused = true
-        }
-        .onExitCommand(perform: onDone)
-    }
-
-    private func save() {
-        let line = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !line.isEmpty else { return onDone() }
-        if let task = model.perform({ try $0.quickAdd(text: line, listId: listId) }) {
-            model.noteUsedList(task.listId)
-            text = ""
+        DraftEditor(draft: $draft, onClose: {
+            draft = TaskDraft(listId: model.defaultListId)
             onDone()
-        }
+        }, onResize: onResize)
+            .onAppear { draft.listId = model.defaultListId }
     }
 }
 
@@ -84,15 +53,21 @@ final class QuickEntryPanel: NSPanel {
 
     func present() {
         // A fresh view each time: the field starts empty and focused.
-        let view = QuickEntryField(onDone: { [weak self] in self?.close() })
+        let view = QuickEntryField(onDone: { [weak self] in self?.close() }, onResize: { [weak self] in self?.refit() })
             .environment(AppModel.shared)
             .font(AppFont.style(.body))
-            .padding(16)
-            .frame(width: 560)
-        contentView = NSHostingView(rootView: view)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .frame(width: 520)
+        let hosting = NSHostingView(rootView: view)
+        // The panel keeps a hidden title bar; without this the card would
+        // start below the room reserved for it.
+        hosting.safeAreaRegions = []
+        contentView = hosting
+        setContentSize(hosting.fittingSize)
         if let screen = NSScreen.main {
             let frame = screen.visibleFrame
-            setFrameOrigin(NSPoint(x: frame.midX - self.frame.width / 2, y: frame.minY + frame.height * 0.68))
+            setFrameTopLeftPoint(NSPoint(x: frame.midX - self.frame.width / 2, y: frame.minY + frame.height * 0.78))
         }
         makeKeyAndOrderFront(nil)
         // SwiftUI asks for focus when the view appears, which is before the
@@ -110,9 +85,25 @@ final class QuickEntryPanel: NSPanel {
         if let target = contentView.flatMap(field(in:)) { makeFirstResponder(target) }
     }
 
+    /// Grows or shrinks with the card, keeping the top edge where it is.
+    private func refit() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let size = self.contentView?.fittingSize, size.height != self.contentView?.frame.height else { return }
+            let top = NSPoint(x: self.frame.minX, y: self.frame.maxY)
+            self.setContentSize(size)
+            self.setFrameTopLeftPoint(top)
+        }
+    }
+
     override func resignKey() {
         super.resignKey()
-        close()
+        // A popover of the card (a date, a tag) takes the keyboard for a
+        // moment; the panel goes away only when something else does.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.isVisible, !self.isKeyWindow else { return }
+            if let key = NSApp.keyWindow, key.parent === self || self.childWindows?.contains(key) == true { return }
+            self.close()
+        }
     }
 
     override func cancelOperation(_ sender: Any?) {

@@ -48,9 +48,11 @@ struct NotesTextView: NSViewRepresentable {
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView view: NSTextView, context: Context) -> CGSize? {
-        guard let width = proposal.width, width.isFinite, width > 0,
-              let container = view.textContainer, let layout = view.layoutManager
-        else { return nil }
+        guard let container = view.textContainer, let layout = view.layoutManager else { return nil }
+        // Asked for an ideal size, the view has no width to wrap at: answer with
+        // the width it has, never with the text view's own (zero) idea of it.
+        let offered = proposal.width.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
+        let width = offered ?? max(view.bounds.width, 240)
         container.containerSize = NSSize(width: width, height: .greatestFiniteMagnitude)
         layout.ensureLayout(for: container)
         let line = layout.defaultLineHeight(for: view.font ?? font)

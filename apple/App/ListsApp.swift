@@ -92,6 +92,15 @@ struct AppCommands: Commands {
             Button(L("Quick Entry")) { QuickEntryPanel.shared.present() }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
             Divider()
+            Button(L("New List…")) {
+                openWindow(id: "main")
+                model.creatingList = true
+            }
+            Button(L("New Filter…")) {
+                openWindow(id: "main")
+                model.creatingFilter = true
+            }
+            Divider()
             Button(L("Import…")) { model.importFromFile() }
         }
         CommandMenu(L("Task")) {
@@ -262,6 +271,9 @@ struct SettingsView: View {
                     ForEach(model.lists.filter { !$0.archived && $0.id != "inbox" }, id: \.id) { Text($0.name).tag($0.id) }
                 }
                 Text(L("Used by quick entry and by views that show several lists, such as Today."))
+                    .font(AppFont.style(.caption)).foregroundStyle(.secondary)
+                Toggle(L("Recognize dates, priority, tags and lists in the title"), isOn: $model.parseQuickText)
+                Text(L("“report friday 10:00 !! #work @Projects” sets the due date, the priority, a tag and the list. Off: the title is kept as typed."))
                     .font(AppFont.style(.caption)).foregroundStyle(.secondary)
                 Picker(L("Return in the notes"), selection: $model.returnAddsLine) {
                     Text(L("Starts a new line")).tag(true)

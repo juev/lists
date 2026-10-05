@@ -33,6 +33,10 @@ struct MainWindow: View {
                 .font(AppFont.style(.body))
                 .navigationTitle(model.scopeTitle)
                 .toolbar {
+                    ToolbarItem(placement: .primaryAction) {
+                        Button { model.startDraft() } label: { Image(systemName: "plus") }
+                            .help(L("New task"))
+                    }
                     ToolbarItem(placement: .primaryAction) { SyncIndicator() }
                 }
         }
@@ -82,9 +86,7 @@ struct SyncIndicator: View {
 struct Sidebar: View {
     @Environment(AppModel.self) private var model
     @State private var editing: TaskList?
-    @State private var creating = false
     @State private var editingFilter: SavedFilter?
-    @State private var creatingFilter = false
 
     var body: some View {
         @Bindable var model = model
@@ -101,7 +103,7 @@ struct Sidebar: View {
                     row(.trash, L("Trash"), "trash", count: model.counts.trash)
                 }
             }
-            Section(L("Lists")) {
+            Section {
                 ForEach(model.lists.filter { $0.id != "inbox" && !$0.archived }, id: \.id) { list in
                     Label {
                         HStack {
@@ -123,6 +125,8 @@ struct Sidebar: View {
                     }
                 }
                 .onMove { source, destination in moveList(source, destination) }
+            } header: {
+                header(L("Lists"), help: L("New list")) { model.creatingList = true }
             }
             if !model.tags.isEmpty {
                 Section(L("Tags")) {
@@ -161,8 +165,9 @@ struct Sidebar: View {
                     }
                 }
             }
-            if !model.filters.isEmpty {
-                Section(L("Filters")) {
+            // Shown even when empty: the header is where a filter is made.
+            do {
+                Section {
                     ForEach(model.filters, id: \.id) { filter in
                         Label {
                             HStack {
@@ -180,6 +185,8 @@ struct Sidebar: View {
                             Button(L("Delete filter"), role: .destructive) { model.perform { try $0.deleteFilter(id: filter.id) } }
                         }
                     }
+                } header: {
+                    header(L("Filters"), help: L("New filter")) { model.creatingFilter = true }
                 }
             }
             let archived = model.lists.filter(\.archived)
@@ -202,12 +209,12 @@ struct Sidebar: View {
         .safeAreaInset(edge: .bottom) {
             HStack {
                 Menu {
-                    Button(L("New list")) { creating = true }
-                    Button(L("New filter")) { creatingFilter = true }
+                    Button(L("New list")) { model.creatingList = true }
+                    Button(L("New filter")) { model.creatingFilter = true }
                 } label: {
                     Label(L("New list"), systemImage: "plus")
                 } primaryAction: {
-                    creating = true
+                    model.creatingList = true
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
@@ -217,9 +224,22 @@ struct Sidebar: View {
             .padding(10)
         }
         .sheet(item: $editing) { ListEditor(list: $0) }
-        .sheet(isPresented: $creating) { ListEditor(list: nil) }
+        .sheet(isPresented: $model.creatingList) { ListEditor(list: nil) }
         .sheet(item: $editingFilter) { FilterEditor(filter: $0) }
-        .sheet(isPresented: $creatingFilter) { FilterEditor(filter: nil) }
+        .sheet(isPresented: $model.creatingFilter) { FilterEditor(filter: nil) }
+    }
+
+    /// A section title with the button that adds to the section.
+    private func header(_ title: String, help: String, add: @escaping () -> Void) -> some View {
+        HStack {
+            Text(title)
+            Spacer()
+            Button(action: add) { Image(systemName: "plus") }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help(help)
+                .accessibilityLabel(help)
+        }
     }
 
     private func row(_ scope: Scope, _ title: String, _ symbol: String, count: UInt32, alert: Bool = false) -> some View {

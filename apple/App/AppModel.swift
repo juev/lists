@@ -25,7 +25,7 @@ final class AppModel {
     var filters: [SavedFilter] = []
     var counts = Counts(inbox: 0, today: 0, overdue: 0, upcoming: 0, trash: 0)
 
-    var scope: Scope = .today { didSet { if scope != oldValue { expanded.removeAll(); subtasksShown.removeAll(); drafting = false; selection = nil; reload() } } }
+    var scope: Scope = .today { didSet { if scope != oldValue { expanded.removeAll(); subtasksShown.removeAll(); draft = nil; selection = nil; reload() } } }
     var search = "" { didSet { if search != oldValue { reload() } } }
     var sections: [TaskSection] = []
     var children: [String: [TaskItem]] = [:]
@@ -33,10 +33,11 @@ final class AppModel {
     /// Expanded tasks whose subtasks are on show; they stay folded until asked for.
     var subtasksShown: Set<String> = []
     var selection: String?
-    /// True while the card of a task that does not exist yet is open (⌘N).
-    var drafting = false
-    /// The task whose notes take the keyboard as soon as its card appears.
-    var focusNotes: String?
+    /// The card of a task that does not exist yet, while it is open (⌘N).
+    var draft: TaskDraft?
+    // Sheets of the sidebar; here so that the menu bar can open them too.
+    var creatingList = false
+    var creatingFilter = false
 
     var syncStatus = SyncStatus(configured: false, pending: 0, lastOk: nil, lastError: nil)
     var syncing = false
@@ -94,6 +95,11 @@ final class AppModel {
     /// Return in the notes starts a new line (Esc finishes); otherwise it finishes editing and ⌥Return starts a line.
     var returnAddsLine: Bool = UserDefaults.standard.object(forKey: "returnAddsLine") == nil || UserDefaults.standard.bool(forKey: "returnAddsLine") {
         didSet { UserDefaults.standard.set(returnAddsLine, forKey: "returnAddsLine") }
+    }
+
+    /// Whether dates, priority, tags and a list are picked out of the typed title.
+    var parseQuickText: Bool = UserDefaults.standard.object(forKey: "parseQuickText") == nil || UserDefaults.standard.bool(forKey: "parseQuickText") {
+        didSet { UserDefaults.standard.set(parseQuickText, forKey: "parseQuickText") }
     }
 
     /// The list for a task entered where no list is implied: quick entry, Today, a tag.
@@ -290,29 +296,51 @@ final class AppModel {
         }
     }
 
-    /// Opens the card for a task that is yet to be typed.
+    /// Opens the card of a new task, filled with what the current view implies.
     func startDraft() {
         search = ""
         switch scope {
         case .completed, .trash: scope = .inbox
         default: break
         }
-        drafting = true
+        var new = TaskDraft(listId: targetListId)
+        switch scope {
+        case .today:
+            new.due = Moment.today()
+            new.dueIsDefault = true
+        case .tag(let name): new.tags = [name]
+        case .project(let id): new.parentId = id
+        default: break
+        }
+        draft = new
     }
 
-    /// Turns the draft card into a task and leaves its card open for the rest of the fields.
-    func commitDraft(_ text: String) {
-        drafting = false
-        guard let task = add(text) else { return }
-        if selectedOrVisible(task.id) == nil { reveal(task.id) }
-        expanded.insert(task.id)
-        selection = task.id
-        focusNotes = task.id
-        reload()
-    }
-
-    private func selectedOrVisible(_ id: String) -> TaskItem? {
-        allTasks.first { $0.id == id }
+    /// Creates the task of a draft. What the fields say wins over what the title says.
+    @discardableResult
+    func save(_ draft: TaskDraft) -> TaskItem? {
+        let title = draft.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { return nil }
+        let parse = parseQuickText
+        let task: TaskItem? = perform { store in
+            let created: TaskItem
+            switch (draft.parentId, parse) {
+            case (let parent?, true): created = try store.quickAddUnder(text: title, parentId: parent)
+            case (let parent?, false): created = try store.createTask(new: NewTask(title: title, parentId: parent))
+            case (nil, true): created = try store.quickAdd(text: title, listId: draft.listId)
+            case (nil, false): created = try store.createTask(new: NewTask(title: title, listId: draft.listId))
+            }
+            if !draft.notes.isEmpty { try store.setNotes(id: created.id, notes: draft.notes) }
+            if let start = draft.start { try store.setStart(id: created.id, start: start) }
+            if let due = draft.due, !(draft.dueIsDefault && created.due != nil) { try store.setDue(id: created.id, due: due) }
+            if draft.priority != .none { try store.setPriority(id: created.id, priority: draft.priority) }
+            for tag in draft.tags where !created.tags.contains(tag) { try store.addTag(id: created.id, tag: tag) }
+            return try store.task(id: created.id)
+        }
+        if let task {
+            noteUsedList(task.listId)
+            if allTasks.contains(where: { $0.id == task.id }) { selection = task.id }
+        }
+        return task
     }
 
     func showSubtasks(_ id: String) {

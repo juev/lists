@@ -18,7 +18,6 @@ struct TaskEditor: View {
     @State private var importing = false
     @State private var attachments: [Attachment] = []
     @State private var notesFocused = false
-    @State private var wantsNotesFocus = false
 
     private var locked: Bool { task.deleted || task.isLog }
 
@@ -29,16 +28,18 @@ struct TaskEditor: View {
             if !attachments.isEmpty { files }
         }
         .disabled(locked)
-        .onAppear {
-            load()
-            if model.focusNotes == task.id {
-                // A focus request made while the row is still being laid out is dropped.
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                    wantsNotesFocus = true
-                    model.focusNotes = nil
-                }
+        .background {
+            // The dates of the selected open task are one key away; with
+            // several cards open only the selected one answers.
+            Group {
+                Button("") { popover = .start }.keyboardShortcut("s", modifiers: .command)
+                Button("") { popover = .due }.keyboardShortcut("d", modifiers: .command)
             }
+            .opacity(0)
+            .accessibilityHidden(true)
+            .disabled(locked || model.selection != task.id || model.draft != nil)
         }
+        .onAppear(perform: load)
         .onChange(of: task) { _, _ in load() }
         .onDisappear(perform: commitNotes)
         .fileImporter(isPresented: $importing, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
@@ -57,13 +58,15 @@ struct TaskEditor: View {
             }
             NotesTextView(
                 text: $notes, font: AppFont.native(.body), returnAddsLine: model.returnAddsLine,
-                wantsFocus: $wantsNotesFocus,
+                wantsFocus: .constant(false),
                 onEditingChanged: { editing in
                     notesFocused = editing
                     if !editing { commitNotes() }
                 },
                 onFinish: finish)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .font(AppFont.style(.body))
     }
 
@@ -101,13 +104,13 @@ struct TaskEditor: View {
                 .popover(isPresented: isOpen(.start)) {
                     DateEditor(title: L("Start: hidden from Today until"), value: task.start) { value in model.perform { try $0.setStart(id: task.id, start: value) } }
                 }
-                .help(L("Start date"))
+                .help(L("Start date (⌘S)"))
             chipButton(.due, symbol: "calendar", text: task.due.map { L("Due: ") + Moment.label($0).lowercased() } ?? L("Due"),
                        tint: task.due.map { Moment.isOverdue($0) && task.done == nil ? Color.red : .accentColor } ?? .secondary)
                 .popover(isPresented: isOpen(.due)) {
                     DateEditor(title: L("Due"), value: task.due) { value in model.perform { try $0.setDue(id: task.id, due: value) } }
                 }
-                .help(L("Due date"))
+                .help(L("Due date (⌘D)"))
             if task.repeat != nil || popover == .repeat {
                 chipButton(.repeat, symbol: "repeat", text: task.repeat?.summary ?? L("Repeat"), tint: .accentColor)
                     .popover(isPresented: isOpen(.repeat)) {
@@ -131,7 +134,8 @@ struct TaskEditor: View {
             } label: {
                 Chip(symbol: "flag", text: task.priority == .none ? "" : task.priority.title, tint: task.priority == .none ? .secondary : .orange)
             }
-            .menuStyle(.borderlessButton)
+            .menuStyle(.button)
+            .buttonStyle(.plain)
             .menuIndicator(.hidden)
             .fixedSize()
             .help(L("Priority"))
@@ -155,7 +159,8 @@ struct TaskEditor: View {
             } label: {
                 Chip(symbol: "plus", text: "")
             }
-            .menuStyle(.borderlessButton)
+            .menuStyle(.button)
+            .buttonStyle(.plain)
             .menuIndicator(.hidden)
             .fixedSize()
             .help(L("Add field"))
@@ -248,20 +253,22 @@ struct DateEditor: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(title).font(AppFont.style(.headline))
-            HStack {
-                Button(L("Today")) { pick(days: 0) }
-                Button(L("Tomorrow")) { pick(days: 1) }
-                Button(L("In a week")) { pick(days: 7) }
+            HStack(alignment: .top, spacing: 12) {
+                DatePicker("", selection: $date, displayedComponents: .date)
+                    .datePickerStyle(.graphical)
+                    .labelsHidden()
+                VStack(alignment: .leading, spacing: 6) {
+                    Button(L("Today")) { pick(days: 0) }
+                    Button(L("Tomorrow")) { pick(days: 1) }
+                    Button(L("In a week")) { pick(days: 7) }
+                }
+                .controlSize(.small)
             }
-            DatePicker("", selection: $date, displayedComponents: .date)
-                .datePickerStyle(.graphical)
-                .labelsHidden()
             HStack {
                 if !timeRequired { Toggle(L("Time"), isOn: $withTime) }
                 if withTime {
                     DatePicker("", selection: $date, displayedComponents: .hourAndMinute).labelsHidden()
                 }
-                Spacer()
             }
             HStack {
                 if value != nil {
@@ -272,8 +279,8 @@ struct DateEditor: View {
                     .keyboardShortcut(.defaultAction)
             }
         }
-        .padding(14)
-        .frame(width: 300)
+        .padding(12)
+        .fixedSize()
         .onAppear {
             withTime = timeRequired || value.map(Moment.hasTime) ?? false
             if let value, let parsed = Moment.date(value) {

@@ -4,7 +4,7 @@ import AppKit
 /// Drives the app from inside for checks that need key presses: macOS lets no
 /// outside process send them without the Accessibility permission. Debug
 /// builds only. `LISTS_DEBUG_SCRIPT` holds steps separated by `;`:
-/// `type:text`, `key:return`, `key:n+cmd`, `sleep:0.5`, `quick`, `settings`,
+/// `type:text`, `key:return`, `key:n+cmd`, `sleep:0.5`, `click:x,y`, `quick`, `settings`,
 /// `state` (prints who has the keyboard).
 @MainActor
 enum DebugScript {
@@ -38,6 +38,20 @@ enum DebugScript {
                     if parts.contains("shift") { flags.insert(.shift) }
                     let key = codes[parts[0]] ?? (0, parts[0])
                     press(key.1, code: key.0, flags: flags)
+                case "click":
+                    // Points from the top left corner of the key window.
+                    let xy = argument.split(separator: ",").compactMap { Double($0) }
+                    if xy.count == 2, let window = NSApp.keyWindow {
+                        let point = NSPoint(x: xy[0], y: Double(window.frame.height) - xy[1])
+                        for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                            if let event = NSEvent.mouseEvent(
+                                with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1) {
+                                // Queued, not sent: a view that tracks the mouse waits for the release in the queue.
+                                NSApp.postEvent(event, atStart: false)
+                            }
+                        }
+                    }
                 case "quick": QuickEntryPanel.shared.present()
                 case "settings": NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
                 case "state":

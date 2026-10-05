@@ -4,22 +4,18 @@ import UniformTypeIdentifiers
 
 struct TaskListView: View {
     @Environment(AppModel.self) private var model
-    @State private var draft = ""
-    @FocusState private var addFocused: Bool
     @FocusState private var listFocused: Bool
-
-    private var readOnly: Bool {
-        switch model.effectiveScope {
-        case .completed, .trash, .search: return true
-        default: return false
-        }
-    }
 
     var body: some View {
         @Bindable var model = model
         VStack(spacing: 0) {
-            if model.drafting {
-                DraftCard()
+            if model.draft != nil {
+                DraftEditor(
+                    draft: Binding(get: { model.draft ?? TaskDraft() }, set: { if model.draft != nil { model.draft = $0 } }),
+                    onClose: { model.draft = nil })
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .cardBackground()
                     .padding(.horizontal, 12)
                     .padding(.top, 10)
                     .padding(.bottom, 4)
@@ -68,14 +64,10 @@ struct TaskListView: View {
                     .onDeleteCommand { if !typing { model.selectedTask.map(model.delete) } }
                     .onChange(of: model.selection) { _, new in
                         guard let new else { return }
-                        if !typing && model.focusNotes == nil { listFocused = true }
+                        if !typing { listFocused = true }
                         withAnimation { proxy.scrollTo(new) }
                     }
                 }
-            }
-            if !readOnly {
-                Divider()
-                addField
             }
             if case .trash = model.effectiveScope {
                 Divider()
@@ -114,27 +106,6 @@ struct TaskListView: View {
         }
     }
 
-    private var addField: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "plus").foregroundStyle(.secondary)
-            TextField(placeholder, text: $draft)
-                .textFieldStyle(.plain)
-                .font(AppFont.style(.body))
-                .focused($addFocused)
-                .onSubmit {
-                    if model.add(draft) != nil { draft = "" }
-                    addFocused = true
-                }
-            QuickChips(text: draft)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-    }
-
-    private var placeholder: String {
-        L("New task")
-    }
-
     @ViewBuilder
     private var emptyState: some View {
         let (title, symbol, text): (String, String, String) = {
@@ -145,7 +116,7 @@ struct TaskListView: View {
             case .completed: return (L("Nothing completed yet"), "checkmark.circle", "")
             case .trash: return (L("Trash is empty"), "trash", "")
             case .search: return (L("Nothing found"), "magnifyingglass", "")
-            default: return (L("No tasks"), "checklist", L("Type a title below and press Return."))
+            default: return (L("No tasks"), "checklist", L("Press ⌘N to add a task."))
             }
         }()
         ContentUnavailableView(title, systemImage: symbol, description: Text(text))
@@ -415,36 +386,6 @@ struct SubtaskField: View {
                 }
         }
         .font(AppFont.style(.callout))
-    }
-}
-
-/// The card of a task that does not exist yet: ⌘N opens it, Return turns it
-/// into a task and leaves that task's card open, Esc throws it away.
-struct DraftCard: View {
-    @Environment(AppModel.self) private var model
-    @State private var text = ""
-    @FocusState private var focused: Bool
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                Image(systemName: "circle").font(AppFont.style(.title3)).foregroundStyle(.secondary)
-                TextField(L("New task"), text: $text)
-                    .textFieldStyle(.plain)
-                    .font(AppFont.style(.body))
-                    .focused($focused)
-                    .onSubmit { model.commitDraft(text) }
-                QuickChips(text: text)
-            }
-            Text(L("Return creates the task and keeps it open, Esc cancels."))
-                .font(AppFont.style(.caption))
-                .foregroundStyle(.tertiary)
-                .padding(.leading, 30)
-        }
-        .padding(10)
-        .cardBackground()
-        .onAppear { focused = true }
-        .onExitCommand { model.drafting = false }
     }
 }
 
