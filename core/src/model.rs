@@ -323,8 +323,9 @@ pub struct SyncStatus {
 pub struct NotifySettings {
     pub enabled: bool,
     /// For a task due at a time and without a reminder of its own: notify this
-    /// many minutes before. `None` turns these off; 0 means at the due time.
-    pub lead_minutes: Option<u32>,
+    /// many minutes before, once per entry. Empty turns these off; 0 means at
+    /// the due time.
+    pub lead_minutes: Vec<u32>,
     /// For a task due on a day without a time: notify at this time (`HH:MM`) on that day.
     pub all_day_at: Option<String>,
     /// A summary of the day at this time (`HH:MM`), when there is anything due.

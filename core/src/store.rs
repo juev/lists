@@ -570,7 +570,8 @@ impl Store {
         )?;
         let mut out = Vec::new();
         for task in &tasks {
-            let planned = match (&task.remind, &task.due) {
+            // (kind, moment, what tells notifications of one task apart)
+            let planned: Vec<(NotificationKind, NaiveDateTime, String)> = match (&task.remind, &task.due) {
                 // A reminder without a time of day follows the all-day setting, nine o'clock failing that.
                 (Some(remind), _) => moment(remind)
                     .or_else(|| {
@@ -580,18 +581,37 @@ impl Store {
                             )
                         })
                     })
-                    .map(|at| (NotificationKind::Reminder, at)),
-                (None, Some(due)) if due.len() > 10 => settings.lead_minutes.and_then(|lead| {
-                    moment(due).map(|at| (NotificationKind::Due, at - chrono::Duration::minutes(i64::from(lead))))
-                }),
-                (None, Some(due)) => {
-                    all_day.and_then(|time| recur::split(due).map(|(d, _)| (NotificationKind::Due, d.and_time(time))))
-                }
-                (None, None) => None,
+                    .map(|at| (NotificationKind::Reminder, at, String::new()))
+                    .into_iter()
+                    .collect(),
+                (None, Some(due)) if due.len() > 10 => moment(due)
+                    .map(|at| {
+                        let mut leads = settings.lead_minutes.clone();
+                        leads.sort_unstable();
+                        leads.dedup();
+                        leads
+                            .into_iter()
+                            .map(|lead| {
+                                (
+                                    NotificationKind::Due,
+                                    at - chrono::Duration::minutes(i64::from(lead)),
+                                    format!(":{lead}"),
+                                )
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                (None, Some(due)) => all_day
+                    .and_then(|time| {
+                        recur::split(due).map(|(d, _)| (NotificationKind::Due, d.and_time(time), String::new()))
+                    })
+                    .into_iter()
+                    .collect(),
+                (None, None) => Vec::new(),
             };
-            if let Some((kind, at)) = planned.filter(|(_, at)| *at > now) {
+            for (kind, at, suffix) in planned.into_iter().filter(|(_, at, _)| *at > now) {
                 out.push(PlannedNotification {
-                    key: format!("task:{}", task.id),
+                    key: format!("task:{}{suffix}", task.id),
                     kind,
                     at: at.format(MOMENT_FMT).to_string(),
                     task_id: Some(task.id.clone()),

@@ -256,3 +256,16 @@
 "Summary of the day" = "Сводка дня";
 "Play a sound" = "Со звуком";
 "A reminder set on a task is always shown. These settings apply to this Mac only." = "Напоминание, заданное у задачи, показывается всегда. Эти настройки действуют только на этом Mac.";
+"Default list" = "Список по умолчанию";
+"Last used list" = "Последний использованный";
+"Used by quick entry and by views that show several lists, such as Today." = "Действует в быстром вводе и в представлениях с несколькими списками, например «Сегодня».";
+"Return in the notes" = "Return в заметке";
+"Starts a new line" = "Начинает новую строку";
+"Finishes editing" = "Завершает правку";
+"Esc finishes editing." = "Правку завершает Esc.";
+"⌥Return starts a new line." = "Новую строку начинает ⌥Return.";
+"Return creates the task and keeps it open, Esc cancels." = "Return создаёт задачу и оставляет её открытой, Esc отменяет.";
+"Subtasks" = "Подзадачи";
+"Start: hidden from Today until" = "Начало: скрыта из «Сегодня» до";
+"Due: " = "Срок: ";
+"Due date" = "Срок";

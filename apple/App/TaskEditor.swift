@@ -17,25 +17,29 @@ struct TaskEditor: View {
     @State private var popover: Popover?
     @State private var importing = false
     @State private var attachments: [Attachment] = []
-    @FocusState private var notesFocused: Bool
+    @State private var notesFocused = false
+    @State private var wantsNotesFocus = false
 
     private var locked: Bool { task.deleted || task.isLog }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            TextField(L("Notes"), text: $notes, axis: .vertical)
-                .textFieldStyle(.plain)
-                .font(AppFont.style(.body))
-                .lineLimit(1...12)
-                .foregroundStyle(.secondary)
-                .focused($notesFocused)
+            notesField
             chips
             if !attachments.isEmpty { files }
         }
         .disabled(locked)
-        .onAppear(perform: load)
+        .onAppear {
+            load()
+            if model.focusNotes == task.id {
+                // A focus request made while the row is still being laid out is dropped.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                    wantsNotesFocus = true
+                    model.focusNotes = nil
+                }
+            }
+        }
         .onChange(of: task) { _, _ in load() }
-        .onChange(of: notesFocused) { _, focused in if !focused { commitNotes() } }
         .onDisappear(perform: commitNotes)
         .fileImporter(isPresented: $importing, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
             if case .success(let urls) = result { attach(urls) }
@@ -44,6 +48,28 @@ struct TaskEditor: View {
             attach(urls.filter(\.isFileURL))
             return true
         }
+    }
+
+    private var notesField: some View {
+        ZStack(alignment: .topLeading) {
+            if notes.isEmpty {
+                Text(L("Notes")).foregroundStyle(.tertiary).allowsHitTesting(false)
+            }
+            NotesTextView(
+                text: $notes, font: AppFont.native(.body), returnAddsLine: model.returnAddsLine,
+                wantsFocus: $wantsNotesFocus,
+                onEditingChanged: { editing in
+                    notesFocused = editing
+                    if !editing { commitNotes() }
+                },
+                onFinish: finish)
+        }
+        .font(AppFont.style(.body))
+    }
+
+    private func finish() {
+        commitNotes()
+        model.collapse(task.id)
     }
 
     private func load() {
@@ -69,17 +95,19 @@ struct TaskEditor: View {
 
     private var chips: some View {
         FlowLayout(spacing: 6) {
-            chipButton(.due, symbol: "calendar", text: task.due.map(Moment.label) ?? L("Due"),
+            // Both dates are always on show: when the work begins and when it is due.
+            chipButton(.start, symbol: "calendar.badge.clock", text: task.start.map { L("Start: ") + Moment.label($0).lowercased() } ?? L("Start"),
+                       tint: task.start == nil ? .secondary : .accentColor)
+                .popover(isPresented: isOpen(.start)) {
+                    DateEditor(title: L("Start: hidden from Today until"), value: task.start) { value in model.perform { try $0.setStart(id: task.id, start: value) } }
+                }
+                .help(L("Start date"))
+            chipButton(.due, symbol: "calendar", text: task.due.map { L("Due: ") + Moment.label($0).lowercased() } ?? L("Due"),
                        tint: task.due.map { Moment.isOverdue($0) && task.done == nil ? Color.red : .accentColor } ?? .secondary)
                 .popover(isPresented: isOpen(.due)) {
                     DateEditor(title: L("Due"), value: task.due) { value in model.perform { try $0.setDue(id: task.id, due: value) } }
                 }
-            if task.start != nil || popover == .start {
-                chipButton(.start, symbol: "calendar.badge.clock", text: task.start.map { L("Start: ") + Moment.label($0).lowercased() } ?? L("Start"), tint: .accentColor)
-                    .popover(isPresented: isOpen(.start)) {
-                        DateEditor(title: L("Hide from Today until"), value: task.start) { value in model.perform { try $0.setStart(id: task.id, start: value) } }
-                    }
-            }
+                .help(L("Due date"))
             if task.repeat != nil || popover == .repeat {
                 chipButton(.repeat, symbol: "repeat", text: task.repeat?.summary ?? L("Repeat"), tint: .accentColor)
                     .popover(isPresented: isOpen(.repeat)) {
@@ -119,10 +147,10 @@ struct TaskEditor: View {
             }
 
             Menu {
-                if task.start == nil { Button(L("Start date")) { popover = .start } }
                 if task.repeat == nil { Button(L("Repeat")) { popover = .repeat } }
                 if task.remind == nil { Button(L("Reminder")) { popover = .remind } }
                 Button(L("Tag")) { popover = .tag }
+                if !model.showsSubtasks(task) { Button(L("Subtask")) { model.showSubtasks(task.id) } }
                 Button(L("File or image…")) { importing = true }
             } label: {
                 Chip(symbol: "plus", text: "")

@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -17,38 +18,60 @@ struct TaskListView: View {
     var body: some View {
         @Bindable var model = model
         VStack(spacing: 0) {
+            if model.drafting {
+                DraftCard()
+                    .padding(.horizontal, 12)
+                    .padding(.top, 10)
+                    .padding(.bottom, 4)
+            }
             if let error = model.startupError {
                 ContentUnavailableView(L("The database could not be opened"), systemImage: "exclamationmark.triangle", description: Text(error))
             } else if model.sections.allSatisfy(\.tasks.isEmpty) {
                 emptyState
             } else {
-                List {
-                    ForEach(model.sections) { section in
-                        if let title = section.title {
-                            Section(title) { rows(section) }
-                        } else {
-                            rows(section)
+                ScrollViewReader { proxy in
+                    List {
+                        ForEach(model.sections) { section in
+                            if let title = section.title {
+                                Section(title) { rows(section) }
+                            } else {
+                                rows(section)
+                            }
                         }
                     }
+                    .listStyle(.inset)
+                    .focusable()
+                    .focusEffectDisabled()
+                    .focused($listFocused)
+                    // The keys below drive the list; while a text field inside a
+                    // row has the keyboard they belong to the text.
+                    .onKeyPress(.upArrow) {
+                        guard !typing else { return .ignored }
+                        model.moveSelection(-1)
+                        return .handled
+                    }
+                    .onKeyPress(.downArrow) {
+                        guard !typing else { return .ignored }
+                        model.moveSelection(1)
+                        return .handled
+                    }
+                    .onKeyPress(.return) {
+                        guard !typing, let id = model.selection else { return .ignored }
+                        model.toggleExpanded(id)
+                        return .handled
+                    }
+                    .onKeyPress(.space) {
+                        guard !typing, let task = model.selectedTask else { return .ignored }
+                        model.toggleDone(task)
+                        return .handled
+                    }
+                    .onDeleteCommand { if !typing { model.selectedTask.map(model.delete) } }
+                    .onChange(of: model.selection) { _, new in
+                        guard let new else { return }
+                        if !typing && model.focusNotes == nil { listFocused = true }
+                        withAnimation { proxy.scrollTo(new) }
+                    }
                 }
-                .listStyle(.inset)
-                .focusable()
-                .focusEffectDisabled()
-                .focused($listFocused)
-                .onKeyPress(.upArrow) { model.moveSelection(-1); return .handled }
-                .onKeyPress(.downArrow) { model.moveSelection(1); return .handled }
-                .onKeyPress(.return) {
-                    guard let id = model.selection else { return .ignored }
-                    model.toggleExpanded(id)
-                    return .handled
-                }
-                .onKeyPress(.space) {
-                    guard let task = model.selectedTask else { return .ignored }
-                    model.toggleDone(task)
-                    return .handled
-                }
-                .onDeleteCommand { model.selectedTask.map(model.delete) }
-                .onChange(of: model.selection) { _, new in if new != nil { listFocused = true } }
             }
             if !readOnly {
                 Divider()
@@ -68,7 +91,11 @@ struct TaskListView: View {
         } message: {
             Text(L("This cannot be undone."))
         }
-        .focusedSceneValue(\.focusAddField, { addFocused = true })
+    }
+
+    /// True while a text view or the field editor of a text field has the keyboard.
+    private var typing: Bool {
+        NSApp.keyWindow?.firstResponder is NSText
     }
 
     @State private var confirmEmptyTrash = false
@@ -171,11 +198,52 @@ struct TaskRow: View {
     private var inTrash: Bool { task.deleted }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        let content = VStack(alignment: .leading, spacing: 6) {
             header
             if isExpanded {
+                Divider().padding(.leading, 34)
                 TaskEditor(task: task)
                     .padding(.leading, 34)
+                subtasks
+            }
+        }
+        // Rows set the font themselves: a List does not hand its environment font to them.
+        .font(AppFont.style(.body))
+        .contextMenu { menu }
+        if isExpanded {
+            content
+                .padding(.horizontal, 4)
+                .padding(.top, 4)
+                .padding(.bottom, 10)
+                .cardBackground()
+                .padding(.vertical, 4)
+        } else {
+            content
+        }
+    }
+
+    /// Subtasks stay folded behind one line until asked for; a task without
+    /// any does not mention them at all.
+    @ViewBuilder
+    private var subtasks: some View {
+        let shown = model.showsSubtasks(task)
+        if task.subtasksTotal > 0 || shown {
+            Button {
+                model.toggleSubtasks(task.id)
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: shown ? "chevron.down" : "chevron.right").frame(width: 12)
+                    Text(L("Subtasks"))
+                    if task.subtasksTotal > 0 { Text("\(task.subtasksDone)/\(task.subtasksTotal)").monospacedDigit() }
+                }
+                .font(AppFont.style(.caption))
+                .foregroundStyle(.secondary)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .padding(.leading, 34)
+            .disabled(task.isProject)
+            if shown {
                 ForEach(model.children[task.id] ?? [], id: \.id) { child in
                     TaskRow(task: child, depth: depth + 1)
                         .padding(.leading, 22)
@@ -186,9 +254,6 @@ struct TaskRow: View {
                 }
             }
         }
-        // Rows set the font themselves: a List does not hand its environment font to them.
-        .font(AppFont.style(.body))
-        .contextMenu { menu }
     }
 
     private var header: some View {
@@ -254,11 +319,12 @@ struct TaskRow: View {
             || task.subtasksTotal > 0 || task.attachments > 0 || !task.notes.isEmpty || showsOrigin
         if hasAny {
             HStack(spacing: 8) {
+                if let start = task.start {
+                    Label(L("from ") + Moment.label(start).lowercased(), systemImage: "calendar.badge.clock")
+                }
                 if let due = task.due {
                     Label(Moment.label(due), systemImage: "calendar")
                         .foregroundStyle(task.done == nil && Moment.isOverdue(due) ? .red : .secondary)
-                } else if let start = task.start {
-                    Label(L("from ") + Moment.label(start).lowercased(), systemImage: "calendar.badge.clock")
                 }
                 if task.repeat != nil { Image(systemName: "repeat") }
                 if task.subtasksTotal > 0 {
@@ -318,7 +384,7 @@ struct TaskRow: View {
                         .disabled(task.parentId == nil && task.listId == list.id)
                 }
             }
-            Button(L("Add subtask")) { if !isExpanded { model.toggleExpanded(task.id) } }
+            Button(L("Add subtask")) { model.showSubtasks(task.id) }
             if task.parentId == nil {
                 Button(task.isProject ? L("Turn back into a task") : L("Make it a project")) {
                     model.perform { try $0.setProject(id: task.id, project: !task.isProject) }
@@ -352,13 +418,45 @@ struct SubtaskField: View {
     }
 }
 
-struct FocusAddFieldKey: FocusedValueKey {
-    typealias Value = () -> Void
+/// The card of a task that does not exist yet: ⌘N opens it, Return turns it
+/// into a task and leaves that task's card open, Esc throws it away.
+struct DraftCard: View {
+    @Environment(AppModel.self) private var model
+    @State private var text = ""
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Image(systemName: "circle").font(AppFont.style(.title3)).foregroundStyle(.secondary)
+                TextField(L("New task"), text: $text)
+                    .textFieldStyle(.plain)
+                    .font(AppFont.style(.body))
+                    .focused($focused)
+                    .onSubmit { model.commitDraft(text) }
+                QuickChips(text: text)
+            }
+            Text(L("Return creates the task and keeps it open, Esc cancels."))
+                .font(AppFont.style(.caption))
+                .foregroundStyle(.tertiary)
+                .padding(.leading, 30)
+        }
+        .padding(10)
+        .cardBackground()
+        .onAppear { focused = true }
+        .onExitCommand { model.drafting = false }
+    }
 }
 
-extension FocusedValues {
-    var focusAddField: (() -> Void)? {
-        get { self[FocusAddFieldKey.self] }
-        set { self[FocusAddFieldKey.self] = newValue }
+extension View {
+    /// The outline that sets an open task apart from the rows around it.
+    func cardBackground() -> some View {
+        background {
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color(nsColor: .controlBackgroundColor))
+                .shadow(color: .black.opacity(0.12), radius: 3, y: 1)
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(Color.primary.opacity(0.14))
+        }
     }
 }

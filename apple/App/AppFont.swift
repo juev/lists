@@ -45,4 +45,20 @@ enum AppFont {
         let headline = style == .headline ? Font.Weight.semibold : nil
         return .system(size: size, weight: weight ?? headline ?? .regular, design: design(model.fontDesign))
     }
+
+    /// The same font for AppKit views.
+    @MainActor
+    static func native(_ style: Font.TextStyle) -> NSFont {
+        let model = AppModel.shared
+        let size = NSFont.preferredFont(forTextStyle: base(style)).pointSize * model.textScale
+        let system = NSFont.systemFont(ofSize: size)
+        let design: NSFontDescriptor.SystemDesign
+        switch model.fontDesign {
+        case "rounded": design = .rounded
+        case "serif": design = .serif
+        case "monospaced": design = .monospaced
+        default: return system
+        }
+        return system.fontDescriptor.withDesign(design).flatMap { NSFont(descriptor: $0, size: size) } ?? system
+    }
 }

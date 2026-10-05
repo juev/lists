@@ -30,11 +30,17 @@ Only the title is required. A task can also have notes, a start date, a due date
 - **Tags** are created by typing them. A tag that no task carries disappears from the sidebar.
 - **Attachments** are files and images in any number. Once downloaded to a device they open without a network. With CalDAV sync, attachments up to 5 MB are synced.
 
-On macOS a task opens in place in the list; on Android it opens as a bottom sheet over the list. Empty fields take no room: they are added from the "+" button.
+On macOS a task opens in place in the list as an outlined card; on Android it opens as a bottom sheet over the list. The card always shows the start date and the due date. Other empty fields take no room: they are added from the "+" button.
+
+On macOS ⌘N opens the card of a new task right in the list: type the title, press Return, and the task is created with its card left open and the cursor in the notes. The field at the bottom of the list stays for entering several tasks in a row.
+
+Return in the notes starts a new line and Esc finishes editing. Settings → New tasks can turn that around: Return finishes, ⌥Return starts a new line.
 
 Deleting and completing can be undone: ⌘Z on macOS, the Undo bar on Android. Only emptying the trash asks for confirmation.
 
 ## Subtasks and projects
+
+On macOS subtasks stay folded behind a "Subtasks 1/3" line in the open card, and a task without subtasks does not mention them: add the first one from the "+" button or the context menu.
 
 A subtask is a full task with its own dates, priority, repeat, attachments and subtasks. Completing a task completes its open subtasks; reopening it leaves them as they are. A subtask with its own due date shows up in Today and Upcoming with the name of its parent. A subtask can be moved to another parent or made a task of its own.
 
@@ -65,6 +71,8 @@ One line becomes a task. Recognized parts are removed from the title and shown a
 
 Dates are understood in English and in Russian. Example: `buy milk tomorrow 18:30 !! #home @Shopping` creates "buy milk" due tomorrow at 18:30 with medium priority and the tag "home" in the list Shopping.
 
+On macOS, Settings → New tasks chooses the list a task goes to when neither the line nor the view names one: Inbox, the list used last, or a fixed list.
+
 Where the entry field is:
 
 - **macOS**: the main window (⌘N); a global hotkey that opens a small window over any app (⌃⌥Space by default, changeable in Settings); the menu bar item, which also lists today's tasks; the share extension; the Services menu; the `lists://add?text=…` URL.
@@ -94,7 +102,7 @@ Edits are saved locally at once. Two devices that change different fields of one
 Each device has its own notification settings, and they do not sync:
 
 - whether to show notifications at all;
-- how long before a timed due date to remind: off, at the time, from 5 minutes to a day before;
+- how long before a timed due date to remind: at the time, from 5 minutes to a day before. On macOS several can be on at once, for example a day before and again 15 minutes before;
 - at what time to remind about tasks due on a day;
 - an optional summary of the day and its time;
 - on macOS, the sound.
@@ -105,7 +113,7 @@ A reminder set on a task itself replaces the one derived from its due date. The 
 
 | Keys | Action |
 |---|---|
-| ⌘N | new task |
+| ⌘N | new task, as a card in the list |
 | ↑ ↓ | select |
 | Enter | open the selected task |
 | Space or ⌘Enter | complete |

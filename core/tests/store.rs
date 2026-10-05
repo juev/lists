@@ -818,7 +818,7 @@ fn derived_tables_are_rebuilt_when_their_shape_changes() {
 fn notify() -> NotifySettings {
     NotifySettings {
         enabled: true,
-        lead_minutes: Some(15),
+        lead_minutes: vec![15],
         all_day_at: Some("09:00".into()),
         summary_at: None,
     }
@@ -872,7 +872,7 @@ fn notifications_follow_reminders_due_dates_and_settings() {
     // Each kind of derived reminder can be turned off; a task's own reminder stays.
     assert_eq!(
         plan(NotifySettings {
-            lead_minutes: None,
+            lead_minutes: vec![],
             all_day_at: None,
             ..notify()
         })
@@ -881,7 +881,7 @@ fn notifications_follow_reminders_due_dates_and_settings() {
     );
     assert_eq!(
         plan(NotifySettings {
-            lead_minutes: Some(0),
+            lead_minutes: vec![0],
             ..notify()
         })[0]
             .1,
@@ -892,10 +892,29 @@ fn notifications_follow_reminders_due_dates_and_settings() {
         ..notify()
     })
     .is_empty());
+    // Several lead times give several notifications for one task; those already past are dropped.
+    let several = d
+        .planned_notifications(NotifySettings {
+            lead_minutes: vec![60, 15, 15, 1440],
+            all_day_at: None,
+            ..notify()
+        })
+        .unwrap()
+        .into_iter()
+        .filter(|n| n.title == "срок со временем")
+        .map(|n| (n.at, n.key.rsplit(':').next().unwrap_or_default().to_string()))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        several,
+        [
+            ("2026-10-05T17:30".to_string(), "60".to_string()),
+            ("2026-10-05T18:15".to_string(), "15".to_string()),
+        ]
+    );
 
     let summary: Vec<(String, u32)> = d
         .planned_notifications(NotifySettings {
-            lead_minutes: None,
+            lead_minutes: vec![],
             all_day_at: None,
             summary_at: Some("08:00".into()),
             ..notify()

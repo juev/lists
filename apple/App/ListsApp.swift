@@ -34,6 +34,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         KeyboardShortcuts.onKeyUp(for: .quickEntry) { QuickEntryPanel.shared.toggle() }
         NSApp.servicesProvider = self
+        #if DEBUG
+        MainActor.assumeIsolated { DebugScript.runIfAsked() }
+        #endif
     }
 
     /// The window can be closed while the menu bar item and the hotkey keep working.
@@ -47,7 +50,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             MainActor.assumeIsolated {
                 switch url.host {
                 case "add":
-                    if let text = value("text") { _ = AppModel.shared.perform { try $0.quickAdd(text: text, listId: nil) } }
+                    if let text = value("text") {
+                        let model = AppModel.shared
+                        _ = model.perform { try $0.quickAdd(text: text, listId: model.defaultListId) }
+                    }
                 case "show":
                     if let id = value("id") { AppModel.shared.reveal(id) }
                 default: break
@@ -61,8 +67,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let text = pboard.string(forType: .string)?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { return }
         let lines = text.split(separator: "\n", maxSplits: 1).map(String.init)
         MainActor.assumeIsolated {
-            _ = AppModel.shared.perform { store in
-                let task = try store.createTask(new: NewTask(title: String(lines[0].prefix(200))))
+            let model = AppModel.shared
+            _ = model.perform { store in
+                let task = try store.createTask(new: NewTask(title: String(lines[0].prefix(200)), listId: model.defaultListId))
                 if lines.count > 1 || lines[0].count > 200 { try store.setNotes(id: task.id, notes: text) }
             }
         }
@@ -71,15 +78,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 struct AppCommands: Commands {
     let model: AppModel
-    @FocusedValue(\.focusAddField) private var focusAddField
     @Environment(\.openWindow) private var openWindow
 
     private var selected: TaskItem? { model.selectedTask }
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
-            Button(L("New task")) { focusAddField?() }
-                .keyboardShortcut("n")
+            Button(L("New task")) {
+                openWindow(id: "main")
+                model.startDraft()
+            }
+            .keyboardShortcut("n")
             Button(L("Quick Entry")) { QuickEntryPanel.shared.present() }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
             Divider()
@@ -185,6 +194,16 @@ struct SettingsView: View {
 
     private enum Kind: Hashable { case off, webdav, caldav, folder }
     private static let times = ["07:00", "08:00", "09:00", "10:00", "12:00", "18:00", "20:00"]
+    private static let leads = [0, 5, 15, 30, 60, 120, 1440]
+
+    private static func leadTitle(_ minutes: Int) -> String {
+        switch minutes {
+        case 0: return L("At the due time")
+        case 1440: return L("A day before")
+        case let m where m < 60: return L("%@ min before", "\(m)")
+        default: return L("%@ h before", "\(minutes / 60)")
+        }
+    }
 
     @State private var kind = Kind.off
     @State private var url = ""
@@ -207,12 +226,20 @@ struct SettingsView: View {
             Section(L("Notifications")) {
                 @Bindable var model = model
                 Toggle(L("Show notifications"), isOn: $model.notifyEnabled)
-                Picker(L("Task due at a time"), selection: $model.notifyLead) {
-                    Text(L("Off")).tag(-1)
-                    Text(L("At the due time")).tag(0)
-                    ForEach([5, 15, 30, 60, 120, 1440], id: \.self) { minutes in
-                        Text(minutes < 60 ? L("%@ min before", "\(minutes)") : minutes == 1440 ? L("A day before") : L("%@ h before", "\(minutes / 60)")).tag(minutes)
+                // Several can be on at once: a day before and again fifteen minutes before.
+                LabeledContent(L("Task due at a time")) {
+                    Menu {
+                        ForEach(Self.leads, id: \.self) { minutes in
+                            Toggle(Self.leadTitle(minutes), isOn: Binding(
+                                get: { model.notifyLeads.contains(minutes) },
+                                set: { if $0 { model.notifyLeads.insert(minutes) } else { model.notifyLeads.remove(minutes) } }))
+                        }
+                    } label: {
+                        Text(model.notifyLeads.isEmpty
+                            ? L("Off")
+                            : model.notifyLeads.sorted().map(Self.leadTitle).joined(separator: ", "))
                     }
+                    .fixedSize()
                 }
                 Picker(L("Task due on a day"), selection: $model.notifyAllDay) {
                     Text(L("Off")).tag("")
@@ -224,6 +251,25 @@ struct SettingsView: View {
                 }
                 Toggle(L("Play a sound"), isOn: $model.notifySound)
                 Text(L("A reminder set on a task is always shown. These settings apply to this Mac only."))
+                    .font(AppFont.style(.caption)).foregroundStyle(.secondary)
+            }
+            Section(L("New tasks")) {
+                @Bindable var model = model
+                Picker(L("Default list"), selection: $model.newTaskList) {
+                    Text(L("Inbox")).tag("inbox")
+                    Text(L("Last used list")).tag("last")
+                    Divider()
+                    ForEach(model.lists.filter { !$0.archived && $0.id != "inbox" }, id: \.id) { Text($0.name).tag($0.id) }
+                }
+                Text(L("Used by quick entry and by views that show several lists, such as Today."))
+                    .font(AppFont.style(.caption)).foregroundStyle(.secondary)
+                Picker(L("Return in the notes"), selection: $model.returnAddsLine) {
+                    Text(L("Starts a new line")).tag(true)
+                    Text(L("Finishes editing")).tag(false)
+                }
+                Text(model.returnAddsLine
+                    ? L("Esc finishes editing.")
+                    : L("⌥Return starts a new line."))
                     .font(AppFont.style(.caption)).foregroundStyle(.secondary)
             }
             Section(L("Quick Entry")) {

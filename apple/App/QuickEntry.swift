@@ -36,14 +36,18 @@ struct QuickEntryField: View {
                 .controlSize(.small)
             }
         }
-        .onAppear { focused = true }
+        .onAppear {
+            listId = model.defaultListId
+            focused = true
+        }
         .onExitCommand(perform: onDone)
     }
 
     private func save() {
         let line = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !line.isEmpty else { return onDone() }
-        if model.perform({ try $0.quickAdd(text: line, listId: listId) }) != nil {
+        if let task = model.perform({ try $0.quickAdd(text: line, listId: listId) }) {
+            model.noteUsedList(task.listId)
             text = ""
             onDone()
         }
@@ -91,6 +95,19 @@ final class QuickEntryPanel: NSPanel {
             setFrameOrigin(NSPoint(x: frame.midX - self.frame.width / 2, y: frame.minY + frame.height * 0.68))
         }
         makeKeyAndOrderFront(nil)
+        // SwiftUI asks for focus when the view appears, which is before the
+        // panel is the key window, and the request is dropped. Hand the
+        // keyboard to the field once the panel has it.
+        DispatchQueue.main.async { [weak self] in self?.focusField() }
+    }
+
+    private func focusField() {
+        contentView?.layoutSubtreeIfNeeded()
+        func field(in view: NSView) -> NSTextField? {
+            if let found = view as? NSTextField, found.isEditable { return found }
+            return view.subviews.lazy.compactMap(field(in:)).first
+        }
+        if let target = contentView.flatMap(field(in:)) { makeFirstResponder(target) }
     }
 
     override func resignKey() {

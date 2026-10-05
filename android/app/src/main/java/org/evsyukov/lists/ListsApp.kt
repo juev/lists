@@ -130,7 +130,7 @@ object NotifyPrefs {
 
     fun settings(context: Context) = NotifySettings(
         enabled = enabled(context),
-        leadMinutes = lead(context).takeIf { it >= 0 }?.toUInt(),
+        leadMinutes = listOfNotNull(lead(context).takeIf { it >= 0 }?.toUInt()),
         allDayAt = allDay(context).ifEmpty { null },
         summaryAt = summary(context).ifEmpty { null },
     )

@@ -25,12 +25,18 @@ final class AppModel {
     var filters: [SavedFilter] = []
     var counts = Counts(inbox: 0, today: 0, overdue: 0, upcoming: 0, trash: 0)
 
-    var scope: Scope = .today { didSet { if scope != oldValue { expanded.removeAll(); selection = nil; reload() } } }
+    var scope: Scope = .today { didSet { if scope != oldValue { expanded.removeAll(); subtasksShown.removeAll(); drafting = false; selection = nil; reload() } } }
     var search = "" { didSet { if search != oldValue { reload() } } }
     var sections: [TaskSection] = []
     var children: [String: [TaskItem]] = [:]
     var expanded: Set<String> = []
+    /// Expanded tasks whose subtasks are on show; they stay folded until asked for.
+    var subtasksShown: Set<String> = []
     var selection: String?
+    /// True while the card of a task that does not exist yet is open (⌘N).
+    var drafting = false
+    /// The task whose notes take the keyboard as soon as its card appears.
+    var focusNotes: String?
 
     var syncStatus = SyncStatus(configured: false, pending: 0, lastOk: nil, lastError: nil)
     var syncing = false
@@ -47,8 +53,8 @@ final class AppModel {
 
     // Notification settings of this Mac; not synced.
     var notifyEnabled: Bool = UserDefaults.standard.object(forKey: "notifyEnabled") as? Bool ?? true { didSet { saveNotify() } }
-    /// Minutes before a timed due date; -1 turns these reminders off.
-    var notifyLead: Int = UserDefaults.standard.object(forKey: "notifyLead") as? Int ?? 15 { didSet { saveNotify() } }
+    /// Minutes before a timed due date, one notification for each; empty turns these reminders off.
+    var notifyLeads: Set<Int> = AppModel.storedLeads() { didSet { saveNotify() } }
     /// `HH:MM`, empty for off.
     var notifyAllDay: String = UserDefaults.standard.string(forKey: "notifyAllDay") ?? "09:00" { didSet { saveNotify() } }
     var notifySummary: String = UserDefaults.standard.string(forKey: "notifySummary") ?? "" { didSet { saveNotify() } }
@@ -57,7 +63,7 @@ final class AppModel {
     var notifySettings: NotifySettings {
         NotifySettings(
             enabled: notifyEnabled,
-            leadMinutes: notifyLead < 0 ? nil : UInt32(notifyLead),
+            leadMinutes: notifyLeads.sorted().map(UInt32.init),
             allDayAt: notifyAllDay.isEmpty ? nil : notifyAllDay,
             summaryAt: notifySummary.isEmpty ? nil : notifySummary)
     }
@@ -65,11 +71,39 @@ final class AppModel {
     private func saveNotify() {
         let defaults = UserDefaults.standard
         defaults.set(notifyEnabled, forKey: "notifyEnabled")
-        defaults.set(notifyLead, forKey: "notifyLead")
+        defaults.set(notifyLeads.sorted(), forKey: "notifyLeads")
         defaults.set(notifyAllDay, forKey: "notifyAllDay")
         defaults.set(notifySummary, forKey: "notifySummary")
         defaults.set(notifySound, forKey: "notifySound")
         Reminders.shared.refresh(store, settings: notifySettings, sound: notifySound)
+    }
+
+    /// Before several lead times were allowed there was one, kept under `notifyLead`.
+    private static func storedLeads() -> Set<Int> {
+        let defaults = UserDefaults.standard
+        if let leads = defaults.array(forKey: "notifyLeads") as? [Int] { return Set(leads) }
+        if let lead = defaults.object(forKey: "notifyLead") as? Int { return lead < 0 ? [] : [lead] }
+        return [15]
+    }
+
+    // Editing habits of this Mac; not synced.
+    /// Where a new task goes when the view does not say: `inbox`, `last` or a list id.
+    var newTaskList: String = UserDefaults.standard.string(forKey: "newTaskList") ?? "inbox" {
+        didSet { UserDefaults.standard.set(newTaskList, forKey: "newTaskList") }
+    }
+    /// Return in the notes starts a new line (Esc finishes); otherwise it finishes editing and ⌥Return starts a line.
+    var returnAddsLine: Bool = UserDefaults.standard.object(forKey: "returnAddsLine") == nil || UserDefaults.standard.bool(forKey: "returnAddsLine") {
+        didSet { UserDefaults.standard.set(returnAddsLine, forKey: "returnAddsLine") }
+    }
+
+    /// The list for a task entered where no list is implied: quick entry, Today, a tag.
+    var defaultListId: String {
+        let id = newTaskList == "last" ? UserDefaults.standard.string(forKey: "lastUsedList") ?? "inbox" : newTaskList
+        return lists.contains { $0.id == id && !$0.archived } ? id : "inbox"
+    }
+
+    func noteUsedList(_ id: String) {
+        UserDefaults.standard.set(id, forKey: "lastUsedList")
     }
 
     @ObservationIgnored private var syncDebounce: DispatchWorkItem?
@@ -133,9 +167,12 @@ final class AppModel {
     }
 
     /// The list a task created in the current view goes to.
-    var targetListId: String? {
-        if case .list(let id) = scope { return id }
-        return nil
+    var targetListId: String {
+        switch scope {
+        case .inbox: return "inbox"
+        case .list(let id): return id
+        default: return defaultListId
+        }
     }
 
     /// Manual reordering makes sense only where the order shown is the stored one.
@@ -248,8 +285,54 @@ final class AppModel {
             if case .tag(let name) = scope {
                 try store.addTag(id: task.id, tag: name)
             }
+            noteUsedList(task.listId)
             return task
         }
+    }
+
+    /// Opens the card for a task that is yet to be typed.
+    func startDraft() {
+        search = ""
+        switch scope {
+        case .completed, .trash: scope = .inbox
+        default: break
+        }
+        drafting = true
+    }
+
+    /// Turns the draft card into a task and leaves its card open for the rest of the fields.
+    func commitDraft(_ text: String) {
+        drafting = false
+        guard let task = add(text) else { return }
+        if selectedOrVisible(task.id) == nil { reveal(task.id) }
+        expanded.insert(task.id)
+        selection = task.id
+        focusNotes = task.id
+        reload()
+    }
+
+    private func selectedOrVisible(_ id: String) -> TaskItem? {
+        allTasks.first { $0.id == id }
+    }
+
+    func showSubtasks(_ id: String) {
+        expanded.insert(id)
+        subtasksShown.insert(id)
+        reload()
+    }
+
+    func toggleSubtasks(_ id: String) {
+        if subtasksShown.contains(id) { subtasksShown.remove(id) } else { subtasksShown.insert(id) }
+    }
+
+    /// A project is its subtasks, so they are on show without asking.
+    func showsSubtasks(_ task: TaskItem) -> Bool {
+        task.isProject || subtasksShown.contains(task.id)
+    }
+
+    func collapse(_ id: String) {
+        expanded.remove(id)
+        reload()
     }
 
     func toggleDone(_ task: TaskItem) {
@@ -292,6 +375,7 @@ final class AppModel {
             task = next
         }
         expanded.formUnion(path)
+        subtasksShown.formUnion(path.dropFirst())
         selection = id
         reload()
     }
@@ -304,7 +388,9 @@ final class AppModel {
     /// Rows in the order they are drawn: each task followed by its expanded subtree.
     private var visibleIds: [String] {
         func walk(_ tasks: [TaskItem]) -> [String] {
-            tasks.flatMap { task in [task.id] + (expanded.contains(task.id) ? walk(children[task.id] ?? []) : []) }
+            tasks.flatMap { task in
+                [task.id] + (expanded.contains(task.id) && showsSubtasks(task) ? walk(children[task.id] ?? []) : [])
+            }
         }
         return walk(allTasks)
     }
@@ -341,6 +427,7 @@ final class AppModel {
         guard let index = siblings.firstIndex(where: { $0.id == task.id }), index > 0 else { return }
         let parent = siblings[index - 1]
         expanded.insert(parent.id)
+        subtasksShown.insert(parent.id)
         perform { store in
             let last = try store.subtasks(parentId: parent.id).last?.id
             try store.moveTask(id: task.id, listId: nil, parentId: parent.id, after: last)
