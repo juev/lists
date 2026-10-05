@@ -21,7 +21,7 @@ env:
 jobs:
   check:
     name: Checks
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
@@ -50,7 +50,7 @@ jobs:
   android:
     name: Android APK
     needs: check
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       NDK_VERSION: 28.2.13676358
       VERSION: ${{ needs.check.outputs.version }}
@@ -199,7 +199,7 @@ jobs:
       matrix:
         include:
           - arch: amd64
-            runner: ubuntu-latest
+            runner: ubuntu-24.04
           - arch: arm64
             runner: ubuntu-24.04-arm
     steps:
@@ -245,7 +245,7 @@ jobs:
     name: Docker manifest
     if: github.event_name == 'push'
     needs: [image, android, macos]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       packages: write
@@ -287,7 +287,7 @@ jobs:
     name: GitHub release
     if: github.event_name == 'push'
     needs: [check, android, macos, manifest]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     env:
