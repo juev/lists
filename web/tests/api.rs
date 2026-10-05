@@ -16,6 +16,7 @@ fn web(password: Option<&str>) -> Web {
         data_dir: dir.path().to_string_lossy().into_owned(),
         listen: "127.0.0.1:0".into(),
         password: password.map(str::to_string),
+        oidc: None,
         sync: SyncConfig::Off,
         sync_password: None,
     })

@@ -57,7 +57,16 @@ LISTS_SYNC=webdav LISTS_SYNC_URL=https://… LISTS_SYNC_USER=… LISTS_SYNC_PASS
 web/target/release/lists-web
 ```
 
-Without `LISTS_WEB_PASSWORD` the server only accepts a loopback address. Put it behind a reverse proxy that terminates TLS; the login is a password and a session cookie. All settings are listed at the top of `web/src/main.rs`.
+There are two ways to sign in, usable together: a password (`LISTS_WEB_PASSWORD`) and an OpenID Connect provider such as Keycloak, Authentik or Authelia:
+
+```sh
+LISTS_OIDC_ISSUER=https://id.example.org/realms/home \
+LISTS_OIDC_CLIENT_ID=lists LISTS_OIDC_CLIENT_SECRET=… \
+LISTS_OIDC_ALLOW=me@example.org \
+LISTS_WEB_URL=https://lists.example.org
+```
+
+Register `<LISTS_WEB_URL>/auth/callback` as the redirect address. The flow is authorization code with PKCE; only the addresses (or subject ids) in `LISTS_OIDC_ALLOW` are let in, and the variable is required. Without any login the server only accepts a loopback address. Put it behind a reverse proxy that terminates TLS. All settings are listed at the top of `web/src/main.rs`.
 
 ## Sync
 
@@ -90,7 +99,7 @@ One line becomes a task: `отчёт в пятницу 10:00 !! #работа @�
 
 ## Status
 
-Version 0.1.0. What is implemented and how each part was checked is listed at the end of [docs/specs/product.md](docs/specs/product.md). Known gaps: no iOS app (the web interface covers the phone), the web login is a single password without OIDC, no encryption of the data in the storage, and manual reordering on Android is not there. The WebDAV password is kept in the macOS keychain and, on Android, encrypted with a key from the Android Keystore; it is never written to the database.
+Version 0.1.0. What is implemented and how each part was checked is listed at the end of [docs/specs/product.md](docs/specs/product.md). Known gaps: no iOS app (the web interface covers the phone), no encryption of the data in the storage, and manual reordering on Android is not there. The WebDAV password is kept in the macOS keychain and, on Android, encrypted with a key from the Android Keystore; it is never written to the database.
 
 ## License
 

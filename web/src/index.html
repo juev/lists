@@ -103,7 +103,7 @@ const RU = {
   "waiting": "ожидает отправки", "Deleted": "Удалено", "Undo": "Отменить", "Task completed": "Выполнено", "Moved to the next occurrence": "Перенесено на следующий повтор",
   "downloads on the next sync": "загрузится при синхронизации", "from": "с", "Delete list": "Удалить список", "Delete this list and move its tasks to the trash?": "Удалить список и отправить его задачи в корзину?",
   "Sort": "Сортировка", "Manually": "Вручную", "By due date": "По сроку", "By priority": "По приоритету", "By title": "По названию", "Rename": "Переименовать", "time": "время",
-  "Import…": "Импорт…", "tasks": "задач", "attachments": "вложений",
+  "Sign in with single sign-on": "Войти через единый вход", "Import…": "Импорт…", "tasks": "задач", "attachments": "вложений",
   "Projects": "Проекты", "Filters": "Фильтры", "New filter": "Новый фильтр", "Make it a project": "Сделать проектом", "Turn back into a task": "Сделать обычной задачей",
   "Filter": "Фильтр", "Date": "Дата", "Any": "Любой", "The coming days": "Ближайшие дни", "No date": "Без даты", "Days": "Дней", "Priority at least": "Приоритет не ниже",
   "Status": "Состояние", "Open": "В работе", "Contains": "Содержит", "Save": "Сохранить", "Cancel": "Отмена", "Delete filter": "Удалить фильтр", "Edit": "Изменить",
@@ -380,15 +380,18 @@ function render() {
       readOnly() || state.filterEdit || state.scope.startsWith("filter:") ? null : $("div", { id: "add" }, $("span", { style: "color:var(--muted)" }, "+"), add))));
 }
 
-function showLogin() {
+async function showLogin() {
+  const methods = await fetch("/auth/methods").then(r => r.json()).catch(() => ({ password: true, oidc: false }));
   const input = $("input", { type: "password", placeholder: t("Password"), autocomplete: "current-password" });
   const form = $("form", { id: "login", onsubmit: async e => {
     e.preventDefault();
     const res = await fetch("/api/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: input.value }) });
     if (res.ok) load(); else { toast(t("Wrong password")); input.select(); }
-  } }, $("h1", { style: "margin:0" }, "Lists"), input, $("button", {}, t("Sign in")));
+  } }, $("h1", { style: "margin:0" }, "Lists"),
+    methods.password ? [input, $("button", {}, t("Sign in"))] : null,
+    methods.oidc ? $("a", { href: "/auth/login", style: "text-align:center;padding:10px 12px;border-radius:10px;border:1px solid var(--line);color:inherit;text-decoration:none" }, t("Sign in with single sign-on")) : null);
   root.replaceChildren(form);
-  input.focus();
+  if (methods.password) input.focus();
 }
 
 // The address keeps the place: `#scope=today&open=<task id>` survives a reload and can be bookmarked.

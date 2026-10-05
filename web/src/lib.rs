@@ -5,12 +5,16 @@
 //! WebDAV or CalDAV server on another origin, so this is what makes Lists
 //! reachable from a phone without a native app.
 
-use std::collections::HashSet;
+mod oidc;
+
+use std::collections::HashMap;
 use std::io::Read;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+pub use oidc::OidcConfig;
 
 use lists_core::{
     AppError, Attachment, FilterSpec, NewTask, Priority, Repeat, Scope, SortMode, Store, SyncConfig, TaskItem, TaskList,
@@ -25,6 +29,7 @@ const ICON: &str = include_str!("icon.svg");
 const COOKIE: &str = "lists_session";
 /// Request bodies above this are refused; it bounds one uploaded attachment.
 const MAX_BODY: usize = 64 * 1024 * 1024;
+const SESSION_TTL: Duration = Duration::from_secs(30 * 24 * 3600);
 
 pub struct Config {
     pub data_dir: String,
@@ -32,6 +37,8 @@ pub struct Config {
     /// Password for the web interface. `None` disables the login and is only
     /// accepted by `main` on a loopback address.
     pub password: Option<String>,
+    /// Sign-in through an OpenID Connect provider, alone or next to the password.
+    pub oidc: Option<OidcConfig>,
     pub sync: SyncConfig,
     pub sync_password: Option<String>,
 }
@@ -39,7 +46,9 @@ pub struct Config {
 struct App {
     store: Arc<Store>,
     password: Option<String>,
-    sessions: Mutex<HashSet<String>>,
+    oidc: Option<oidc::Oidc>,
+    /// Session token → when it stops being valid.
+    sessions: Mutex<HashMap<String, Instant>>,
     /// Set by a change, cleared by the sync thread.
     dirty: AtomicBool,
 }
@@ -65,6 +74,21 @@ fn reply(code: u16, content_type: &str, body: impl Into<Vec<u8>>) -> Reply {
 
 fn json_reply(code: u16, value: Value) -> Reply {
     reply(code, "application/json; charset=utf-8", value.to_string())
+}
+
+/// A minimal page for the sign-in round trip: on success it goes to the app,
+/// otherwise it says why not. The message is escaped; nothing else is dynamic.
+fn page(code: u16, message: &str) -> Reply {
+    let safe = message.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
+    let body = if code == 200 {
+        "<!doctype html><meta charset=utf-8><title>Lists</title><script>location.replace('/')</script>".to_string()
+    } else {
+        format!("<!doctype html><meta charset=utf-8><title>Lists</title><body style=\"font:16px sans-serif;margin:15vh auto;max-width:420px\"><h1>Lists</h1><p>{safe}</p><p><a href=\"/\">Back</a></p>")
+    };
+    reply(code, "text/html; charset=utf-8", body).with_header(header(
+        "Content-Security-Policy",
+        "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'",
+    ))
 }
 
 fn fail(code: u16, message: impl Into<String>) -> Reply {
@@ -346,15 +370,29 @@ impl App {
             .find(|(k, _)| *k == COOKIE)?
             .1
             .to_string();
+        let mut sessions = self.sessions.lock().unwrap_or_else(|p| p.into_inner());
+        sessions.retain(|_, until| *until > Instant::now());
+        sessions.contains_key(&token).then_some(token)
+    }
+
+    /// Starts a session and returns the cookie that carries it.
+    fn open_session(&self) -> Header {
+        let token = format!("{}{}", uuid::Uuid::new_v4().simple(), uuid::Uuid::new_v4().simple());
         self.sessions
             .lock()
             .unwrap_or_else(|p| p.into_inner())
-            .contains(&token)
-            .then_some(token)
+            .insert(token.clone(), Instant::now() + SESSION_TTL);
+        header(
+            "Set-Cookie",
+            &format!(
+                "{COOKIE}={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age={}",
+                SESSION_TTL.as_secs()
+            ),
+        )
     }
 
     fn authorized(&self, request: &Request) -> bool {
-        self.password.is_none() || self.session(request).is_some()
+        (self.password.is_none() && self.oidc.is_none()) || self.session(request).is_some()
     }
 
     fn body(request: &mut Request) -> Result<Vec<u8>, Reply> {
@@ -392,18 +430,40 @@ impl App {
                     Err(r) => return r,
                 };
                 let given = serde_json::from_slice::<Value>(&body).ok().and_then(|v| v.get("password").and_then(Value::as_str).map(str::to_string));
-                let expected = self.password.clone().unwrap_or_default();
-                if self.password.is_some() && !given.is_some_and(|g| same_secret(&g, &expected)) {
-                    // Slows down guessing; the lock on nothing keeps it per connection.
+                let correct = match (&self.password, given) {
+                    (Some(expected), Some(given)) => same_secret(&given, expected),
+                    // No password is set: open only when there is no other way in to guard.
+                    (None, _) => self.oidc.is_none(),
+                    _ => false,
+                };
+                if !correct {
+                    // Slows down guessing.
                     std::thread::sleep(Duration::from_millis(800));
                     return fail(401, "wrong password");
                 }
-                let token = format!("{}{}", uuid::Uuid::new_v4().simple(), uuid::Uuid::new_v4().simple());
-                self.sessions.lock().unwrap_or_else(|p| p.into_inner()).insert(token.clone());
-                return json_reply(200, json!({ "ok": true })).with_header(header(
-                    "Set-Cookie",
-                    &format!("{COOKIE}={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=2592000"),
-                ));
+                return json_reply(200, json!({ "ok": true })).with_header(self.open_session());
+            }
+            (Method::Get, "/auth/methods") => {
+                return json_reply(200, json!({ "password": self.password.is_some(), "oidc": self.oidc.is_some() }));
+            }
+            (Method::Get, "/auth/login") => {
+                return match self.oidc.as_ref().map(|o| o.begin()) {
+                    Some(Ok(location)) => reply(302, "text/plain", "").with_header(header("Location", &location)),
+                    Some(Err(e)) => page(502, &e),
+                    None => fail(404, "not found"),
+                };
+            }
+            (Method::Get, "/auth/callback") => {
+                let Some(oidc) = &self.oidc else {
+                    return fail(404, "not found");
+                };
+                let (state, code) = (query(&url, "state").unwrap_or_default(), query(&url, "code").unwrap_or_default());
+                return match oidc.finish(&state, &code) {
+                    // A page, not a redirect: the cookie is SameSite=Strict and this
+                    // request arrived from the provider's site.
+                    Ok(_) => page(200, "").with_header(self.open_session()),
+                    Err(e) => page(403, &e),
+                };
             }
             _ => {}
         }
@@ -559,7 +619,8 @@ pub fn start(config: Config) -> Result<Running, Box<dyn std::error::Error>> {
     let app = Arc::new(App {
         store,
         password: config.password,
-        sessions: Mutex::new(HashSet::new()),
+        oidc: config.oidc.map(oidc::Oidc::new).transpose()?,
+        sessions: Mutex::new(HashMap::new()),
         dirty: AtomicBool::new(true),
     });
 

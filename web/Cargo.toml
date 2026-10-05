@@ -7,14 +7,15 @@ description = "Self-hosted web interface for Lists: one more device in the sync,
 
 [dependencies]
 lists-core = { path = "../core" }
+base64 = "0.22"
 serde_json = "1"
 sha2 = "0.10"
 tiny_http = "0.12"
+ureq = { version = "2.12", default-features = false, features = ["tls", "json"] }
 uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
 tempfile = "3"
-ureq = { version = "2.12", default-features = false, features = ["json"] }
 
 [profile.release]
 opt-level = "s"
