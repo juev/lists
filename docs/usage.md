@@ -32,9 +32,9 @@ Only the title is required. A task can also have notes, a start date, a due date
 
 On macOS a task opens in place in the list as an outlined card; on Android it opens as a bottom sheet over the list. The card always shows the start date and the due date. Other empty fields take no room: they are added from the "+" button.
 
-On macOS ⌘N opens the card of a new task right in the list: type the title, press Return, and the task is created with its card left open and the cursor in the notes. The field at the bottom of the list stays for entering several tasks in a row.
+On macOS ⌘N, or the "+" button in the toolbar, opens the card of a new task right in the list with every field at hand: title, notes, start date, due date, priority, tags and list. Return in the title creates the task. Esc creates it when it has a title and drops an empty card.
 
-Return in the notes starts a new line and Esc finishes editing. Settings → New tasks can turn that around: Return finishes, ⌥Return starts a new line.
+Return in the notes starts a new line and Esc finishes editing. Settings → New tasks can turn that around: Return finishes, ⌥Return starts a new line. ⌘S and ⌘D open the start date and the due date from anywhere in the card; the calendar takes the arrow keys, and Return confirms.
 
 Deleting and completing can be undone: ⌘Z on macOS, the Undo bar on Android. Only emptying the trash asks for confirmation.
 
@@ -58,7 +58,7 @@ On Android the end date of a repeat cannot be set; the web interface offers the 
 
 ## Quick entry
 
-One line becomes a task. Recognized parts are removed from the title and shown as chips before saving; each chip can be dismissed.
+One line becomes a task. Recognized parts are removed from the title and shown as chips before saving. Nothing has to be typed as text, though: the quick-entry window carries the same fields as the task card, and a value set in a field wins over one read from the title. Recognition can be turned off in Settings; the title is then kept as typed.
 
 | Typed | Meaning |
 |---|---|
@@ -71,17 +71,17 @@ One line becomes a task. Recognized parts are removed from the title and shown a
 
 Dates are understood in English and in Russian. Example: `buy milk tomorrow 18:30 !! #home @Shopping` creates "buy milk" due tomorrow at 18:30 with medium priority and the tag "home" in the list Shopping.
 
-On macOS, Settings → New tasks chooses the list a task goes to when neither the line nor the view names one: Inbox, the list used last, or a fixed list.
+Settings → New tasks (Settings in the drawer on Android) chooses the list a task goes to when neither the line nor the view names one: Inbox, the list used last, or a fixed list.
 
 Where the entry field is:
 
-- **macOS**: the main window (⌘N); a global hotkey that opens a small window over any app (⌃⌥Space by default, changeable in Settings); the menu bar item, which also lists today's tasks; the share extension; the Services menu; the `lists://add?text=…` URL.
+- **macOS**: the card in the main window (⌘N); a global hotkey that opens a small window over any app (⌃⌥Space by default, changeable in Settings); the menu bar item, which also lists today's tasks; the share extension; the Services menu; the `lists://add?text=…` URL.
 - **Android**: the bar at the bottom of the main screen; a small window over the current app from Share, from the text-selection menu, from the launcher shortcut and from the quick settings tile.
 - **Web**: the New task field in the task list.
 
 ## Saved filters
 
-A filter is a named view with conditions that must all hold: date (any, overdue, today, the next N days including overdue, no date), lists, tags (all of the chosen ones), a minimum priority, state (open, completed, all) and words in the title or notes. Four come ready: Next 7 days, Overdue, High priority, No date.
+A filter is made with the "+" next to Filters in the sidebar on macOS (or File → New Filter…), with New filter in the drawer on Android, and from the sidebar in the web interface. It is a named view with conditions that must all hold: date (any, overdue, today, the next N days including overdue, no date), lists, tags (all of the chosen ones), a minimum priority, state (open, completed, all) and words in the title or notes. Four come ready: Next 7 days, Overdue, High priority, No date.
 
 Filters sync like the rest of the data. Over CalDAV they are kept in a property of the Inbox calendar and are lost on servers that do not store such properties.
 
@@ -102,7 +102,7 @@ Edits are saved locally at once. Two devices that change different fields of one
 Each device has its own notification settings, and they do not sync:
 
 - whether to show notifications at all;
-- how long before a timed due date to remind: at the time, from 5 minutes to a day before. On macOS several can be on at once, for example a day before and again 15 minutes before;
+- how long before a timed due date to remind: at the time, from 5 minutes to a day before. Several can be on at once, for example a day before and again 15 minutes before;
 - at what time to remind about tasks due on a day;
 - an optional summary of the day and its time;
 - on macOS, the sound.
@@ -114,6 +114,7 @@ A reminder set on a task itself replaces the one derived from its due date. The 
 | Keys | Action |
 |---|---|
 | ⌘N | new task, as a card in the list |
+| ⌘S and ⌘D | start date and due date of the open card |
 | ↑ ↓ | select |
 | Enter | open the selected task |
 | Space or ⌘Enter | complete |
