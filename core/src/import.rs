@@ -107,6 +107,36 @@ fn twodo_date(seconds: f64, time_of_day: f64) -> Option<String> {
     Some(date.format("%Y-%m-%d").to_string())
 }
 
+/// The repeat rule of a 2Do task. docs/specs/import.md says which of these
+/// codes were confirmed on real data and which follow 2Do's documentation.
+///
+/// `kind` below 256 is a preset in the order of the Repeat menu; 256 and up is
+/// "every `value` units" with the unit in the low byte. Anything else (chosen
+/// weekdays, the n-th weekday of a month) is not understood and yields `None`.
+fn twodo_repeat(kind: i64, value: i64, mode: i64, end: (i64, i64, f64)) -> Option<Repeat> {
+    let mut out = match kind {
+        1 => rule(Freq::Daily, 1),
+        2 => rule(Freq::Weekly, 1),
+        3 => rule(Freq::Weekly, 2),
+        4 => rule(Freq::Monthly, 1),
+        5 => rule(Freq::Monthly, 3),
+        6 => rule(Freq::Yearly, 1),
+        256..=259 if (1..=999).contains(&value) => {
+            let freq = [Freq::Daily, Freq::Weekly, Freq::Monthly, Freq::Yearly][(kind - 256) as usize];
+            rule(freq, value as u32)
+        }
+        _ => return None,
+    };
+    // 1 counts from the due date, 2 from the completion date.
+    out.from_done = mode == 2;
+    match end {
+        (1, _, date) => out.until = twodo_date(date, -1.0),
+        (2, left, _) if left > 0 => out.count = Some(left as u32),
+        _ => {}
+    }
+    Some(out)
+}
+
 /// A `.2dodb` backup: a zip with `2do.db` (SQLite) and the attachment files.
 fn parse_2do(archive: &Path, work: &Path) -> Result<Parsed> {
     let file = std::fs::File::open(archive)?;
@@ -194,10 +224,11 @@ fn parse_2do(archive: &Path, work: &Path) -> Result<Parsed> {
         }
     }
 
-    let (mut repeats, mut odd_priority) = (0u32, 0u32);
+    let (mut repeats, mut converted, mut odd_priority) = (0u32, 0u32, 0u32);
     let mut stmt = conn.prepare(
         "SELECT uid, calendaruid, title, coalesce(notes, ''), duedate, coalesce(duetime, 999999), startdate, priority,
-                iscompleted, coalesce(completeddate, 0), coalesce(tags, ''), coalesce(parent, ''), tasktype, repeattype, coalesce(url, '')
+                iscompleted, coalesce(completeddate, 0), coalesce(tags, ''), coalesce(parent, ''), tasktype, repeattype, coalesce(url, ''),
+                repeatvalue, recurrence, recurrenceendtype, recurrenceendrepeats, recurrenceenddate
          FROM tasks WHERE isdeleted = 0 ORDER BY displayorder, primid",
     )?;
     let mut rows = stmt.query([])?;
@@ -245,10 +276,22 @@ fn parse_2do(archive: &Path, work: &Path) -> Result<Parsed> {
         let parent: String = r.get(11)?;
         task.parent = (!parent.is_empty()).then_some(parent);
         task.project = r.get::<_, i64>(12)? == 1;
-        if r.get::<_, i64>(13)? != 0 {
-            // The encoding of the rule is not documented and is not guessed here.
-            repeats += 1;
-            task.tags.push("2do-repeat".into());
+        let repeat_type: i64 = r.get(13)?;
+        if repeat_type != 0 {
+            let end = (r.get::<_, i64>(17)?, r.get::<_, i64>(18)?, r.get::<_, f64>(19)?);
+            match twodo_repeat(repeat_type, r.get(15)?, r.get(16)?, end) {
+                Some(rule) => {
+                    converted += 1;
+                    task.repeat = Some(crate::recur::normalized(
+                        rule,
+                        task.due.as_deref().or(task.start.as_deref()),
+                    ));
+                }
+                None => {
+                    repeats += 1;
+                    task.tags.push("2do-repeat".into());
+                }
+            }
         }
         let url: String = r.get(14)?;
         if !url.is_empty() && !task.notes.contains(&url) {
@@ -257,8 +300,13 @@ fn parse_2do(archive: &Path, work: &Path) -> Result<Parsed> {
         task.key = uid;
         out.tasks.push(task);
     }
+    if converted > 0 {
+        out.notes.push(format!("{converted} repeat rules were converted."));
+    }
     if repeats > 0 {
-        out.notes.push(format!("{repeats} repeating tasks were imported without their repeat rule and tagged #2do-repeat: set the repeat again."));
+        out.notes.push(format!(
+            "{repeats} repeating tasks use a rule this importer cannot read (chosen weekdays or \"the n-th weekday of the month\"); they were tagged #2do-repeat: set the repeat again."
+        ));
     }
     if odd_priority > 0 {
         out.notes.push(format!(
@@ -866,5 +914,46 @@ mod tests {
         );
         assert_eq!(twodo_date(6_406_192_800.0, 999_999.0), None);
         assert_eq!(twodo_date(0.0, 999_999.0), None);
+    }
+
+    #[test]
+    fn twodo_repeat_codes() {
+        let none = (0, 0, 0.0);
+        let shape = |r: Repeat| (r.freq, r.interval, r.from_done);
+        // Confirmed on a real backup: 256/5 moved a task by five days, 258/1 by one month.
+        assert_eq!(shape(twodo_repeat(256, 5, 2, none).unwrap()), (Freq::Daily, 5, true));
+        assert_eq!(shape(twodo_repeat(258, 1, 1, none).unwrap()), (Freq::Monthly, 1, false));
+        assert_eq!(shape(twodo_repeat(258, 6, 1, none).unwrap()), (Freq::Monthly, 6, false));
+        // By analogy and by 2Do's documentation.
+        assert_eq!(shape(twodo_repeat(257, 2, 1, none).unwrap()), (Freq::Weekly, 2, false));
+        assert_eq!(shape(twodo_repeat(259, 1, 1, none).unwrap()), (Freq::Yearly, 1, false));
+        let presets: Vec<_> = (1..=6)
+            .map(|k| shape(twodo_repeat(k, 1, 1, none).unwrap()))
+            .map(|(f, n, _)| (f, n))
+            .collect();
+        assert_eq!(
+            presets,
+            [
+                (Freq::Daily, 1),
+                (Freq::Weekly, 1),
+                (Freq::Weekly, 2),
+                (Freq::Monthly, 1),
+                (Freq::Monthly, 3),
+                (Freq::Yearly, 1)
+            ]
+        );
+        // Ends: on a date, after a number of repeats.
+        assert_eq!(
+            twodo_repeat(257, 2, 1, (1, 0, 1_792_497_600.0))
+                .unwrap()
+                .until
+                .as_deref(),
+            Some("2026-10-20")
+        );
+        assert_eq!(twodo_repeat(2, 1, 1, (2, 5, 0.0)).unwrap().count, Some(5));
+        // Not understood: left for the user.
+        assert!(twodo_repeat(512, 1, 1, none).is_none());
+        assert!(twodo_repeat(256, 0, 1, none).is_none());
+        assert!(twodo_repeat(7, 1, 1, none).is_none());
     }
 }

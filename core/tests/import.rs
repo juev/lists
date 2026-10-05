@@ -16,7 +16,8 @@ fn twodo_backup(dir: &std::path::Path) -> String {
     conn.execute_batch(
         "CREATE TABLE calendars (uid TEXT, title TEXT, colorhex TEXT, isinboxcal INTEGER, isdeleted INTEGER, listtype INTEGER, smartsearch TEXT, displayorder INTEGER);
          CREATE TABLE tasks (primid INTEGER PRIMARY KEY, uid TEXT, calendaruid TEXT, title TEXT, notes TEXT, duedate DOUBLE, duetime DOUBLE, startdate DOUBLE,
-            priority INTEGER, iscompleted INTEGER, completeddate DOUBLE, tags TEXT, parent TEXT, tasktype INTEGER, repeattype INTEGER, url TEXT, isdeleted INTEGER, displayorder INTEGER);
+            priority INTEGER, iscompleted INTEGER, completeddate DOUBLE, tags TEXT, parent TEXT, tasktype INTEGER, repeattype INTEGER, url TEXT, isdeleted INTEGER, displayorder INTEGER,
+            repeatvalue INTEGER DEFAULT 0, recurrence INTEGER DEFAULT 1, recurrenceendtype INTEGER DEFAULT 0, recurrenceendrepeats INTEGER DEFAULT 0, recurrenceenddate DOUBLE DEFAULT 0);
          CREATE TABLE taskattachments (taskuid TEXT, displayname TEXT, fileextension TEXT, relativepath TEXT, isdeleted INTEGER, orderindex INTEGER);
          INSERT INTO calendars VALUES ('all', 'All', '#000000', 0, 0, 1, '', 0), ('inbox', 'Inbox', '#5E7C92', 1, 0, 6, '', 1),
             ('home', 'Дом', '#379417', 0, 0, 0, '', 2), ('smart', 'Smart', '#111111', 0, 0, 0, 'type:overdue', 3), ('gone', 'Удалён', '', 0, 1, 0, '', 4);
@@ -24,7 +25,10 @@ fn twodo_backup(dir: &std::path::Path) -> String {
             ('t1', 'home', 'Полить цветы', 'раз в три дня', 1790510400, 999999, 6406192800, 10, 0, 0, 'дом_~|$$@$$|~_0_~|$$@$$|~__~|$$@$$|~_1_~|$$@$$|~_abc_~|$$@$$|~__~|$$@$$|~__~|$$@$$|~_0', '', 0, 258, '', 0, 1),
             ('t2', 'inbox', 'Ремонт', '', 1790510400, 34200, 1790467200, 2, 0, 0, '', '', 1, 0, 'https://example.org', 0, 2),
             ('t3', 'inbox', 'Купить краску', '', 6406192800, 999999, 6406192800, 0, 1, 1790596633, '', 't2', 0, 0, '', 0, 3),
-            ('t4', 'home', 'Удалена', '', 6406192800, 999999, 6406192800, 10, 0, 0, '', '', 0, 0, '', 1, 4);
+            ('t4', 'home', 'Удалена', '', 6406192800, 999999, 6406192800, 10, 0, 0, '', '', 0, 0, '', 1, 4),
+            ('t5', 'home', 'Особый повтор', '', 1790510400, 999999, 6406192800, 10, 0, 0, '', '', 0, 513, '', 0, 5);
+         UPDATE tasks SET repeatvalue = 3 WHERE uid = 't1';
+         UPDATE tasks SET repeattype = 258, repeatvalue = 1, recurrence = 2, recurrenceendtype = 1, recurrenceenddate = 1792497600 WHERE uid = 't2';
          INSERT INTO taskattachments VALUES ('t2', 'План.jpg', 'jpg', 'aa/bb/payload.jpg', 0, 0), ('t2', 'evil', 'txt', '../../2do.db', 0, 1);",
     )
     .unwrap();
@@ -48,10 +52,21 @@ fn twodo_backup_brings_lists_tasks_subtasks_tags_and_attachments() {
     let report = d.import_file(twodo_backup(dir.path())).unwrap();
     assert_eq!(
         (report.source.as_str(), report.lists, report.tasks, report.attachments),
-        ("2Do", 1, 3, 1)
+        ("2Do", 1, 4, 1)
     );
     assert!(
-        report.notes.iter().any(|n| n.contains("1 repeating tasks")),
+        report
+            .notes
+            .iter()
+            .any(|n| n.starts_with("2 repeat rules were converted")),
+        "{:?}",
+        report.notes
+    );
+    assert!(
+        report
+            .notes
+            .iter()
+            .any(|n| n.starts_with("1 repeating tasks use a rule")),
         "{:?}",
         report.notes
     );
@@ -69,17 +84,32 @@ fn twodo_backup_brings_lists_tasks_subtasks_tags_and_attachments() {
             id: lists[1].id.clone(),
         })
         .unwrap();
-    assert_eq!(titles(&home), ["Полить цветы"]);
+    assert_eq!(titles(&home), ["Полить цветы", "Особый повтор"]);
     assert_eq!(
         (home[0].due.as_deref(), home[0].notes.as_str()),
         (Some("2026-09-27"), "раз в три дня")
     );
+    assert_eq!(home[0].tags, ["дом"]);
+    let every_three_months = home[0].repeat.clone().expect("258 with value 3 is every three months");
     assert_eq!(
-        home[0].tags,
-        ["2do-repeat", "дом"],
-        "the repeat is flagged, not guessed"
+        (
+            every_three_months.freq,
+            every_three_months.interval,
+            every_three_months.from_done
+        ),
+        (Freq::Monthly, 3, false)
     );
-    assert!(home[0].repeat.is_none());
+    assert_eq!(
+        every_three_months.monthday,
+        Some(27),
+        "the day of the month comes from the due date"
+    );
+    assert_eq!(
+        home[1].tags,
+        ["2do-repeat"],
+        "a rule that is not understood is flagged, not guessed"
+    );
+    assert!(home[1].repeat.is_none());
 
     let inbox = d.tasks(Scope::Inbox).unwrap();
     assert_eq!(titles(&inbox), ["Ремонт"]);
@@ -91,6 +121,16 @@ fn twodo_backup_brings_lists_tasks_subtasks_tags_and_attachments() {
         (Some("2026-09-27T09:30"), Some("2026-09-27"))
     );
     assert!(project.notes.contains("https://example.org"));
+    let monthly = project.repeat.clone().unwrap();
+    assert_eq!(
+        (
+            monthly.freq,
+            monthly.interval,
+            monthly.from_done,
+            monthly.until.as_deref()
+        ),
+        (Freq::Monthly, 1, true, Some("2026-10-20"))
+    );
     let subs = d.subtasks(project.id.clone()).unwrap();
     assert_eq!(titles(&subs), ["Купить краску"]);
     assert!(subs[0].done.is_some() && subs[0].priority == Priority::Low);
