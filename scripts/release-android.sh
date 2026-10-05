@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Builds the signed release APK into dist/Lists-<version>-android.apk.
+# Builds the signed release APK into dist/Lists-<version>-android.apk
+# (arm64-v8a, minified).
 #
 # The keystore comes from LISTS_RELEASE_KEYSTORE and its password from
 # LISTS_RELEASE_PASSWORD. On the maintainer's Mac both have defaults: the file
@@ -19,7 +20,7 @@ if [ -z "${LISTS_RELEASE_PASSWORD:-}" ]; then
     export LISTS_RELEASE_PASSWORD
 fi
 
-"$root/scripts/build-android.sh"
+LISTS_ANDROID_ABIS="arm64-v8a" "$root/scripts/build-android.sh"
 (cd "$root/android" && ./gradlew --no-daemon --quiet assembleRelease)
 
 version="$(sed -n 's/^ *versionName = "\(.*\)"/\1/p' "$root/android/app/build.gradle.kts")"

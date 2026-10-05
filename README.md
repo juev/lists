@@ -36,7 +36,7 @@ The share extension works only in notarized builds and in builds [made with your
 
 ### Android
 
-Needs Android 8.0 or newer (arm64 or x86_64).
+Needs Android 8.0 or newer on an arm64 device, which is every current phone.
 
 1. Download `Lists-<version>-android.apk` on the phone.
 2. Open the file and allow the browser or file manager to install apps when Android asks.
@@ -149,7 +149,7 @@ Known gaps:
 - the data in the storage is not encrypted;
 - on Android, tasks and lists cannot be reordered by dragging, and the end date of a repeat can only be set on macOS;
 - the web interface has no custom repeat rules and does not notify;
-- the macOS app is built for Apple silicon only.
+- the macOS app is built for Apple silicon only, the released APK for arm64 only.
 
 ## License
 

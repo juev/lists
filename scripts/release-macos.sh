@@ -50,7 +50,7 @@ trap 'rm -rf "$stage"' EXIT
 ditto "$app" "$stage/Lists.app"
 ln -s /Applications "$stage/Applications"
 mkdir -p "$root/dist"
-hdiutil create -quiet -volname "Lists" -srcfolder "$stage" -fs HFS+ -format UDZO -ov "$dmg"
+hdiutil create -quiet -volname "Lists" -srcfolder "$stage" -fs HFS+ -format ULMO -ov "$dmg"
 
 if [ "$LISTS_SIGN_IDENTITY" = "-" ]; then
     echo "macos: ad hoc build, not notarized: $dmg"

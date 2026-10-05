@@ -13,7 +13,12 @@ fi
 export ANDROID_NDK_HOME
 
 app="$root/android/app/src/main"
-(cd "$root/core" && cargo ndk -t arm64-v8a -t x86_64 --platform 26 -o "$app/jniLibs" build --release)
+# LISTS_ANDROID_ABIS narrows the set: a release ships arm64-v8a only.
+targets=()
+for abi in ${LISTS_ANDROID_ABIS:-arm64-v8a x86_64}; do
+    targets+=(-t "$abi")
+done
+(cd "$root/core" && cargo ndk "${targets[@]}" --platform 26 -o "$app/jniLibs" build --release)
 
 # Bindings are read from an unstripped host build, as on the Apple side.
 case "$(uname -s)" in

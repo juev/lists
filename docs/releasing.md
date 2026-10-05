@@ -35,6 +35,8 @@ Keep a copy of the keystore and the password outside the Mac. GitHub secrets can
 
 `./scripts/release-android.sh` builds the signed APK locally into `dist/`.
 
+The released APK is built for arm64-v8a only and goes through R8, which renames and removes code. Code reached by name or by reflection must be listed in `android/app/proguard-rules.pro`; a missing rule shows up as a crash at run time, not as a build error, so start the release APK on a device or an arm64 emulator before tagging.
+
 ## macOS signing and notarization
 
 A disk image that opens without warnings needs a Developer ID Application certificate, which comes with the paid Apple Developer Program, and notarization by Apple. The workflow does both when these repository secrets exist:

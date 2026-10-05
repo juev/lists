@@ -18,6 +18,8 @@ docker run -d --name lists \
 
 The container listens on port 8080, keeps its data in `/data` and runs as user 10001. A directory mounted over `/data` must be writable by that user.
 
+The image holds only the server, linked statically, and a minimal init; there is no shell inside, so `docker exec` has nothing to run.
+
 With Compose, syncing through WebDAV:
 
 ```yaml

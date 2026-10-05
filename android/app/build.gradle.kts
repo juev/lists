@@ -22,10 +22,6 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "0.1.0-rc.1"
-        ndk {
-            // Must match the ABIs built by scripts/build-android.sh.
-            abiFilters += listOf("arm64-v8a", "x86_64")
-        }
     }
 
     signingConfigs {
@@ -40,8 +36,16 @@ android {
     }
 
     buildTypes {
+        // The ABIs must be among those built by scripts/build-android.sh.
+        debug {
+            ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
+        }
         release {
-            isMinifyEnabled = false
+            // Phones are arm64; x86_64 is only needed for the emulator.
+            ndk { abiFilters += "arm64-v8a" }
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             if (releaseKeystore != null) signingConfig = signingConfigs.getByName("release")
         }
     }
