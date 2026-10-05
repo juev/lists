@@ -141,7 +141,7 @@ This serves a folder over WebDAV and CalDAV with user `user` and password `secre
 
 ## Status
 
-Version 0.1.0-rc.2, a release candidate. What is implemented and how each part was checked is listed at the end of [docs/specs/product.md](docs/specs/product.md).
+Version 0.1.0-rc.3, a release candidate. What is implemented and how each part was checked is listed at the end of [docs/specs/product.md](docs/specs/product.md).
 
 Known gaps:
 
