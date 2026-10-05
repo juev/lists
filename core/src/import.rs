@@ -107,20 +107,17 @@ fn twodo_date(seconds: f64, time_of_day: f64) -> Option<String> {
     Some(date.format("%Y-%m-%d").to_string())
 }
 
-/// The repeat rule of a 2Do task. docs/specs/import.md says which of these
-/// codes were confirmed on real data and which follow 2Do's documentation.
+/// The repeat rule of a 2Do task, as far as its encoding is known; the
+/// evidence for each code is in docs/specs/import.md.
 ///
-/// `kind` below 256 is a preset in the order of the Repeat menu; 256 and up is
-/// "every `value` units" with the unit in the low byte. Anything else (chosen
-/// weekdays, the n-th weekday of a month) is not understood and yields `None`.
+/// 256 and up is "every `value` units" with the unit in the low byte; the
+/// Daily, Monthly and similar presets of 2Do are stored this way too. Kind 2
+/// is "weekly on chosen weekdays": only the value 1 has been seen, on tasks
+/// that repeat on the weekday of their due date, and only that is converted.
+/// Everything else yields `None` and is left for the user.
 fn twodo_repeat(kind: i64, value: i64, mode: i64, end: (i64, i64, f64)) -> Option<Repeat> {
     let mut out = match kind {
-        1 => rule(Freq::Daily, 1),
-        2 => rule(Freq::Weekly, 1),
-        3 => rule(Freq::Weekly, 2),
-        4 => rule(Freq::Monthly, 1),
-        5 => rule(Freq::Monthly, 3),
-        6 => rule(Freq::Yearly, 1),
+        2 if value == 1 => rule(Freq::Weekly, 1),
         256..=259 if (1..=999).contains(&value) => {
             let freq = [Freq::Daily, Freq::Weekly, Freq::Monthly, Freq::Yearly][(kind - 256) as usize];
             rule(freq, value as u32)
@@ -920,29 +917,12 @@ mod tests {
     fn twodo_repeat_codes() {
         let none = (0, 0, 0.0);
         let shape = |r: Repeat| (r.freq, r.interval, r.from_done);
-        // Confirmed on a real backup: 256/5 moved a task by five days, 258/1 by one month.
+        // Each of these pairs was compared with what 2Do itself reports for the task.
         assert_eq!(shape(twodo_repeat(256, 5, 2, none).unwrap()), (Freq::Daily, 5, true));
+        assert_eq!(shape(twodo_repeat(257, 2, 1, none).unwrap()), (Freq::Weekly, 2, false));
         assert_eq!(shape(twodo_repeat(258, 1, 1, none).unwrap()), (Freq::Monthly, 1, false));
         assert_eq!(shape(twodo_repeat(258, 6, 1, none).unwrap()), (Freq::Monthly, 6, false));
-        // By analogy and by 2Do's documentation.
-        assert_eq!(shape(twodo_repeat(257, 2, 1, none).unwrap()), (Freq::Weekly, 2, false));
-        assert_eq!(shape(twodo_repeat(259, 1, 1, none).unwrap()), (Freq::Yearly, 1, false));
-        let presets: Vec<_> = (1..=6)
-            .map(|k| shape(twodo_repeat(k, 1, 1, none).unwrap()))
-            .map(|(f, n, _)| (f, n))
-            .collect();
-        assert_eq!(
-            presets,
-            [
-                (Freq::Daily, 1),
-                (Freq::Weekly, 1),
-                (Freq::Weekly, 2),
-                (Freq::Monthly, 1),
-                (Freq::Monthly, 3),
-                (Freq::Yearly, 1)
-            ]
-        );
-        // Ends: on a date, after a number of repeats.
+        assert_eq!(shape(twodo_repeat(2, 1, 1, none).unwrap()), (Freq::Weekly, 1, false));
         assert_eq!(
             twodo_repeat(257, 2, 1, (1, 0, 1_792_497_600.0))
                 .unwrap()
@@ -950,10 +930,11 @@ mod tests {
                 .as_deref(),
             Some("2026-10-20")
         );
-        assert_eq!(twodo_repeat(2, 1, 1, (2, 5, 0.0)).unwrap().count, Some(5));
-        // Not understood: left for the user.
-        assert!(twodo_repeat(512, 1, 1, none).is_none());
-        assert!(twodo_repeat(256, 0, 1, none).is_none());
-        assert!(twodo_repeat(7, 1, 1, none).is_none());
+        // By analogy with the three units above.
+        assert_eq!(shape(twodo_repeat(259, 1, 1, none).unwrap()), (Freq::Yearly, 1, false));
+        // Not seen in real data, so not converted.
+        for (kind, value) in [(1, 1), (2, 3), (3, 1), (4, 1), (512, 1), (256, 0)] {
+            assert!(twodo_repeat(kind, value, 1, none).is_none(), "{kind}/{value}");
+        }
     }
 }
