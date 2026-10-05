@@ -1,0 +1,19 @@
+# lists-web behind a loopback port. Put LISTS_WEB_PASSWORD (and the sync
+# settings, see docs/self-hosting.md) into an .env file next to this one.
+services:
+  lists:
+    image: ghcr.io/juev/lists:${LISTS_VERSION:-latest}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${LISTS_PORT:-8080}:8080"
+    volumes:
+      - lists-data:/data
+    environment:
+      LISTS_WEB_PASSWORD: ${LISTS_WEB_PASSWORD:?set LISTS_WEB_PASSWORD in .env}
+      LISTS_SYNC: ${LISTS_SYNC:-off}
+      LISTS_SYNC_URL: ${LISTS_SYNC_URL:-}
+      LISTS_SYNC_USER: ${LISTS_SYNC_USER:-}
+      LISTS_SYNC_PASSWORD: ${LISTS_SYNC_PASSWORD:-}
+
+volumes:
+  lists-data:

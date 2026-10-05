@@ -20,7 +20,7 @@ The container listens on port 8080, keeps its data in `/data` and runs as user 1
 
 The image holds only the server, linked statically, and a minimal init; there is no shell inside, so `docker exec` has nothing to run.
 
-With Compose, syncing through WebDAV:
+The repository carries a ready [`compose.yaml`](../compose.yaml) that reads its settings from an `.env` file. A Compose file of your own, syncing through WebDAV:
 
 ```yaml
 services:
