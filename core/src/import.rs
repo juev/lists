@@ -94,37 +94,71 @@ fn rule(freq: Freq, interval: u32) -> Repeat {
 const TWODO_NO_DATE: f64 = 6_000_000_000.0;
 const TWODO_TAG_SEPARATOR: &str = "_~|$$@$$|~_";
 
+/// A due date: the day is a UTC instant on that day (noon), the time of day
+/// is a separate number written as HHMM (930 is 09:30, 999999 is "no time").
 fn twodo_date(seconds: f64, time_of_day: f64) -> Option<String> {
     if seconds <= 0.0 || seconds >= TWODO_NO_DATE {
         return None;
     }
-    // Stored as a UTC instant on the day in question (midnight or noon).
     let date = Utc.timestamp_opt(seconds as i64, 0).single()?.date_naive();
-    if (0.0..86_400.0).contains(&time_of_day) {
-        let (h, m) = ((time_of_day as u32) / 3600, (time_of_day as u32 % 3600) / 60);
+    let (h, m) = ((time_of_day as i64) / 100, (time_of_day as i64) % 100);
+    if (0.0..2400.0).contains(&time_of_day) && h < 24 && m < 60 {
         return Some(format!("{}T{h:02}:{m:02}", date.format("%Y-%m-%d")));
     }
     Some(date.format("%Y-%m-%d").to_string())
 }
 
-/// The repeat rule of a 2Do task, as far as its encoding is known; the
-/// evidence for each code is in docs/specs/import.md.
+/// A start date: one instant whose UTC fields are the local date and time;
+/// midnight means "no time".
+fn twodo_start(seconds: f64) -> Option<String> {
+    if seconds <= 0.0 || seconds >= TWODO_NO_DATE {
+        return None;
+    }
+    let moment = Utc.timestamp_opt(seconds as i64, 0).single()?.naive_utc();
+    let format = if moment.time() == chrono::NaiveTime::MIN {
+        "%Y-%m-%d"
+    } else {
+        "%Y-%m-%dT%H:%M"
+    };
+    Some(moment.format(format).to_string())
+}
+
+/// The repeat rule of a 2Do task. Every code here was read from tasks created
+/// in 2Do 4.19 with a known rule; the table is in docs/specs/import.md.
 ///
-/// 256 and up is "every `value` units" with the unit in the low byte; the
-/// Daily, Monthly and similar presets of 2Do are stored this way too. Kind 2
-/// is "weekly on chosen weekdays": only the value 1 has been seen, on tasks
-/// that repeat on the weekday of their due date, and only that is converted.
-/// Everything else yields `None` and is left for the user.
-fn twodo_repeat(kind: i64, value: i64, mode: i64, end: (i64, i64, f64)) -> Option<Repeat> {
+/// - 1..=127: weekly on chosen weekdays, one bit per day (Sunday 1, Saturday 2,
+///   Friday 4, Thursday 8, Wednesday 16, Tuesday 32, Monday 64);
+/// - 256..=259: every `value` days, weeks, months, years (2Do's Daily, Weekly,
+///   Monthly and Yearly presets are stored this way with the value 1);
+/// - 260..=266: the n-th weekday of each month, Monday 260 to Sunday 266, with
+///   `value` 1 to 5 for the ordinal and 6 for "last".
+///
+/// `mode` 2 counts from the completion date. `end` is the end type (1 on a
+/// date, 2 after a number of repeats), the repeats left, and the end date.
+fn twodo_repeat(kind: i64, value: i64, mode: i64, end: (i64, i64, f64), due: Option<NaiveDate>) -> Option<Repeat> {
     let mut out = match kind {
-        2 if value == 1 => rule(Freq::Weekly, 1),
+        1..=127 => {
+            // Monday first, as the rest of the app counts them.
+            let bits = [64, 32, 16, 8, 4, 2, 1];
+            let days: Vec<u32> = (0..7).filter(|i| kind & bits[*i] != 0).map(|i| i as u32 + 1).collect();
+            let same_as_due = due.is_some_and(|d| days == [chrono::Datelike::weekday(&d).number_from_monday()]);
+            // "Every week on the weekday of the due date" is the plain weekly rule.
+            Repeat {
+                weekdays: if same_as_due { vec![] } else { days },
+                ..rule(Freq::Weekly, value.clamp(1, 999) as u32)
+            }
+        }
         256..=259 if (1..=999).contains(&value) => {
             let freq = [Freq::Daily, Freq::Weekly, Freq::Monthly, Freq::Yearly][(kind - 256) as usize];
             rule(freq, value as u32)
         }
+        260..=266 if (1..=6).contains(&value) => Repeat {
+            nth: Some(if value == 6 { -1 } else { value as i32 }),
+            nth_weekday: Some((kind - 259) as u32),
+            ..rule(Freq::Monthly, 1)
+        },
         _ => return None,
     };
-    // 1 counts from the due date, 2 from the completion date.
     out.from_done = mode == 2;
     match end {
         (1, _, date) => out.until = twodo_date(date, -1.0),
@@ -237,16 +271,16 @@ fn parse_2do(archive: &Path, work: &Path) -> Result<Parsed> {
             title: r.get(2)?,
             notes: r.get(3)?,
             due: twodo_date(r.get::<_, f64>(4)?, r.get::<_, f64>(5)?),
-            start: twodo_date(r.get::<_, f64>(6)?, -1.0),
+            start: twodo_start(r.get::<_, f64>(6)?),
             files: files.remove(&uid).unwrap_or_default(),
             ..Task::default()
         };
-        // Observed: 10 is "none". 0, 1, 2 as low, medium, high follows 2Do's own CSV; anything else is left unset.
+        // The scale of iCalendar: 1 is the highest. 2Do writes 1, 5 and 9, and 10 for "none".
         task.priority = match r.get::<_, i64>(7)? {
-            0 => 1,
-            1 => 2,
-            2 => 3,
-            10 | -1 => 0,
+            1..=4 => 3,
+            5 => 2,
+            6..=9 => 1,
+            0 | 10 => 0,
             _ => {
                 odd_priority += 1;
                 0
@@ -272,11 +306,17 @@ fn parse_2do(archive: &Path, work: &Path) -> Result<Parsed> {
             .collect();
         let parent: String = r.get(11)?;
         task.parent = (!parent.is_empty()).then_some(parent);
-        task.project = r.get::<_, i64>(12)? == 1;
+        // 2 is a project, 1 a checklist; a checklist becomes a plain task with subtasks.
+        task.project = r.get::<_, i64>(12)? == 2;
         let repeat_type: i64 = r.get(13)?;
         if repeat_type != 0 {
             let end = (r.get::<_, i64>(17)?, r.get::<_, i64>(18)?, r.get::<_, f64>(19)?);
-            match twodo_repeat(repeat_type, r.get(15)?, r.get(16)?, end) {
+            let due_day = task
+                .due
+                .as_deref()
+                .or(task.start.as_deref())
+                .and_then(|d| NaiveDate::parse_from_str(&d[..10], "%Y-%m-%d").ok());
+            match twodo_repeat(repeat_type, r.get(15)?, r.get(16)?, end, due_day) {
                 Some(rule) => {
                     converted += 1;
                     task.repeat = Some(crate::recur::normalized(
@@ -302,7 +342,7 @@ fn parse_2do(archive: &Path, work: &Path) -> Result<Parsed> {
     }
     if repeats > 0 {
         out.notes.push(format!(
-            "{repeats} repeating tasks use a rule this importer cannot read (chosen weekdays or \"the n-th weekday of the month\"); they were tagged #2do-repeat: set the repeat again."
+            "{repeats} repeating tasks use a rule this importer does not know; they were tagged #2do-repeat: set the repeat again."
         ));
     }
     if odd_priority > 0 {
@@ -903,38 +943,82 @@ mod tests {
 
     #[test]
     fn twodo_dates() {
-        // Noon UTC on 2026-09-27, as found in a real backup; no time of day.
+        // Noon UTC on 2026-09-27; the time of day is a number written as HHMM.
         assert_eq!(twodo_date(1_790_510_400.0, 999_999.0).as_deref(), Some("2026-09-27"));
+        assert_eq!(twodo_date(1_790_510_400.0, 930.0).as_deref(), Some("2026-09-27T09:30"));
+        assert_eq!(twodo_date(1_790_510_400.0, 1405.0).as_deref(), Some("2026-09-27T14:05"));
+        assert_eq!(twodo_date(1_790_510_400.0, 30.0).as_deref(), Some("2026-09-27T00:30"));
+        assert_eq!(twodo_date(1_790_510_400.0, 2359.0).as_deref(), Some("2026-09-27T23:59"));
         assert_eq!(
-            twodo_date(1_790_510_400.0, 34_200.0).as_deref(),
-            Some("2026-09-27T09:30")
+            twodo_date(1_790_510_400.0, 1299.0).as_deref(),
+            Some("2026-09-27"),
+            "99 minutes is not a time"
         );
         assert_eq!(twodo_date(6_406_192_800.0, 999_999.0), None);
         assert_eq!(twodo_date(0.0, 999_999.0), None);
+        // Start dates as 2Do wrote them for 2026-12-05 and for 2026-12-05 08:15.
+        assert_eq!(twodo_start(1_796_428_800.0).as_deref(), Some("2026-12-05"));
+        assert_eq!(twodo_start(1_796_458_500.0).as_deref(), Some("2026-12-05T08:15"));
+        assert_eq!(twodo_start(6_406_192_800.0), None);
     }
 
+    /// Codes exactly as 2Do 4.19 stored them for tasks created with these rules.
     #[test]
     fn twodo_repeat_codes() {
         let none = (0, 0, 0.0);
-        let shape = |r: Repeat| (r.freq, r.interval, r.from_done);
-        // Each of these pairs was compared with what 2Do itself reports for the task.
-        assert_eq!(shape(twodo_repeat(256, 5, 2, none).unwrap()), (Freq::Daily, 5, true));
-        assert_eq!(shape(twodo_repeat(257, 2, 1, none).unwrap()), (Freq::Weekly, 2, false));
-        assert_eq!(shape(twodo_repeat(258, 1, 1, none).unwrap()), (Freq::Monthly, 1, false));
-        assert_eq!(shape(twodo_repeat(258, 6, 1, none).unwrap()), (Freq::Monthly, 6, false));
-        assert_eq!(shape(twodo_repeat(2, 1, 1, none).unwrap()), (Freq::Weekly, 1, false));
+        let monday = NaiveDate::from_ymd_opt(2026, 12, 7);
+        let get = |kind, value| twodo_repeat(kind, value, 1, none, monday).unwrap();
+        let unit = |kind, value| (get(kind, value).freq, get(kind, value).interval);
+        assert_eq!(unit(256, 1), (Freq::Daily, 1));
+        assert_eq!(unit(257, 1), (Freq::Weekly, 1));
+        assert_eq!(unit(257, 2), (Freq::Weekly, 2));
+        assert_eq!(unit(258, 1), (Freq::Monthly, 1));
+        assert_eq!(unit(258, 3), (Freq::Monthly, 3));
+        assert_eq!(unit(259, 1), (Freq::Yearly, 1));
+        assert_eq!(unit(259, 3), (Freq::Yearly, 3));
+
+        let days = |kind| get(kind, 1).weekdays;
         assert_eq!(
-            twodo_repeat(257, 2, 1, (1, 0, 1_792_497_600.0))
+            days(64),
+            Vec::<u32>::new(),
+            "Monday on a task due on a Monday is the plain weekly rule"
+        );
+        assert_eq!(days(1), [7]);
+        assert_eq!(days(32), [2]);
+        assert_eq!(days(2), [6]);
+        assert_eq!(days(84), [1, 3, 5]);
+        assert_eq!(days(124), [1, 2, 3, 4, 5]);
+        assert_eq!(get(84, 1).freq, Freq::Weekly);
+
+        let nth = |kind, value| {
+            (
+                get(kind, value).nth.unwrap(),
+                get(kind, value).nth_weekday.unwrap(),
+                get(kind, value).freq,
+            )
+        };
+        assert_eq!(nth(260, 1), (1, 1, Freq::Monthly), "first Monday");
+        assert_eq!(nth(261, 2), (2, 2, Freq::Monthly), "second Tuesday");
+        assert_eq!(nth(262, 3), (3, 3, Freq::Monthly), "third Wednesday");
+        assert_eq!(nth(263, 4), (4, 4, Freq::Monthly), "fourth Thursday");
+        assert_eq!(nth(264, 6), (-1, 5, Freq::Monthly), "last Friday");
+        assert_eq!(nth(265, 5), (5, 6, Freq::Monthly), "fifth Saturday");
+        assert_eq!(nth(266, 1), (1, 7, Freq::Monthly), "first Sunday");
+        assert_eq!(nth(260, 6), (-1, 1, Freq::Monthly), "last Monday");
+
+        assert!(twodo_repeat(256, 1, 2, none, monday).unwrap().from_done);
+        assert!(twodo_repeat(2, 1, 2, none, monday).unwrap().from_done);
+        assert_eq!(twodo_repeat(256, 1, 1, (2, 5, 0.0), monday).unwrap().count, Some(5));
+        assert_eq!(
+            twodo_repeat(256, 1, 1, (1, 0, 1_800_014_400.0), monday)
                 .unwrap()
                 .until
                 .as_deref(),
-            Some("2026-10-20")
+            Some("2027-01-15")
         );
-        // By analogy with the three units above.
-        assert_eq!(shape(twodo_repeat(259, 1, 1, none).unwrap()), (Freq::Yearly, 1, false));
-        // Not seen in real data, so not converted.
-        for (kind, value) in [(1, 1), (2, 3), (3, 1), (4, 1), (512, 1), (256, 0)] {
-            assert!(twodo_repeat(kind, value, 1, none).is_none(), "{kind}/{value}");
+
+        for (kind, value) in [(128, 1), (255, 1), (256, 0), (260, 7), (267, 1), (512, 1)] {
+            assert!(twodo_repeat(kind, value, 1, none, monday).is_none(), "{kind}/{value}");
         }
     }
 }

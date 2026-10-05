@@ -23,10 +23,14 @@ fn twodo_backup(dir: &std::path::Path) -> String {
             ('home', 'Дом', '#379417', 0, 0, 0, '', 2), ('smart', 'Smart', '#111111', 0, 0, 0, 'type:overdue', 3), ('gone', 'Удалён', '', 0, 1, 0, '', 4);
          INSERT INTO tasks (uid, calendaruid, title, notes, duedate, duetime, startdate, priority, iscompleted, completeddate, tags, parent, tasktype, repeattype, url, isdeleted, displayorder) VALUES
             ('t1', 'home', 'Полить цветы', 'раз в три дня', 1790510400, 999999, 6406192800, 10, 0, 0, 'дом_~|$$@$$|~_0_~|$$@$$|~__~|$$@$$|~_1_~|$$@$$|~_abc_~|$$@$$|~__~|$$@$$|~__~|$$@$$|~_0', '', 0, 258, '', 0, 1),
-            ('t2', 'inbox', 'Ремонт', '', 1790510400, 34200, 1790467200, 2, 0, 0, '', '', 1, 0, 'https://example.org', 0, 2),
-            ('t3', 'inbox', 'Купить краску', '', 6406192800, 999999, 6406192800, 0, 1, 1790596633, '', 't2', 0, 0, '', 0, 3),
+            ('t2', 'inbox', 'Ремонт', '', 1790510400, 930, 1790467200, 1, 0, 0, '', '', 2, 0, 'https://example.org', 0, 2),
+            ('t3', 'inbox', 'Купить краску', '', 6406192800, 999999, 6406192800, 9, 1, 1790596633, '', 't2', 0, 0, '', 0, 3),
             ('t4', 'home', 'Удалена', '', 6406192800, 999999, 6406192800, 10, 0, 0, '', '', 0, 0, '', 1, 4),
-            ('t5', 'home', 'Особый повтор', '', 1790510400, 999999, 6406192800, 10, 0, 0, '', '', 0, 513, '', 0, 5);
+            ('t5', 'home', 'Особый повтор', '', 1790510400, 999999, 6406192800, 10, 0, 0, '', '', 0, 513, '', 0, 5),
+            ('t6', 'home', 'Последняя пятница', '', 1790510400, 999999, 6406192800, 5, 0, 0, '', '', 1, 264, '', 0, 6),
+            ('t7', 'home', 'Пн, ср, пт', '', 1790510400, 999999, 6406192800, 10, 0, 0, '', '', 0, 84, '', 0, 7);
+         UPDATE tasks SET repeatvalue = 6 WHERE uid = 't6';
+         UPDATE tasks SET repeatvalue = 1, recurrenceendtype = 2, recurrenceendrepeats = 4 WHERE uid = 't7';
          UPDATE tasks SET repeatvalue = 3 WHERE uid = 't1';
          UPDATE tasks SET repeattype = 258, repeatvalue = 1, recurrence = 2, recurrenceendtype = 1, recurrenceenddate = 1792497600 WHERE uid = 't2';
          INSERT INTO taskattachments VALUES ('t2', 'План.jpg', 'jpg', 'aa/bb/payload.jpg', 0, 0), ('t2', 'evil', 'txt', '../../2do.db', 0, 1);",
@@ -52,13 +56,13 @@ fn twodo_backup_brings_lists_tasks_subtasks_tags_and_attachments() {
     let report = d.import_file(twodo_backup(dir.path())).unwrap();
     assert_eq!(
         (report.source.as_str(), report.lists, report.tasks, report.attachments),
-        ("2Do", 1, 4, 1)
+        ("2Do", 1, 6, 1)
     );
     assert!(
         report
             .notes
             .iter()
-            .any(|n| n.starts_with("2 repeat rules were converted")),
+            .any(|n| n.starts_with("4 repeat rules were converted")),
         "{:?}",
         report.notes
     );
@@ -84,7 +88,22 @@ fn twodo_backup_brings_lists_tasks_subtasks_tags_and_attachments() {
             id: lists[1].id.clone(),
         })
         .unwrap();
-    assert_eq!(titles(&home), ["Полить цветы", "Особый повтор"]);
+    assert_eq!(
+        titles(&home),
+        ["Полить цветы", "Особый повтор", "Последняя пятница", "Пн, ср, пт"]
+    );
+    let last_friday = home[2].repeat.clone().unwrap();
+    assert_eq!(
+        (last_friday.freq, last_friday.nth, last_friday.nth_weekday),
+        (Freq::Monthly, Some(-1), Some(5))
+    );
+    assert_eq!(home[2].priority, Priority::Medium);
+    assert!(!home[2].is_project, "a checklist is a plain task");
+    let three_days = home[3].repeat.clone().unwrap();
+    assert_eq!(
+        (three_days.freq, three_days.weekdays.clone(), three_days.count),
+        (Freq::Weekly, vec![1, 3, 5], Some(4))
+    );
     assert_eq!(
         (home[0].due.as_deref(), home[0].notes.as_str()),
         (Some("2026-09-27"), "раз в три дня")
