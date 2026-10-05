@@ -16,6 +16,10 @@ app="$root/android/app/src/main"
 (cd "$root/core" && cargo ndk -t arm64-v8a -t x86_64 --platform 26 -o "$app/jniLibs" build --release)
 
 # Bindings are read from an unstripped host build, as on the Apple side.
+case "$(uname -s)" in
+    Darwin) hostlib="liblists_core.dylib" ;;
+    *) hostlib="liblists_core.so" ;;
+esac
 (cd "$root/core" && cargo build && cargo run --quiet --features cli --bin uniffi-bindgen -- \
-    generate --library target/debug/liblists_core.dylib --language kotlin --no-format --out-dir "$app/java")
+    generate --library "target/debug/$hostlib" --language kotlin --no-format --out-dir "$app/java")
 echo "android: core is in $app/jniLibs, bindings in $app/java/uniffi"

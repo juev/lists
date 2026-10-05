@@ -1,0 +1,323 @@
+name: Release
+
+# A tag v<version> builds and publishes everything. A manual run builds the
+# same artifacts and keeps them on the run, without publishing.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  check:
+    name: Checks
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check that the tag matches the version in the sources
+        id: version
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == 'push' ]]; then
+            ./scripts/check-version.sh "$GITHUB_REF_NAME"
+          else
+            ./scripts/check-version.sh
+          fi
+          echo "version=$(sed -n 's/^version = "\(.*\)"/\1/p' core/Cargo.toml | head -1)" >> "$GITHUB_OUTPUT"
+      - name: Install the Rust toolchain
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            core
+            web
+      - name: Lint
+        run: make lint
+      - name: Test
+        run: make test
+
+  android:
+    name: Android APK
+    needs: check
+    runs-on: ubuntu-latest
+    env:
+      NDK_VERSION: 28.2.13676358
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v4
+      - name: Install Android SDK packages
+        run: |
+          sdkmanager 'platforms;android-36' 'build-tools;36.0.0' "ndk;$NDK_VERSION"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+      - name: Install the Rust toolchain
+        run: |
+          rustup toolchain install
+          rustup target add aarch64-linux-android x86_64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: core
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --version 4.1.2 --locked
+      - uses: gradle/actions/setup-gradle@v6
+
+      - name: Restore the release key
+        env:
+          RELEASE_KEYSTORE_B64: ${{ secrets.LISTS_RELEASE_KEYSTORE_B64 }}
+        run: |
+          if [[ -z "$RELEASE_KEYSTORE_B64" ]]; then
+            echo 'Release keystore secret is missing' >&2
+            exit 1
+          fi
+          printf '%s' "$RELEASE_KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/lists-release.jks"
+          chmod 600 "$RUNNER_TEMP/lists-release.jks"
+
+      - name: Build the signed APK
+        env:
+          LISTS_RELEASE_KEYSTORE: ${{ runner.temp }}/lists-release.jks
+          LISTS_RELEASE_PASSWORD: ${{ secrets.LISTS_RELEASE_PASSWORD }}
+        run: |
+          if [[ -z "$LISTS_RELEASE_PASSWORD" ]]; then
+            echo 'Release password secret is missing' >&2
+            exit 1
+          fi
+          ./scripts/release-android.sh
+
+      - name: Verify the APK
+        run: |
+          set -euo pipefail
+          apk="dist/Lists-$VERSION-android.apk"
+          build_tools="$ANDROID_HOME/build-tools/36.0.0"
+          signer_digest="$("$build_tools/apksigner" verify --print-certs "$apk" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')"
+          if [[ "$signer_digest" != '4aca5869f8c3b2ffc45fa2b62530d5c15fb6790fcc37bcc9c94e3b170cf63c09' ]]; then
+            echo 'APK signing certificate does not match the release key' >&2
+            exit 1
+          fi
+          package_line="$("$build_tools/aapt" dump badging "$apk" | sed -n '1p')"
+          if [[ "$package_line" != *"name='org.evsyukov.lists'"* ]]; then
+            echo 'Unexpected APK package name' >&2
+            exit 1
+          fi
+          if [[ "$package_line" != *"versionName='$VERSION'"* ]]; then
+            echo 'APK version name does not match the release version' >&2
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: asset-android
+          path: dist/*.apk
+          if-no-files-found: error
+
+  macos:
+    name: macOS disk image
+    needs: check
+    runs-on: macos-latest
+    outputs:
+      notarized: ${{ steps.build.outputs.notarized }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install xcodegen
+        run: brew install xcodegen
+      - name: Install the Rust toolchain
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: core
+
+      - name: Import the Developer ID certificate
+        env:
+          CERTIFICATE_B64: ${{ secrets.LISTS_MACOS_CERTIFICATE_B64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.LISTS_MACOS_CERTIFICATE_PASSWORD }}
+          NOTARY_KEY_B64: ${{ secrets.LISTS_NOTARY_KEY_B64 }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$CERTIFICATE_B64" ]]; then
+            echo '::warning::No Developer ID certificate in the secrets: the disk image is signed ad hoc and not notarized'
+            exit 0
+          fi
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          keychain_password="$(openssl rand -hex 16)"
+          printf '%s' "$CERTIFICATE_B64" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$RUNNER_TEMP/certificate.p12" -P "$CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$keychain"
+          security set-key-partition-list -S apple-tool:,apple: -k "$keychain_password" "$keychain" > /dev/null
+          security list-keychains -d user -s "$keychain" login.keychain-db
+          rm "$RUNNER_TEMP/certificate.p12"
+          if [[ -n "$NOTARY_KEY_B64" ]]; then
+            printf '%s' "$NOTARY_KEY_B64" | base64 --decode > "$RUNNER_TEMP/notary.p8"
+            echo "LISTS_NOTARY_KEY=$RUNNER_TEMP/notary.p8" >> "$GITHUB_ENV"
+          else
+            echo '::warning::No notarization key in the secrets: the disk image is signed but not notarized'
+          fi
+
+      - name: Build the disk image
+        id: build
+        env:
+          LISTS_NOTARY_KEY_ID: ${{ secrets.LISTS_NOTARY_KEY_ID }}
+          LISTS_NOTARY_ISSUER_ID: ${{ secrets.LISTS_NOTARY_ISSUER_ID }}
+        run: |
+          ./scripts/release-macos.sh
+          if xcrun stapler validate dist/*.dmg; then
+            echo 'notarized=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'notarized=false' >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: asset-macos
+          path: dist/*.dmg
+          if-no-files-found: error
+
+  image:
+    name: Docker image (${{ matrix.arch }})
+    needs: check
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        if: github.event_name == 'push'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - uses: docker/metadata-action@v6
+        id: meta
+        with:
+          images: ${{ env.IMAGE }}
+      # Each architecture is built on its own runner and pushed without a tag;
+      # the manifest job joins the two under the release tags.
+      - uses: docker/build-push-action@v7
+        id: build
+        with:
+          context: .
+          platforms: linux/${{ matrix.arch }}
+          labels: ${{ steps.meta.outputs.labels }}
+          outputs: ${{ github.event_name == 'push' && format('type=image,name={0},push-by-digest=true,name-canonical=true,push=true', env.IMAGE) || 'type=cacheonly' }}
+          cache-from: type=gha,scope=image-${{ matrix.arch }}
+          cache-to: type=gha,scope=image-${{ matrix.arch }},mode=max
+      - name: Export the digest
+        if: github.event_name == 'push'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/digests"
+          touch "$RUNNER_TEMP/digests/${DIGEST#sha256:}"
+      - uses: actions/upload-artifact@v7
+        if: github.event_name == 'push'
+        with:
+          name: digest-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  manifest:
+    name: Docker manifest
+    if: github.event_name == 'push'
+    needs: [image, android, macos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digest-*
+          merge-multiple: true
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - uses: docker/metadata-action@v6
+        id: meta
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+      - name: Join the architectures under the release tags
+        working-directory: ${{ runner.temp }}/digests
+        run: |
+          set -euo pipefail
+          tags=()
+          while IFS= read -r tag; do
+            tags+=(--tag "$tag")
+          done < <(jq -r '.tags[]' <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          sources=()
+          for digest in *; do
+            sources+=("$IMAGE@sha256:$digest")
+          done
+          docker buildx imagetools create "${tags[@]}" "${sources[@]}"
+          docker buildx imagetools inspect "$IMAGE:${{ steps.meta.outputs.version }}"
+
+  publish:
+    name: GitHub release
+    if: github.event_name == 'push'
+    needs: [check, android, macos, manifest]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+      NOTARIZED: ${{ needs.macos.outputs.notarized }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          pattern: asset-*
+          merge-multiple: true
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          (cd dist && sha256sum Lists-* > SHA256SUMS)
+          sed "s/{{version}}/$VERSION/g" .github/release-notes.md > "$RUNNER_TEMP/notes.md"
+          if [[ "$NOTARIZED" != 'true' ]]; then
+            sed "s/{{version}}/$VERSION/g" .github/release-notes-unsigned.md >> "$RUNNER_TEMP/notes.md"
+          fi
+          release_flags=()
+          if [[ "$tag" == *-* ]]; then
+            release_flags+=(--prerelease --latest=false)
+          fi
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" dist/* --clobber
+          else
+            gh release create "$tag" dist/* --verify-tag --title "Lists $VERSION" \
+              --notes-file "$RUNNER_TEMP/notes.md" --generate-notes "${release_flags[@]}"
+          fi

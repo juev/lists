@@ -1,0 +1,7 @@
+# The image is built from the two Rust crates only.
+*
+!core
+!web
+!rust-toolchain.toml
+core/target
+web/target

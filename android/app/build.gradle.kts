@@ -4,6 +4,15 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+// A release is signed only when both variables are set; scripts/release-android.sh
+// and the release workflow set them.
+val releaseKeystore = providers.environmentVariable("LISTS_RELEASE_KEYSTORE").orNull
+val releasePassword = providers.environmentVariable("LISTS_RELEASE_PASSWORD").orNull
+require((releaseKeystore == null && releasePassword == null) ||
+    (!releaseKeystore.isNullOrBlank() && !releasePassword.isNullOrBlank())) {
+    "Set both LISTS_RELEASE_KEYSTORE and LISTS_RELEASE_PASSWORD to sign a release"
+}
+
 android {
     namespace = "org.evsyukov.lists"
     compileSdk = 36
@@ -20,9 +29,21 @@ android {
         }
     }
 
+    signingConfigs {
+        if (releaseKeystore != null) {
+            create("release") {
+                storeFile = file(releaseKeystore)
+                storePassword = releasePassword
+                keyAlias = "lists"
+                keyPassword = releasePassword
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            if (releaseKeystore != null) signingConfig = signingConfigs.getByName("release")
         }
     }
     compileOptions {
