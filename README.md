@@ -77,6 +77,10 @@ cargo run --example webdav -- /tmp/lists-dav 8765
 
 This serves a folder over WebDAV and CalDAV with user `user` and password `secret`. Point the macOS app at `http://127.0.0.1:8765` and the Android emulator at `http://10.0.2.2:8765`. `cargo run --example lists` is a small command-line tool for looking into a data folder; it takes the password from `LISTS_PASSWORD`.
 
+## Import
+
+A file from another task manager can be imported from File → Import… on macOS, from Settings on Android and from the sidebar of the web interface: a 2Do backup (`.2dodb`), a Todoist CSV template, a Trello board JSON, or Microsoft To Do lists as JSON. Importing the same file again updates what is already there. What each importer carries over, and what it cannot, is in [docs/specs/import.md](docs/specs/import.md).
+
 ## Quick entry
 
 One line becomes a task: `отчёт в пятницу 10:00 !! #работа @Проекты` sets the due date, a medium priority, a tag and the list. Dates are understood in Russian and English.

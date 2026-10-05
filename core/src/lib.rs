@@ -8,6 +8,7 @@ mod caldav;
 mod db;
 mod error;
 mod hlc;
+mod import;
 mod model;
 mod order;
 mod quickadd;
@@ -16,5 +17,6 @@ mod store;
 pub mod sync;
 
 pub use error::{AppError, Result};
+pub use import::ImportReport;
 pub use model::*;
 pub use store::{days_between, shift_date, Store};

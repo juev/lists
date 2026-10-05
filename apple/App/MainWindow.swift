@@ -39,7 +39,7 @@ struct MainWindow: View {
         .searchable(text: $model.search, placement: .toolbar, prompt: L("Search"))
         .onAppear { model.undoManager = undoManager }
         .onChange(of: undoManager) { _, new in model.undoManager = new }
-        .alert(L("That did not work"), isPresented: Binding(get: { model.alert != nil }, set: { if !$0 { model.alert = nil } })) {
+        .alert(model.alertIsError ? L("That did not work") : "Lists", isPresented: Binding(get: { model.alert != nil }, set: { if !$0 { model.alert = nil } })) {
             Button("OK", role: .cancel) {}
         } message: {
             Text(model.alert ?? "")

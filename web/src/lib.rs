@@ -482,6 +482,29 @@ impl App {
                     self.dirty.store(true, Ordering::Relaxed);
                     json_reply(200, attachment_json(&added?))
                 }
+                (Method::Post, "/api/import") => {
+                    let data = match Self::body(request) {
+                        Ok(b) => b,
+                        Err(r) => return Ok(r),
+                    };
+                    let dir = std::env::temp_dir().join(format!("lists-upload-{}", uuid::Uuid::new_v4().simple()));
+                    std::fs::create_dir_all(&dir).map_err(|e| AppError::Storage { msg: e.to_string() })?;
+                    // The name carries no meaning to the importer except as a Todoist list name.
+                    let name = query(&url, "name")
+                        .map(|n| n.replace(['/', '\\'], "_"))
+                        .filter(|n| !n.is_empty())
+                        .unwrap_or_else(|| "import".into());
+                    let file = dir.join(name);
+                    std::fs::write(&file, data).map_err(|e| AppError::Storage { msg: e.to_string() })?;
+                    let report = self.store.import_file(file.to_string_lossy().into_owned());
+                    let _ = std::fs::remove_dir_all(&dir);
+                    self.dirty.store(true, Ordering::Relaxed);
+                    let report = report?;
+                    json_reply(
+                        200,
+                        json!({ "source": report.source, "lists": report.lists, "tasks": report.tasks, "attachments": report.attachments, "notes": report.notes }),
+                    )
+                }
                 (Method::Post, "/api/call") => {
                     let body = match Self::body(request) {
                         Ok(b) => b,

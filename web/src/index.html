@@ -103,6 +103,7 @@ const RU = {
   "waiting": "ожидает отправки", "Deleted": "Удалено", "Undo": "Отменить", "Task completed": "Выполнено", "Moved to the next occurrence": "Перенесено на следующий повтор",
   "downloads on the next sync": "загрузится при синхронизации", "from": "с", "Delete list": "Удалить список", "Delete this list and move its tasks to the trash?": "Удалить список и отправить его задачи в корзину?",
   "Sort": "Сортировка", "Manually": "Вручную", "By due date": "По сроку", "By priority": "По приоритету", "By title": "По названию", "Rename": "Переименовать", "time": "время",
+  "Import…": "Импорт…", "tasks": "задач", "attachments": "вложений",
   "Projects": "Проекты", "Filters": "Фильтры", "New filter": "Новый фильтр", "Make it a project": "Сделать проектом", "Turn back into a task": "Сделать обычной задачей",
   "Filter": "Фильтр", "Date": "Дата", "Any": "Любой", "The coming days": "Ближайшие дни", "No date": "Без даты", "Days": "Дней", "Priority at least": "Приоритет не ниже",
   "Status": "Состояние", "Open": "В работе", "Contains": "Содержит", "Save": "Сохранить", "Cancel": "Отмена", "Delete filter": "Удалить фильтр", "Edit": "Изменить",
@@ -343,6 +344,13 @@ function render() {
   const current = state.scope.startsWith("list:") ? o.lists.find(l => "list:" + l.id === state.scope) : state.scope === "inbox" ? o.lists.find(l => l.id === "inbox") : null;
   const syncText = !o.sync.configured ? "" : o.sync.lastError ? t("Sync failed") : o.sync.pending ? `${o.sync.pending} ${t("waiting")}` : t("Synced");
   const search = $("input", { type: "search", placeholder: t("Search"), value: state.search, oninput: e => { state.search = e.target.value; clearTimeout(search.timer); search.timer = setTimeout(async () => { await load(); const again = document.querySelector("header input"); again.focus(); again.setSelectionRange(again.value.length, again.value.length); }, 250); } });
+  const importer = $("input", { type: "file", style: "display:none", onchange: async e => {
+    const f = e.target.files[0];
+    if (!f) return;
+    const r = await api("/api/import?name=" + encodeURIComponent(f.name), { method: "POST", headers: { "X-Lists": "1" }, body: f });
+    alert([`${r.source}: ${t("Lists")} ${r.lists}, ${t("tasks")} ${r.tasks}, ${t("attachments")} ${r.attachments}`, ...r.notes].join("\n\n"));
+    load();
+  } });
   const add = $("input", { type: "text", placeholder: t("New task"), enterkeyhint: "done", onkeydown: async e => { if (e.key === "Enter" && e.target.value.trim()) { const text = e.target.value; e.target.value = ""; await act("quickAdd", { text, scope: state.scope, today: today() }); document.querySelector("#add input").focus(); } } });
   root.replaceChildren($("div", { id: "app", class: state.drawer ? "drawer" : "" },
     $("nav", { id: "side" },
@@ -356,7 +364,9 @@ function render() {
       $("div", { class: "side-title" }, t("Filters")), o.filters.map(f => nav("filter:" + f.id, f.name, f.open)),
       $("button", { class: "nav", style: "color:var(--muted)", onclick: () => { state.filterEdit = {}; state.drawer = false; render(); } }, "+ " + t("New filter")),
       o.tags.length ? $("div", { class: "side-title" }, t("Tags")) : null, o.tags.map(g => nav("tag:" + g.name, "#" + g.name, g.open)),
-      $("div", { class: "side-title" }), $("button", { class: "nav", style: "color:var(--muted)", onclick: () => api("/api/logout", { method: "POST", headers: { "X-Lists": "1" } }).then(showLogin) }, t("Sign out"))),
+      $("div", { class: "side-title" }),
+      $("button", { class: "nav", style: "color:var(--muted)", onclick: () => importer.click() }, t("Import…")), importer,
+      $("button", { class: "nav", style: "color:var(--muted)", onclick: () => api("/api/logout", { method: "POST", headers: { "X-Lists": "1" } }).then(showLogin) }, t("Sign out"))),
     $("div", { id: "shade", onclick: () => { state.drawer = false; render(); } }),
     $("div", { id: "main" },
       $("header", {}, $("button", { id: "menu", "aria-label": "menu", onclick: () => { state.drawer = true; render(); } }, "☰"), $("h1", {}, scopeTitle()),

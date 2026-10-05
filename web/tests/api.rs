@@ -292,3 +292,28 @@ fn projects_and_saved_filters_over_the_api() {
     call(&web, "", json!({ "op": "deleteFilter", "id": fid }));
     assert_eq!(get(&web, "", "/api/overview")["filters"].as_array().unwrap().len(), 0);
 }
+
+#[test]
+fn import_through_the_web() {
+    let web = web(None);
+    let board = r#"{"name":"B","lists":[{"id":"l1","name":"Do","closed":false}],"cards":[{"id":"c1","name":"Card","desc":"","closed":false,"idList":"l1","idLabels":[]}],"labels":[],"checklists":[]}"#;
+    let report: Value = ureq::post(&format!("{}/api/import?name=board.json", web.base))
+        .set("X-Lists", "1")
+        .send_string(board)
+        .unwrap()
+        .into_json()
+        .unwrap();
+    assert_eq!(
+        (
+            report["source"].as_str(),
+            report["lists"].as_u64(),
+            report["tasks"].as_u64()
+        ),
+        (Some("Trello"), Some(1), Some(1))
+    );
+    assert_eq!(get(&web, "", "/api/overview")["lists"][1]["name"], "B: Do");
+    let bad = ureq::post(&format!("{}/api/import?name=x.csv", web.base))
+        .set("X-Lists", "1")
+        .send_string("a,b\n");
+    assert_eq!(status(bad), 400);
+}

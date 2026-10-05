@@ -6,6 +6,7 @@
 //! cargo run --example lists -- <data folder> webdav <url> <user>
 //! LISTS_PASSWORD=… cargo run --example lists -- <data folder> sync
 //! cargo run --example lists -- <data folder> sync-off
+//! cargo run --example lists -- <data folder> import <backup.2dodb | todoist.csv | trello.json | todo.json>
 //! ```
 //!
 //! Close the app before pointing this at its folder.
@@ -14,7 +15,7 @@ use lists_core::{Scope, Store, SyncConfig};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let usage = "usage: lists <data folder> list | add <text> | webdav <url> <user> | sync | sync-off";
+    let usage = "usage: lists <data folder> list | add <text> | webdav <url> <user> | sync | sync-off | import <file>";
     let (dir, command) = match args.as_slice() {
         [dir, command, ..] => (dir.clone(), command.as_str()),
         _ => return Err(usage.into()),
@@ -37,6 +38,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("{:?}", store.sync_now()?)
         }
         ("sync-off", []) => store.set_sync_config(SyncConfig::Off)?,
+        ("import", [file]) => {
+            let report = store.import_file(file.clone())?;
+            println!(
+                "{}: {} lists, {} tasks, {} attachments",
+                report.source, report.lists, report.tasks, report.attachments
+            );
+            for note in report.notes {
+                println!("- {note}");
+            }
+        }
         _ => return Err(usage.into()),
     }
     Ok(())

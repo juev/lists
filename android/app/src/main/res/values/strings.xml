@@ -180,4 +180,6 @@
     <string name="status_open">Open</string>
     <string name="contains">Contains</string>
     <string name="matching_now">Tasks matching now: %1$s</string>
+    <string name="import_file">Import…</string>
+    <string name="imported">Imported from %1$s: %2$s lists, %3$s tasks, %4$s attachments.</string>
 </resources>

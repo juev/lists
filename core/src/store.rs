@@ -245,7 +245,7 @@ fn clean_tag(tag: &str) -> String {
     tag.trim().trim_start_matches('#').to_lowercase()
 }
 
-fn guess_mime(name: &str) -> &'static str {
+pub(crate) fn guess_mime(name: &str) -> &'static str {
     let ext = name
         .rsplit_once('.')
         .map(|(_, e)| e.to_ascii_lowercase())

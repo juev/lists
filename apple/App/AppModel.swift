@@ -42,6 +42,8 @@ final class AppModel {
         didSet { UserDefaults.standard.set(fontDesign, forKey: AppFont.designKey) }
     }
     var alert: String?
+    /// False while `alert` carries a report rather than a failure.
+    var alertIsError = true
 
     @ObservationIgnored private var syncDebounce: DispatchWorkItem?
     @ObservationIgnored private var timer: Timer?
@@ -192,6 +194,7 @@ final class AppModel {
             scheduleSync()
             return result
         } catch {
+            alertIsError = true
             alert = describe(error)
             reload()
             return nil
@@ -324,6 +327,22 @@ final class AppModel {
             let parent = try store.task(id: parentId)
             try store.moveTask(id: task.id, listId: nil, parentId: parent.parentId, after: parent.id)
         }
+    }
+
+    // MARK: Import
+
+    /// Asks for a file exported from another task manager and imports it.
+    func importFromFile() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.message = L("A 2Do backup (.2dodb), a Todoist CSV, a Trello board JSON or Microsoft To Do lists as JSON")
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard let report = perform({ try $0.importFile(path: url.path) }) else { return }
+        let summary = L("Imported from %@: %@ lists, %@ tasks, %@ attachments.", report.source, "\(report.lists)", "\(report.tasks)", "\(report.attachments)")
+        alertIsError = false
+        alert = ([summary] + report.notes).joined(separator: "\n\n")
     }
 
     // MARK: Sync

@@ -673,6 +673,12 @@ fun SettingsDialog(model: MainViewModel, onDismiss: () -> Unit) {
     val context = LocalContext.current
     var password by remember { mutableStateOf(if (enabled) Secrets.load(context).orEmpty() else "") }
     var error by remember { mutableStateOf<String?>(null) }
+    val pickImport = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            onDismiss()
+            model.importFrom(context, uri)
+        }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -720,7 +726,12 @@ fun SettingsDialog(model: MainViewModel, onDismiss: () -> Unit) {
                     .onFailure { error = describe(it) }
             }) { Text(str(R.string.save_and_sync)) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(str(R.string.close)) } },
+        dismissButton = {
+            Row {
+                TextButton(onClick = { pickImport.launch(arrayOf("*/*")) }) { Text(str(R.string.import_file)) }
+                TextButton(onClick = onDismiss) { Text(str(R.string.close)) }
+            }
+        },
     )
 }
 

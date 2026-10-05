@@ -222,6 +222,28 @@ class MainViewModel : ViewModel() {
         act(Notice(str(R.string.deleted)) { it.restoreTask(task.id) }) { it.deleteTask(task.id) }
     }
 
+    /** Imports a file exported from another task manager and reports what came of it. */
+    fun importFrom(context: android.content.Context, uri: android.net.Uri) {
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val file = copyToCache(context, uri) ?: error("cannot read the file")
+                    try {
+                        Repo.store.importFile(file.absolutePath)
+                    } finally {
+                        file.parentFile?.deleteRecursively()
+                    }
+                }
+            }
+            val text = result.fold(
+                { r -> (listOf(str(R.string.imported, r.source, r.lists.toString(), r.tasks.toString(), r.attachments.toString())) + r.notes).joinToString(" ") },
+                { e -> describe(e) },
+            )
+            _state.update { it.copy(notice = Notice(text)) }
+            Repo.changed()
+        }
+    }
+
     fun sync() {
         viewModelScope.launch { Repo.sync() }
     }

@@ -82,6 +82,8 @@ struct AppCommands: Commands {
                 .keyboardShortcut("n")
             Button(L("Quick Entry")) { QuickEntryPanel.shared.present() }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
+            Divider()
+            Button(L("Import…")) { model.importFromFile() }
         }
         CommandMenu(L("Task")) {
             // Plain Return and Space are handled by the list itself: as menu

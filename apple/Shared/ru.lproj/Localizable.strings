@@ -240,3 +240,6 @@
 "Rounded" = "Скруглённый";
 "Serif" = "С засечками";
 "Monospaced" = "Моноширинный";
+"Import…" = "Импорт…";
+"A 2Do backup (.2dodb), a Todoist CSV, a Trello board JSON or Microsoft To Do lists as JSON" = "Резервная копия 2Do (.2dodb), CSV из Todoist, JSON доски Trello или списки Microsoft To Do в JSON";
+"Imported from %@: %@ lists, %@ tasks, %@ attachments." = "Импорт из %1$@: списков — %2$@, задач — %3$@, вложений — %4$@.";

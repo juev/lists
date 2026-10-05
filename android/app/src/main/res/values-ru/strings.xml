@@ -179,4 +179,6 @@
     <string name="status_open">В работе</string>
     <string name="contains">Содержит</string>
     <string name="matching_now">Сейчас подходит задач: %1$s</string>
+    <string name="import_file">Импорт…</string>
+    <string name="imported">Импорт из %1$s: списков — %2$s, задач — %3$s, вложений — %4$s.</string>
 </resources>
