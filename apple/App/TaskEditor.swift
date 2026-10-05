@@ -25,6 +25,7 @@ struct TaskEditor: View {
         VStack(alignment: .leading, spacing: 8) {
             TextField(L("Notes"), text: $notes, axis: .vertical)
                 .textFieldStyle(.plain)
+                .font(AppFont.style(.body))
                 .lineLimit(1...12)
                 .foregroundStyle(.secondary)
                 .focused($notesFocused)
@@ -161,7 +162,7 @@ struct TaskEditor: View {
                     .buttonStyle(.link)
                     .disabled(file.localPath == nil)
                     Text(file.localPath == nil ? L("downloads on the next sync") : ByteCountFormatter.string(fromByteCount: Int64(file.size), countStyle: .file))
-                        .font(.caption)
+                        .font(AppFont.style(.caption))
                         .foregroundStyle(.tertiary)
                     Button {
                         model.perform { try $0.removeAttachment(id: file.id) }
@@ -172,7 +173,7 @@ struct TaskEditor: View {
                     .buttonStyle(.plain)
                     .help(L("Remove attachment"))
                 }
-                .font(.callout)
+                .font(AppFont.style(.callout))
             }
         }
     }
@@ -188,6 +189,7 @@ struct TaskTitleField: View {
     var body: some View {
         TextField(L("Title"), text: $title)
             .textFieldStyle(.plain)
+            .font(AppFont.style(.body))
             .focused($focused)
             .onSubmit(commit)
             .onAppear { title = task.title }
@@ -217,7 +219,7 @@ struct DateEditor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(title).font(.headline)
+            Text(title).font(AppFont.style(.headline))
             HStack {
                 Button(L("Today")) { pick(days: 0) }
                 Button(L("Tomorrow")) { pick(days: 1) }

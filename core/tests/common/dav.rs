@@ -72,8 +72,9 @@ fn write_props(dir: &Path, root: &Path, body: &str) {
         ("name", "displayname"),
         ("color", "calendar-color"),
         ("state", ":state"),
+        ("filters", ":filters"),
     ] {
-        if key == "state" && !keep_custom {
+        if matches!(key, "state" | "filters") && !keep_custom {
             continue;
         }
         if let Some(value) = element(body, tag) {
@@ -210,6 +211,9 @@ fn handle(mut request: Request, root: &Path) {
                     }
                     if let Some(state) = get("state") {
                         inner.push_str(&format!("<l:state>{state}</l:state>"));
+                    }
+                    if let Some(filters) = get("filters") {
+                        inner.push_str(&format!("<l:filters>{filters}</l:filters>"));
                     }
                     format!("<d:response><d:href>{href}/</d:href><d:propstat><d:prop>{inner}</d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>")
                 };

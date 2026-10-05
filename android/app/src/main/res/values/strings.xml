@@ -160,4 +160,24 @@
     <string name="password_store_failed">The password could not be saved in the system keychain: %1$s</string>
     <string name="caldav_hint">Lists become calendars and tasks stay visible to other CalDAV apps. Attachments up to 5 MB are synced.</string>
     <string name="sync_off">Off</string>
+    <string name="project">Project</string>
+    <string name="filter">Filter</string>
+    <string name="projects">Projects</string>
+    <string name="filters">Filters</string>
+    <string name="project_off">Turn back into a task</string>
+    <string name="project_on">Make it a project</string>
+    <string name="new_filter">New filter</string>
+    <string name="delete_filter">Delete filter</string>
+    <string name="next_7_days">Next 7 days</string>
+    <string name="high_priority">High priority</string>
+    <string name="no_date">No date</string>
+    <string name="date">Date</string>
+    <string name="any">Any</string>
+    <string name="coming_days">The coming days</string>
+    <string name="days">Days</string>
+    <string name="priority_at_least">Priority at least</string>
+    <string name="status">Status</string>
+    <string name="status_open">Open</string>
+    <string name="contains">Contains</string>
+    <string name="matching_now">Tasks matching now: %1$s</string>
 </resources>

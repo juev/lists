@@ -104,6 +104,10 @@ import org.evsyukov.lists.title
 import org.evsyukov.lists.today
 import org.evsyukov.lists.weekdayNames
 import uniffi.lists_core.Attachment
+import uniffi.lists_core.DueWindow
+import uniffi.lists_core.FilterSpec
+import uniffi.lists_core.FilterStatus
+import uniffi.lists_core.SavedFilter
 import uniffi.lists_core.Freq
 import uniffi.lists_core.Priority
 import uniffi.lists_core.Repeat
@@ -717,5 +721,105 @@ fun SettingsDialog(model: MainViewModel, onDismiss: () -> Unit) {
             }) { Text(str(R.string.save_and_sync)) }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text(str(R.string.close)) } },
+    )
+}
+
+/** A saved view: which dates, lists, tags, priority and status it lets through. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun FilterDialog(filter: SavedFilter?, state: UiState, model: MainViewModel, onDismiss: () -> Unit) {
+    val old = filter?.spec
+    var name by remember { mutableStateOf(filter?.name.orEmpty()) }
+    // "any", "overdue", "today", "next", "none"
+    var window by remember {
+        mutableStateOf(
+            when (old?.due) {
+                is DueWindow.Overdue -> "overdue"
+                is DueWindow.Today -> "today"
+                is DueWindow.Next -> "next"
+                is DueWindow.NoDate -> "none"
+                else -> "any"
+            },
+        )
+    }
+    var days by remember { mutableStateOf(((old?.due as? DueWindow.Next)?.days ?: 7u).toString()) }
+    var lists by remember { mutableStateOf(old?.listIds?.toSet() ?: emptySet()) }
+    var tags by remember { mutableStateOf(old?.tags?.joinToString(" ").orEmpty()) }
+    var priority by remember { mutableStateOf(old?.minPriority ?: Priority.NONE) }
+    var status by remember { mutableStateOf(old?.status ?: FilterStatus.OPEN) }
+    var text by remember { mutableStateOf(old?.text.orEmpty()) }
+
+    val spec = FilterSpec(
+        due = when (window) {
+            "overdue" -> DueWindow.Overdue
+            "today" -> DueWindow.Today
+            "next" -> DueWindow.Next((days.toUIntOrNull() ?: 7u).coerceIn(1u, 365u))
+            "none" -> DueWindow.NoDate
+            else -> DueWindow.Any
+        },
+        listIds = lists.sorted(),
+        tags = tags.split(' ', ',').filter { it.isNotBlank() },
+        minPriority = priority,
+        status = status,
+        text = text,
+    )
+    val matching = remember(spec) { runCatching { Repo.store.previewFilter(spec).size }.getOrDefault(0) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(filter?.name ?: str(R.string.new_filter)) },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                OutlinedTextField(name, { name = it }, singleLine = true, label = { Text(str(R.string.title)) })
+                if (filter == null) {
+                    FlowRow(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        AssistChip(onClick = { name = str(R.string.next_7_days); window = "next"; days = "7" }, label = { Text(str(R.string.next_7_days)) })
+                        AssistChip(onClick = { name = str(R.string.overdue); window = "overdue" }, label = { Text(str(R.string.overdue)) })
+                        AssistChip(onClick = { name = str(R.string.high_priority); window = "any"; priority = Priority.HIGH }, label = { Text(str(R.string.high_priority)) })
+                        AssistChip(onClick = { name = str(R.string.no_date); window = "none" }, label = { Text(str(R.string.no_date)) })
+                    }
+                }
+                Text(str(R.string.date), style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 12.dp))
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    for ((value, label) in listOf("any" to R.string.any, "overdue" to R.string.overdue, "today" to R.string.today, "next" to R.string.coming_days, "none" to R.string.no_date)) {
+                        FilterChip(selected = window == value, onClick = { window = value }, label = { Text(str(label)) })
+                    }
+                }
+                if (window == "next") {
+                    OutlinedTextField(days, { days = it.filter(Char::isDigit).take(3) }, singleLine = true, label = { Text(str(R.string.days)) }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+                }
+                Text(str(R.string.lists), style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 12.dp))
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    for (list in state.lists.filter { !it.archived }) {
+                        FilterChip(selected = list.id in lists, onClick = { lists = if (list.id in lists) lists - list.id else lists + list.id }, label = { Text(list.displayName()) })
+                    }
+                }
+                OutlinedTextField(tags, { tags = it }, singleLine = true, label = { Text(str(R.string.tags)) }, modifier = Modifier.padding(top = 8.dp))
+                Text(str(R.string.priority_at_least), style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 12.dp))
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    for (p in priorities) FilterChip(selected = priority == p, onClick = { priority = p }, label = { Text(if (p == Priority.NONE) str(R.string.any) else p.title()) })
+                }
+                Text(str(R.string.status), style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 12.dp))
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    for ((value, label) in listOf(FilterStatus.OPEN to R.string.status_open, FilterStatus.DONE to R.string.completed, FilterStatus.ALL to R.string.all)) {
+                        FilterChip(selected = status == value, onClick = { status = value }, label = { Text(str(label)) })
+                    }
+                }
+                OutlinedTextField(text, { text = it }, singleLine = true, label = { Text(str(R.string.contains)) }, modifier = Modifier.padding(top = 8.dp))
+                Text(str(R.string.matching_now, matching), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp))
+                if (filter != null) {
+                    TextButton(onClick = { onDismiss(); model.act { it.deleteFilter(filter.id) } }) {
+                        Text(str(R.string.delete_filter), color = MaterialTheme.colorScheme.error)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = name.isNotBlank(), onClick = {
+                onDismiss()
+                model.act { store -> if (filter == null) store.createFilter(name, spec) else store.updateFilter(filter.id, name, spec) }
+            }) { Text(str(if (filter == null) R.string.create else R.string.done)) }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(str(R.string.cancel)) } },
     )
 }

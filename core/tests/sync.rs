@@ -609,3 +609,52 @@ fn s13_attachment_hash_from_the_storage_never_becomes_a_path() {
     assert_eq!(got[0].sha256, "", "a value that is not a hash is dropped");
     assert_eq!(got[0].local_path, None);
 }
+
+#[test]
+fn projects_and_saved_filters_sync_like_everything_else() {
+    let storage = tempfile::tempdir().unwrap();
+    let (a, b) = (device(), device());
+    let p = add(&a, "проект");
+    a.set_project(p.id.clone(), true).unwrap();
+    a.quick_add_under("шаг".into(), p.id.clone()).unwrap();
+    let f = a
+        .create_filter(
+            "Неделя".into(),
+            FilterSpec {
+                due: DueWindow::Next { days: 7 },
+                ..FilterSpec::default()
+            },
+        )
+        .unwrap();
+    settle(&a, &b, &storage);
+
+    assert_eq!(titles(&b.projects().unwrap()), ["проект"]);
+    assert_eq!(view(&b, Scope::Project { id: p.id }), ["шаг"]);
+    assert_eq!(b.filters().unwrap()[0].spec.due, DueWindow::Next { days: 7 });
+
+    // A rename on one device and a new condition on the other are both kept.
+    a.update_filter(f.id.clone(), "Ближайшее".into(), f.spec.clone())
+        .unwrap();
+    b.set_now_for_tests("2026-10-05T10:05");
+    b.update_filter(
+        f.id.clone(),
+        "Неделя".into(),
+        FilterSpec {
+            due: DueWindow::Next { days: 7 },
+            min_priority: Priority::High,
+            ..FilterSpec::default()
+        },
+    )
+    .unwrap();
+    settle(&a, &b, &storage);
+    for d in [&a, &b] {
+        let got = &d.filters().unwrap()[0];
+        assert_eq!(
+            (got.name.as_str(), got.spec.min_priority),
+            ("Ближайшее", Priority::High)
+        );
+    }
+    b.delete_filter(f.id).unwrap();
+    settle(&b, &a, &storage);
+    assert!(a.filters().unwrap().is_empty());
+}

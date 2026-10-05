@@ -25,9 +25,12 @@ struct MainWindow: View {
         @Bindable var model = model
         NavigationSplitView {
             Sidebar()
+                // Set per column: the split view does not pass the font down from the window.
+                .font(AppFont.style(.body))
                 .navigationSplitViewColumnWidth(min: 190, ideal: 220, max: 320)
         } detail: {
             TaskListView()
+                .font(AppFont.style(.body))
                 .navigationTitle(model.scopeTitle)
                 .toolbar {
                     ToolbarItem(placement: .primaryAction) { SyncIndicator() }
@@ -80,6 +83,8 @@ struct Sidebar: View {
     @Environment(AppModel.self) private var model
     @State private var editing: TaskList?
     @State private var creating = false
+    @State private var editingFilter: SavedFilter?
+    @State private var creatingFilter = false
 
     var body: some View {
         @Bindable var model = model
@@ -100,13 +105,14 @@ struct Sidebar: View {
                 ForEach(model.lists.filter { $0.id != "inbox" && !$0.archived }, id: \.id) { list in
                     Label {
                         HStack {
-                            Text(list.name)
+                            Text(list.name).font(AppFont.style(.body))
                             Spacer()
                             if list.openCount > 0 { Text("\(list.openCount)").foregroundStyle(.secondary).monospacedDigit() }
                         }
                     } icon: {
                         Image(systemName: list.symbol).foregroundStyle(list.tint)
                     }
+                    .font(AppFont.style(.body))
                     .tag(Scope.list(id: list.id))
                     .dropDestination(for: String.self) { ids, _ in moveTasks(ids, to: list.id) }
                     .contextMenu {
@@ -123,14 +129,56 @@ struct Sidebar: View {
                     ForEach(model.tags, id: \.name) { tag in
                         Label {
                             HStack {
-                                Text(tag.name)
+                                Text(tag.name).font(AppFont.style(.body))
                                 Spacer()
                                 Text("\(tag.openCount)").foregroundStyle(.secondary).monospacedDigit()
                             }
                         } icon: {
                             Image(systemName: "number")
                         }
+                        .font(AppFont.style(.body))
                         .tag(Scope.tag(name: tag.name))
+                    }
+                }
+            }
+            if !model.projects.isEmpty {
+                Section(L("Projects")) {
+                    ForEach(model.projects, id: \.id) { project in
+                        Label {
+                            HStack {
+                                Text(project.title).lineLimit(1).font(AppFont.style(.body))
+                                Spacer()
+                                Text("\(project.subtasksDone)/\(project.subtasksTotal)").foregroundStyle(.secondary).monospacedDigit()
+                            }
+                        } icon: {
+                            Image(systemName: "folder").foregroundStyle(model.list(project.listId)?.tint ?? .accentColor)
+                        }
+                        .font(AppFont.style(.body))
+                        .tag(Scope.project(id: project.id))
+                        .contextMenu {
+                            Button(L("Turn back into a task")) { model.perform { try $0.setProject(id: project.id, project: false) } }
+                        }
+                    }
+                }
+            }
+            if !model.filters.isEmpty {
+                Section(L("Filters")) {
+                    ForEach(model.filters, id: \.id) { filter in
+                        Label {
+                            HStack {
+                                Text(filter.name).lineLimit(1).font(AppFont.style(.body))
+                                Spacer()
+                                if filter.openCount > 0 { Text("\(filter.openCount)").foregroundStyle(.secondary).monospacedDigit() }
+                            }
+                        } icon: {
+                            Image(systemName: "line.3.horizontal.decrease.circle")
+                        }
+                        .font(AppFont.style(.body))
+                        .tag(Scope.filter(id: filter.id))
+                        .contextMenu {
+                            Button(L("Configure…")) { editingFilter = filter }
+                            Button(L("Delete filter"), role: .destructive) { model.perform { try $0.deleteFilter(id: filter.id) } }
+                        }
                     }
                 }
             }
@@ -140,6 +188,7 @@ struct Sidebar: View {
                     ForEach(archived, id: \.id) { list in
                         Label(list.name, systemImage: "archivebox")
                             .foregroundStyle(.secondary)
+                            .font(AppFont.style(.body))
                             .tag(Scope.list(id: list.id))
                             .contextMenu {
                                 Button(L("Unarchive")) { model.perform { try $0.setListArchived(id: list.id, archived: false) } }
@@ -152,21 +201,31 @@ struct Sidebar: View {
         .listStyle(.sidebar)
         .safeAreaInset(edge: .bottom) {
             HStack {
-                Button { creating = true } label: { Label(L("New list"), systemImage: "plus") }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
+                Menu {
+                    Button(L("New list")) { creating = true }
+                    Button(L("New filter")) { creatingFilter = true }
+                } label: {
+                    Label(L("New list"), systemImage: "plus")
+                } primaryAction: {
+                    creating = true
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .foregroundStyle(.secondary)
                 Spacer()
             }
             .padding(10)
         }
         .sheet(item: $editing) { ListEditor(list: $0) }
         .sheet(isPresented: $creating) { ListEditor(list: nil) }
+        .sheet(item: $editingFilter) { FilterEditor(filter: $0) }
+        .sheet(isPresented: $creatingFilter) { FilterEditor(filter: nil) }
     }
 
     private func row(_ scope: Scope, _ title: String, _ symbol: String, count: UInt32, alert: Bool = false) -> some View {
         Label {
             HStack {
-                Text(title)
+                Text(title).font(AppFont.style(.body))
                 Spacer()
                 if count > 0 {
                     Text("\(count)").foregroundStyle(alert ? AnyShapeStyle(.red) : AnyShapeStyle(.secondary)).monospacedDigit()
@@ -175,6 +234,7 @@ struct Sidebar: View {
         } icon: {
             Image(systemName: symbol)
         }
+        .font(AppFont.style(.body))
         .tag(scope)
     }
 
@@ -226,7 +286,7 @@ struct ListEditor: View {
                         Circle()
                             .fill(Color(hex: hex) ?? .accentColor)
                             .frame(width: 18, height: 18)
-                            .overlay { if hex == color { Image(systemName: "checkmark").font(.caption2.bold()).foregroundStyle(.white) } }
+                            .overlay { if hex == color { Image(systemName: "checkmark").font(AppFont.style(.caption2, weight: .bold)).foregroundStyle(.white) } }
                             .onTapGesture { color = hex }
                             .accessibilityLabel(hex.isEmpty ? L("Default color") : hex)
                     }
@@ -297,6 +357,135 @@ struct ListEditor: View {
             return id
         }
         if list == nil, let created { model.scope = .list(id: created) }
+        dismiss()
+    }
+}
+
+extension SavedFilter: Identifiable {}
+
+/// A saved view: which dates, lists, tags, priority and status it lets through.
+struct FilterEditor: View {
+    let filter: SavedFilter?
+    @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+
+    private enum Window: Hashable { case any, overdue, today, next, noDate }
+
+    @State private var name = ""
+    @State private var window = Window.any
+    @State private var days = 7
+    @State private var lists: Set<String> = []
+    @State private var tags = ""
+    @State private var priority = Priority.none
+    @State private var status = FilterStatus.open
+    @State private var text = ""
+    @State private var matching = 0
+
+    private var spec: FilterSpec {
+        let due: DueWindow
+        switch window {
+        case .any: due = .any
+        case .overdue: due = .overdue
+        case .today: due = .today
+        case .next: due = .next(days: UInt32(days))
+        case .noDate: due = .noDate
+        }
+        return FilterSpec(
+            due: due, listIds: lists.sorted(),
+            tags: tags.split(whereSeparator: { $0 == " " || $0 == "," }).map { String($0) },
+            minPriority: priority, status: status, text: text)
+    }
+
+    var body: some View {
+        Form {
+            TextField(L("Title"), text: $name)
+            if filter == nil {
+                LabeledContent(L("Start from")) {
+                    HStack {
+                        Button(L("Next 7 days")) { name = L("Next 7 days"); window = .next; days = 7 }
+                        Button(L("Overdue")) { name = L("Overdue"); window = .overdue }
+                        Button(L("High priority")) { name = L("High priority"); window = .any; priority = .high }
+                        Button(L("No date")) { name = L("No date"); window = .noDate }
+                    }
+                    .controlSize(.small)
+                }
+            }
+            Picker(L("Date"), selection: $window) {
+                Text(L("Any")).tag(Window.any)
+                Text(L("Overdue")).tag(Window.overdue)
+                Text(L("Today")).tag(Window.today)
+                Text(L("The coming days")).tag(Window.next)
+                Text(L("No date")).tag(Window.noDate)
+            }
+            if window == .next {
+                Stepper(L("Days: %@", "\(days)"), value: $days, in: 1...365)
+            }
+            LabeledContent(L("Lists")) {
+                VStack(alignment: .leading) {
+                    ForEach(model.lists.filter { !$0.archived }, id: \.id) { list in
+                        Toggle(model.listName(list), isOn: Binding(
+                            get: { lists.contains(list.id) },
+                            set: { if $0 { lists.insert(list.id) } else { lists.remove(list.id) } }))
+                    }
+                    Text(L("None checked means every list.")).font(AppFont.style(.caption)).foregroundStyle(.secondary)
+                }
+            }
+            TextField(L("Tags"), text: $tags, prompt: Text(L("all of these, separated by spaces")))
+            Picker(L("Priority at least"), selection: $priority) {
+                ForEach(Priority.all, id: \.self) { Text($0 == .none ? L("Any") : $0.title).tag($0) }
+            }
+            Picker(L("Status"), selection: $status) {
+                Text(L("Open")).tag(FilterStatus.open)
+                Text(L("Completed")).tag(FilterStatus.done)
+                Text(L("All")).tag(FilterStatus.all)
+            }
+            TextField(L("Contains"), text: $text)
+            Text(L("Tasks matching now: %@", "\(matching)")).font(AppFont.style(.caption)).foregroundStyle(.secondary)
+        }
+        .formStyle(.grouped)
+        .frame(width: 480)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) { Button(L("Cancel")) { dismiss() } }
+            ToolbarItem(placement: .confirmationAction) {
+                Button(filter == nil ? L("Create") : L("Done"), action: save)
+                    .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+        .onAppear(perform: load)
+        .onChange(of: spec) { _, new in count(new) }
+    }
+
+    private func count(_ spec: FilterSpec) {
+        matching = (try? model.store?.previewFilter(spec: spec).count) ?? 0
+    }
+
+    private func load() {
+        defer { count(spec) }
+        guard let filter else { return }
+        name = filter.name
+        switch filter.spec.due {
+        case .any: window = .any
+        case .overdue: window = .overdue
+        case .today: window = .today
+        case .next(let n): window = .next; days = Int(n)
+        case .noDate: window = .noDate
+        }
+        lists = Set(filter.spec.listIds)
+        tags = filter.spec.tags.joined(separator: " ")
+        priority = filter.spec.minPriority
+        status = filter.spec.status
+        text = filter.spec.text
+    }
+
+    private func save() {
+        let created = model.perform { store -> String in
+            if let filter {
+                try store.updateFilter(id: filter.id, name: name, spec: spec)
+                return filter.id
+            }
+            return try store.createFilter(name: name, spec: spec).id
+        }
+        if filter == nil, let created { model.scope = .filter(id: created) }
         dismiss()
     }
 }

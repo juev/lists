@@ -102,7 +102,11 @@ const RU = {
   "No tasks": "Задач нет", "Nothing found": "Ничего не найдено", "Synced": "Синхронизировано", "Sync failed": "Синхронизация не удалась",
   "waiting": "ожидает отправки", "Deleted": "Удалено", "Undo": "Отменить", "Task completed": "Выполнено", "Moved to the next occurrence": "Перенесено на следующий повтор",
   "downloads on the next sync": "загрузится при синхронизации", "from": "с", "Delete list": "Удалить список", "Delete this list and move its tasks to the trash?": "Удалить список и отправить его задачи в корзину?",
-  "Sort": "Сортировка", "Manually": "Вручную", "By due date": "По сроку", "By priority": "По приоритету", "By title": "По названию", "Rename": "Переименовать", "time": "время"
+  "Sort": "Сортировка", "Manually": "Вручную", "By due date": "По сроку", "By priority": "По приоритету", "By title": "По названию", "Rename": "Переименовать", "time": "время",
+  "Projects": "Проекты", "Filters": "Фильтры", "New filter": "Новый фильтр", "Make it a project": "Сделать проектом", "Turn back into a task": "Сделать обычной задачей",
+  "Filter": "Фильтр", "Date": "Дата", "Any": "Любой", "The coming days": "Ближайшие дни", "No date": "Без даты", "Days": "Дней", "Priority at least": "Приоритет не ниже",
+  "Status": "Состояние", "Open": "В работе", "Contains": "Содержит", "Save": "Сохранить", "Cancel": "Отмена", "Delete filter": "Удалить фильтр", "Edit": "Изменить",
+  "all of these, separated by spaces": "все сразу, через пробел", "Next 7 days": "Ближайшие 7 дней", "High priority": "Высокий приоритет", "Any list unless some are checked": "Любой список, если ничего не отмечено"
 };
 const ru = (navigator.language || "en").toLowerCase().startsWith("ru");
 const t = s => (ru && RU[s]) || s;
@@ -116,7 +120,7 @@ const $ = (tag, props = {}, ...kids) => {
   for (const kid of kids.flat(Infinity)) if (kid != null && kid !== false) el.append(kid);
   return el;
 };
-const state = { scope: "today", search: "", overview: null, tasks: [], open: new Set(), details: {}, drawer: false, typing: false };
+const state = { filterEdit: null, scope: "today", search: "", overview: null, tasks: [], open: new Set(), details: {}, drawer: false, typing: false };
 const root = document.getElementById("root");
 
 async function api(path, options) {
@@ -165,6 +169,8 @@ function scopeTitle() {
   const s = state.scope;
   if (s.startsWith("list:")) { const l = state.overview.lists.find(l => "list:" + l.id === s); return l ? l.name : t("Lists"); }
   if (s.startsWith("tag:")) return "#" + s.slice(4);
+  if (s.startsWith("project:")) { const p = state.overview.projects.find(p => "project:" + p.id === s); return p ? p.title : t("Projects"); }
+  if (s.startsWith("filter:")) { const f = state.overview.filters.find(f => "filter:" + f.id === s); return f ? f.name : t("Filter"); }
   return t({ inbox: "Inbox", today: "Today", upcoming: "Upcoming", all: "All", completed: "Completed", trash: "Trash" }[s]);
 }
 const listName = id => { const l = state.overview.lists.find(l => l.id === id); return !l ? "" : l.id === "inbox" ? t("Inbox") : l.name; };
@@ -220,7 +226,7 @@ function taskNode(x, origin) {
     $("div", { class: "title" },
       // An open task shows its title once, as the editable field below.
       open && !locked ? $("div", { class: "meta" }, x.priority ? $("span", { class: "prio" }, marks(x.priority)) : "", listName(x.list)) :
-        $("div", { class: "t" + (x.done ? " done" : "") }, x.priority ? $("span", { class: "prio" }, marks(x.priority) + " ") : "", x.title),
+        $("div", { class: "t" + (x.done ? " done" : "") }, x.project ? "▸ " : "", x.priority ? $("span", { class: "prio" }, marks(x.priority) + " ") : "", x.title),
       open ? null : summary(x, origin)));
   return $("div", { class: "task" + (open ? " open" : "") }, row, open && state.details[x.id] ? editor(state.details[x.id]) : null);
 }
@@ -274,6 +280,7 @@ function editor(d) {
       $("div", { class: "chips" },
         $("button", { class: "link", onclick: () => file.click() }, t("Attach file")), file, $("span", { class: "chip" }, move),
         $("button", { class: "link", onclick: () => act("duplicate", { id }) }, t("Duplicate")),
+        x.parent ? null : $("button", { class: "link", onclick: () => act("setProject", { id, value: !x.project }) }, t(x.project ? "Turn back into a task" : "Make it a project")),
         $("button", { class: "link danger", onclick: () => { state.open.delete(id); act("delete", { id }, t("Deleted"), () => act("restore", { id })); } }, t("Delete")))),
     $("div", { class: "sub" }, d.subtasks.map(s => taskNode(s, false)), $("div", { class: "row" }, $("span", { class: "check", style: "border-style:dashed" }), sub)));
 }
@@ -292,9 +299,46 @@ function listTools(l) {
     l.id === "inbox" ? null : $("button", { class: "link danger", onclick: () => { if (confirm(t("Delete this list and move its tasks to the trash?"))) { state.scope = "inbox"; act("deleteList", { id: l.id }); } } }, t("Delete list"))];
 }
 
+// The filter form replaces the task list while a filter is being created or edited.
+function filterForm(f) {
+  const spec = f.spec || {}, due = spec.due || { kind: "any" };
+  const name = $("input", { type: "text", value: f.name || "", placeholder: t("Title") });
+  const win = $("select", {}, [["any", "Any"], ["overdue", "Overdue"], ["today", "Today"], ["next", "The coming days"], ["nodate", "No date"]].map(([v, n]) => $("option", { value: v, selected: due.kind === v }, t(n))));
+  const days = $("input", { type: "number", min: 1, max: 365, value: due.days || 7, style: "width:70px" });
+  const lists = state.overview.lists.filter(l => !l.archived).map(l => { const box = $("input", { type: "checkbox", value: l.id, checked: (spec.list_ids || []).includes(l.id) }); return $("label", { class: "chip" }, box, listName(l.id)); });
+  const tags = $("input", { type: "text", value: (spec.tags || []).join(" "), placeholder: t("all of these, separated by spaces") });
+  const prio = $("select", {}, [["none", "Any"], ["low", "Low"], ["medium", "Medium"], ["high", "High"]].map(([v, n]) => $("option", { value: v, selected: (spec.min_priority || "none") === v }, t(n))));
+  const status = $("select", {}, [["open", "Open"], ["done", "Completed"], ["all", "All"]].map(([v, n]) => $("option", { value: v, selected: (spec.status || "open") === v }, t(n))));
+  const text = $("input", { type: "text", value: spec.text || "" });
+  const preset = (label, set) => $("button", { class: "chip", onclick: () => { name.value = t(label); set(); } }, t(label));
+  const read = () => ({
+    due: win.value === "next" ? { kind: "next", days: Math.max(1, Number(days.value) || 7) } : { kind: win.value },
+    list_ids: lists.map(l => l.querySelector("input")).filter(b => b.checked).map(b => b.value),
+    tags: tags.value.split(/[ ,]+/).filter(Boolean), min_priority: prio.value, status: status.value, text: text.value.trim()
+  });
+  const close = () => { state.filterEdit = null; load(); };
+  const row = (label, ...kids) => $("div", { class: "chips" }, $("span", { style: "min-width:150px;color:var(--muted)" }, label), kids);
+  return $("div", { class: "edit", style: "padding:16px;max-width:640px" },
+    $("div", { class: "name", style: "border-bottom:1px solid var(--line);padding-bottom:6px" }, name),
+    f.id ? null : row("", preset("Next 7 days", () => { win.value = "next"; days.value = 7; }), preset("Overdue", () => { win.value = "overdue"; }), preset("High priority", () => { prio.value = "high"; }), preset("No date", () => { win.value = "nodate"; })),
+    row(t("Date"), $("span", { class: "chip" }, win), $("span", { class: "chip" }, t("Days"), days)),
+    row(t("Lists"), lists), $("div", { class: "meta" }, t("Any list unless some are checked")),
+    row(t("Tags"), $("span", { class: "chip" }, tags)), row(t("Priority at least"), $("span", { class: "chip" }, prio)),
+    row(t("Status"), $("span", { class: "chip" }, status)), row(t("Contains"), $("span", { class: "chip" }, text)),
+    $("div", { class: "chips" },
+      $("button", { class: "link", onclick: async () => {
+        if (!name.value.trim()) return name.focus();
+        if (f.id) await call("updateFilter", { id: f.id, name: name.value.trim(), spec: read() });
+        else { const made = await call("createFilter", { name: name.value.trim(), spec: read() }); state.scope = "filter:" + made.id; }
+        close();
+      } }, t("Save")),
+      $("button", { class: "link", onclick: close }, t("Cancel")),
+      f.id ? $("button", { class: "link danger", onclick: async () => { await call("deleteFilter", { id: f.id }); state.scope = "inbox"; close(); } }, t("Delete filter")) : null));
+}
+
 function render() {
   if (state.typing) return; // never rebuild the page under the user's cursor
-  const o = state.overview, c = o.counts, secs = sections(), origin = state.search || ["today", "upcoming", "completed", "trash"].includes(state.scope) || state.scope.startsWith("tag:");
+  const o = state.overview, c = o.counts, secs = sections(), origin = state.search || ["today", "upcoming", "completed", "trash"].includes(state.scope) || state.scope.startsWith("tag:") || state.scope.startsWith("filter:");
   const empty = secs.every(s => !s.tasks.length);
   const current = state.scope.startsWith("list:") ? o.lists.find(l => "list:" + l.id === state.scope) : state.scope === "inbox" ? o.lists.find(l => l.id === "inbox") : null;
   const syncText = !o.sync.configured ? "" : o.sync.lastError ? t("Sync failed") : o.sync.pending ? `${o.sync.pending} ${t("waiting")}` : t("Synced");
@@ -307,18 +351,23 @@ function render() {
       $("div", { class: "side-title" }, t("Lists")),
       o.lists.filter(l => l.id !== "inbox" && !l.archived).map(l => nav("list:" + l.id, l.name, l.open, { color: l.color })),
       $("button", { class: "nav", style: "color:var(--muted)", onclick: () => { const name = prompt(t("List name")); if (name && name.trim()) call("createList", { name: name.trim() }).then(l => { state.scope = "list:" + l.id; load(); }); } }, "+ " + t("New list")),
+      o.projects.length ? $("div", { class: "side-title" }, t("Projects")) : null,
+      o.projects.map(p => nav("project:" + p.id, p.title, `${p.subtasksDone}/${p.subtasks}`)),
+      $("div", { class: "side-title" }, t("Filters")), o.filters.map(f => nav("filter:" + f.id, f.name, f.open)),
+      $("button", { class: "nav", style: "color:var(--muted)", onclick: () => { state.filterEdit = {}; state.drawer = false; render(); } }, "+ " + t("New filter")),
       o.tags.length ? $("div", { class: "side-title" }, t("Tags")) : null, o.tags.map(g => nav("tag:" + g.name, "#" + g.name, g.open)),
       $("div", { class: "side-title" }), $("button", { class: "nav", style: "color:var(--muted)", onclick: () => api("/api/logout", { method: "POST", headers: { "X-Lists": "1" } }).then(showLogin) }, t("Sign out"))),
     $("div", { id: "shade", onclick: () => { state.drawer = false; render(); } }),
     $("div", { id: "main" },
       $("header", {}, $("button", { id: "menu", "aria-label": "menu", onclick: () => { state.drawer = true; render(); } }, "☰"), $("h1", {}, scopeTitle()),
         $("button", { id: "sync", class: o.sync.lastError ? "bad" : "", title: o.sync.lastError || "", onclick: () => call("sync").then(load, load) }, syncText), search),
-      $("div", { id: "tasks" },
+      state.filterEdit ? $("div", { id: "tasks" }, filterForm(state.filterEdit)) : $("div", { id: "tasks" },
+        state.scope.startsWith("filter:") && !state.search ? $("div", { class: "chips", style: "padding:8px 10px 0" }, $("button", { class: "link", onclick: () => { state.filterEdit = o.filters.find(f => "filter:" + f.id === state.scope); render(); } }, t("Edit"))) : null,
         current && !state.search ? $("div", { class: "chips", style: "padding:8px 10px 0" }, listTools(current)) : null,
         empty ? $("div", { class: "empty" }, t(state.search ? "Nothing found" : state.scope === "today" ? "All done for today" : "No tasks"))
           : secs.map(s => [s.title ? $("div", { class: "section" + (s.bad ? " bad" : "") }, s.title) : null, s.tasks.map(x => taskNode(x, origin))]),
         state.scope === "trash" && !empty ? $("div", { style: "text-align:right;padding:14px" }, $("button", { class: "link danger", onclick: () => confirm(t("Delete everything in the trash for good?")) && act("emptyTrash") }, t("Empty Trash"))) : null),
-      readOnly() ? null : $("div", { id: "add" }, $("span", { style: "color:var(--muted)" }, "+"), add))));
+      readOnly() || state.filterEdit || state.scope.startsWith("filter:") ? null : $("div", { id: "add" }, $("span", { style: "color:var(--muted)" }, "+"), add))));
 }
 
 function showLogin() {

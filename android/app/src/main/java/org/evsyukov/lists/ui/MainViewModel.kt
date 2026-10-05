@@ -21,6 +21,7 @@ import uniffi.lists_core.Attachment
 import uniffi.lists_core.Counts
 import uniffi.lists_core.AppException
 import uniffi.lists_core.NewTask
+import uniffi.lists_core.SavedFilter
 import uniffi.lists_core.Scope
 import uniffi.lists_core.Store
 import uniffi.lists_core.SyncStatus
@@ -39,6 +40,8 @@ data class Notice(val text: String, val undo: (suspend (Store) -> Unit)? = null)
 data class UiState(
     val lists: List<TaskList> = emptyList(),
     val tags: List<TagCount> = emptyList(),
+    val projects: List<TaskItem> = emptyList(),
+    val filters: List<SavedFilter> = emptyList(),
     val counts: Counts = Counts(0u, 0u, 0u, 0u, 0u),
     val scope: Scope = Scope.Today,
     val search: String? = null,
@@ -63,6 +66,8 @@ data class UiState(
             is Scope.List -> list(s.id)?.displayName() ?: str(R.string.list)
             is Scope.Tag -> "#${s.name}"
             is Scope.Search -> str(R.string.search)
+            is Scope.Project -> projects.firstOrNull { it.id == s.id }?.title ?: str(R.string.project)
+            is Scope.Filter -> filters.firstOrNull { it.id == s.id }?.name ?: str(R.string.filter)
         }
 
     /** Where a task typed into the current view goes. */
@@ -101,12 +106,16 @@ class MainViewModel : ViewModel() {
                 val tags = store.tags()
                 // The list or tag on screen may have been removed on another device.
                 val shown = current.scope
+                val projects = store.projects()
+                val filters = store.filters()
                 val scope = when {
+                    shown is Scope.Project && projects.none { it.id == shown.id } -> Scope.Inbox
+                    shown is Scope.Filter && filters.none { it.id == shown.id } -> Scope.Inbox
                     shown is Scope.List && lists.none { it.id == shown.id } -> Scope.Inbox
                     shown is Scope.Tag && tags.none { it.name == shown.name } -> Scope.Inbox
                     else -> shown
                 }
-                val base = current.copy(lists = lists, tags = tags, scope = scope)
+                val base = current.copy(lists = lists, tags = tags, projects = projects, filters = filters, scope = scope)
                 base.copy(
                     counts = store.counts(),
                     sections = group(base, store.tasks(base.effectiveScope)),
@@ -185,6 +194,10 @@ class MainViewModel : ViewModel() {
         if (line.isEmpty()) return
         val state = _state.value
         act { store ->
+            (state.scope as? Scope.Project)?.let {
+                store.quickAddUnder(line, it.id)
+                return@act
+            }
             val task = store.quickAdd(line, state.targetListId)
             // A task typed into Today belongs to today unless the line says otherwise.
             if (state.scope == Scope.Today && task.due == null) store.setDue(task.id, today())

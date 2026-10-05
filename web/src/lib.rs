@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use lists_core::{
-    AppError, Attachment, NewTask, Priority, Repeat, Scope, SortMode, Store, SyncConfig, TaskItem, TaskList,
+    AppError, Attachment, FilterSpec, NewTask, Priority, Repeat, Scope, SortMode, Store, SyncConfig, TaskItem, TaskList,
 };
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -110,6 +110,7 @@ fn task_json(t: &TaskItem) -> Value {
         "priority": priority_to(t.priority), "tags": t.tags,
         "repeat": t.repeat.as_ref().and_then(|r| serde_json::to_value(r).ok()),
         "remind": t.remind, "done": t.done, "deleted": t.deleted, "log": t.is_log,
+        "project": t.is_project,
         "subtasks": t.subtasks_total, "subtasksDone": t.subtasks_done, "attachments": t.attachments,
     })
 }
@@ -132,6 +133,8 @@ fn scope_from(text: &str) -> Option<Scope> {
         Some(("list", id)) => Scope::List { id: id.to_string() },
         Some(("tag", name)) => Scope::Tag { name: name.to_string() },
         Some(("search", q)) => Scope::Search { text: q.to_string() },
+        Some(("project", id)) => Scope::Project { id: id.to_string() },
+        Some(("filter", id)) => Scope::Filter { id: id.to_string() },
         Some(_) => return None,
         None => match text {
             "inbox" => Scope::Inbox,
@@ -204,6 +207,8 @@ impl App {
         Ok(json!({
             "lists": s.lists()?.iter().map(list_json).collect::<Vec<_>>(),
             "tags": s.tags()?.iter().map(|t| json!({ "name": t.name, "open": t.open_count })).collect::<Vec<_>>(),
+            "projects": s.projects()?.iter().map(task_json).collect::<Vec<_>>(),
+            "filters": s.filters()?.iter().map(|f| json!({ "id": f.id, "name": f.name, "open": f.open_count, "spec": serde_json::to_value(&f.spec).unwrap_or(Value::Null) })).collect::<Vec<_>>(),
             "counts": { "inbox": counts.inbox, "today": counts.today, "overdue": counts.overdue, "upcoming": counts.upcoming, "trash": counts.trash },
             "sync": { "configured": status.configured, "pending": status.pending, "lastOk": status.last_ok, "lastError": status.last_error },
         }))
@@ -213,92 +218,114 @@ impl App {
         let s = &self.store;
         let id = || text_arg(a, "id");
         let done = json!({ "ok": true });
-        let out = match op {
-            "quickAdd" => {
-                let scope = optional(a, "scope").unwrap_or_default();
-                let list = scope.strip_prefix("list:").map(str::to_string);
-                let task = s.quick_add(text_arg(a, "text")?, list)?;
-                // Same rule as in the apps: what is typed into Today belongs to today.
-                if scope == "today" && task.due.is_none() {
-                    s.set_due(task.id.clone(), optional(a, "today"))?;
+        let out =
+            match op {
+                "quickAdd" => {
+                    let scope = optional(a, "scope").unwrap_or_default();
+                    let list = scope.strip_prefix("list:").map(str::to_string);
+                    if let Some(project) = scope.strip_prefix("project:") {
+                        self.dirty.store(true, Ordering::Relaxed);
+                        return Ok(task_json(
+                            &s.quick_add_under(text_arg(a, "text")?, project.to_string())?,
+                        ));
+                    }
+                    let task = s.quick_add(text_arg(a, "text")?, list)?;
+                    // Same rule as in the apps: what is typed into Today belongs to today.
+                    if scope == "today" && task.due.is_none() {
+                        s.set_due(task.id.clone(), optional(a, "today"))?;
+                    }
+                    if let Some(tag) = scope.strip_prefix("tag:") {
+                        s.add_tag(task.id.clone(), tag.to_string())?;
+                    }
+                    task_json(&s.task(task.id)?)
                 }
-                if let Some(tag) = scope.strip_prefix("tag:") {
-                    s.add_tag(task.id.clone(), tag.to_string())?;
+                "addSubtask" => task_json(&s.create_task(NewTask {
+                    title: text_arg(a, "title")?,
+                    parent_id: Some(text_arg(a, "parent")?),
+                    ..NewTask::default()
+                })?),
+                "setTitle" => s.set_title(id()?, text_arg(a, "value")?).map(|_| done)?,
+                "setNotes" => s
+                    .set_notes(
+                        id()?,
+                        a.get("value").and_then(Value::as_str).unwrap_or_default().to_string(),
+                    )
+                    .map(|_| done)?,
+                "setStart" => s.set_start(id()?, optional(a, "value")).map(|_| done)?,
+                "setDue" => s.set_due(id()?, optional(a, "value")).map(|_| done)?,
+                "setRemind" => s.set_remind(id()?, optional(a, "value")).map(|_| done)?,
+                "setPriority" => s
+                    .set_priority(
+                        id()?,
+                        priority_from(a.get("value").and_then(Value::as_i64).unwrap_or(0)),
+                    )
+                    .map(|_| done)?,
+                "setRepeat" => {
+                    let rule = match a.get("value") {
+                        None | Some(Value::Null) => None,
+                        Some(v) => Some(
+                            serde_json::from_value::<Repeat>(v.clone())
+                                .map_err(|e| AppError::Invalid { msg: e.to_string() })?,
+                        ),
+                    };
+                    s.set_repeat(id()?, rule).map(|_| done)?
                 }
-                task_json(&s.task(task.id)?)
-            }
-            "addSubtask" => task_json(&s.create_task(NewTask {
-                title: text_arg(a, "title")?,
-                parent_id: Some(text_arg(a, "parent")?),
-                ..NewTask::default()
-            })?),
-            "setTitle" => s.set_title(id()?, text_arg(a, "value")?).map(|_| done)?,
-            "setNotes" => s
-                .set_notes(
-                    id()?,
-                    a.get("value").and_then(Value::as_str).unwrap_or_default().to_string(),
-                )
-                .map(|_| done)?,
-            "setStart" => s.set_start(id()?, optional(a, "value")).map(|_| done)?,
-            "setDue" => s.set_due(id()?, optional(a, "value")).map(|_| done)?,
-            "setRemind" => s.set_remind(id()?, optional(a, "value")).map(|_| done)?,
-            "setPriority" => s
-                .set_priority(
-                    id()?,
-                    priority_from(a.get("value").and_then(Value::as_i64).unwrap_or(0)),
-                )
-                .map(|_| done)?,
-            "setRepeat" => {
-                let rule = match a.get("value") {
-                    None | Some(Value::Null) => None,
-                    Some(v) => Some(
-                        serde_json::from_value::<Repeat>(v.clone())
-                            .map_err(|e| AppError::Invalid { msg: e.to_string() })?,
-                    ),
-                };
-                s.set_repeat(id()?, rule).map(|_| done)?
-            }
-            "addTag" => s.add_tag(id()?, text_arg(a, "value")?).map(|_| done)?,
-            "removeTag" => s.remove_tag(id()?, text_arg(a, "value")?).map(|_| done)?,
-            "complete" => task_json(&s.complete_task(id()?)?),
-            "reopen" => s.reopen_task(id()?).map(|_| done)?,
-            "delete" => s.delete_task(id()?).map(|_| done)?,
-            "restore" => s.restore_task(id()?).map(|_| done)?,
-            "emptyTrash" => json!({ "removed": s.empty_trash()? }),
-            "moveToList" => s.move_to_list(id()?, text_arg(a, "list")?).map(|_| done)?,
-            "duplicate" => task_json(&s.duplicate_task(id()?)?),
-            "createList" => list_json(&s.create_list(text_arg(a, "name")?)?),
-            "renameList" => s.rename_list(id()?, text_arg(a, "value")?).map(|_| done)?,
-            "setListColor" => s
-                .set_list_color(
-                    id()?,
-                    a.get("value").and_then(Value::as_str).unwrap_or_default().to_string(),
-                )
-                .map(|_| done)?,
-            "setListSort" => {
-                let sort = match text_arg(a, "value")?.as_str() {
-                    "due" => SortMode::Due,
-                    "priority" => SortMode::Priority,
-                    "title" => SortMode::Title,
-                    _ => SortMode::Manual,
-                };
-                s.set_list_sort(id()?, sort).map(|_| done)?
-            }
-            "setListShowDone" => s
-                .set_list_show_done(id()?, a.get("value").and_then(Value::as_bool).unwrap_or(false))
-                .map(|_| done)?,
-            "deleteList" => s.delete_list(id()?).map(|_| done)?,
-            "removeAttachment" => s.remove_attachment(id()?).map(|_| done)?,
-            "sync" => {
-                let report = s.sync_now()?;
-                json!({ "pulled": report.pulled, "pushed": report.pushed })
-            }
-            other => {
-                return Err(AppError::Invalid {
-                    msg: format!("unknown operation {other}"),
-                })
-            }
-        };
+                "addTag" => s.add_tag(id()?, text_arg(a, "value")?).map(|_| done)?,
+                "removeTag" => s.remove_tag(id()?, text_arg(a, "value")?).map(|_| done)?,
+                "complete" => task_json(&s.complete_task(id()?)?),
+                "reopen" => s.reopen_task(id()?).map(|_| done)?,
+                "delete" => s.delete_task(id()?).map(|_| done)?,
+                "restore" => s.restore_task(id()?).map(|_| done)?,
+                "emptyTrash" => json!({ "removed": s.empty_trash()? }),
+                "moveToList" => s.move_to_list(id()?, text_arg(a, "list")?).map(|_| done)?,
+                "duplicate" => task_json(&s.duplicate_task(id()?)?),
+                "createList" => list_json(&s.create_list(text_arg(a, "name")?)?),
+                "renameList" => s.rename_list(id()?, text_arg(a, "value")?).map(|_| done)?,
+                "setListColor" => s
+                    .set_list_color(
+                        id()?,
+                        a.get("value").and_then(Value::as_str).unwrap_or_default().to_string(),
+                    )
+                    .map(|_| done)?,
+                "setListSort" => {
+                    let sort = match text_arg(a, "value")?.as_str() {
+                        "due" => SortMode::Due,
+                        "priority" => SortMode::Priority,
+                        "title" => SortMode::Title,
+                        _ => SortMode::Manual,
+                    };
+                    s.set_list_sort(id()?, sort).map(|_| done)?
+                }
+                "setListShowDone" => s
+                    .set_list_show_done(id()?, a.get("value").and_then(Value::as_bool).unwrap_or(false))
+                    .map(|_| done)?,
+                "deleteList" => s.delete_list(id()?).map(|_| done)?,
+                "setProject" => s
+                    .set_project(id()?, a.get("value").and_then(Value::as_bool).unwrap_or(false))
+                    .map(|_| done)?,
+                "createFilter" | "updateFilter" => {
+                    let spec: FilterSpec = serde_json::from_value(a.get("spec").cloned().unwrap_or(Value::Null))
+                        .map_err(|e| AppError::Invalid {
+                            msg: format!("bad filter: {e}"),
+                        })?;
+                    if op == "createFilter" {
+                        json!({ "id": s.create_filter(text_arg(a, "name")?, spec)?.id })
+                    } else {
+                        s.update_filter(id()?, text_arg(a, "name")?, spec).map(|_| done)?
+                    }
+                }
+                "deleteFilter" => s.delete_filter(id()?).map(|_| done)?,
+                "removeAttachment" => s.remove_attachment(id()?).map(|_| done)?,
+                "sync" => {
+                    let report = s.sync_now()?;
+                    json!({ "pulled": report.pulled, "pushed": report.pushed })
+                }
+                other => {
+                    return Err(AppError::Invalid {
+                        msg: format!("unknown operation {other}"),
+                    })
+                }
+            };
         if op != "sync" {
             self.dirty.store(true, Ordering::Relaxed);
         }

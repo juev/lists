@@ -620,3 +620,32 @@ fn switching_from_the_log_to_caldav_carries_everything_over() {
     assert_eq!(view(&b, Scope::Inbox), ["из журнала"]);
     assert_eq!(titles(&b.subtasks(t.id).unwrap()), ["подзадача"]);
 }
+
+#[test]
+fn projects_and_saved_filters_travel_through_caldav() {
+    let dav = start();
+    let (a, b) = pair(&dav);
+    let p = add(&a, "проект");
+    a.set_project(p.id.clone(), true).unwrap();
+    a.quick_add_under("шаг".into(), p.id.clone()).unwrap();
+    a.create_filter(
+        "Неделя".into(),
+        FilterSpec {
+            due: DueWindow::Next { days: 7 },
+            ..FilterSpec::default()
+        },
+    )
+    .unwrap();
+    settle(&a, &b);
+
+    assert_eq!(titles(&b.projects().unwrap()), ["проект"]);
+    assert_eq!(view(&b, Scope::Project { id: p.id }), ["шаг"]);
+    let filters = b.filters().unwrap();
+    assert_eq!((filters.len(), filters[0].name.as_str()), (1, "Неделя"));
+
+    b.delete_filter(filters[0].id.clone()).unwrap();
+    settle(&b, &a);
+    assert!(a.filters().unwrap().is_empty());
+    a.sync_now().unwrap();
+    assert_eq!(b.sync_now().unwrap(), SyncReport::default());
+}

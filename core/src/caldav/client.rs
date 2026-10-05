@@ -24,6 +24,8 @@ pub struct Calendar {
     pub color: String,
     /// Raw value of the app's own property, when the server keeps one.
     pub state: Option<String>,
+    /// Saved filters, kept on the inbox calendar the same way.
+    pub filters: Option<String>,
 }
 
 pub enum Condition<'a> {
@@ -58,6 +60,7 @@ struct Response {
     name: String,
     color: String,
     state: Option<String>,
+    filters: Option<String>,
     etag: String,
     home: Option<String>,
     principal: Option<String>,
@@ -178,7 +181,7 @@ impl Client {
     /// Calendars that accept tasks.
     pub fn calendars(&self) -> Result<Vec<Calendar>> {
         let body = format!(
-            r#"<?xml version="1.0" encoding="utf-8"?><d:propfind xmlns:d="{DAV}" xmlns:c="{CALDAV}" xmlns:a="{APPLE}" xmlns:l="{NS}"><d:prop><d:resourcetype/><d:displayname/><a:calendar-color/><c:supported-calendar-component-set/><l:state/></d:prop></d:propfind>"#
+            r#"<?xml version="1.0" encoding="utf-8"?><d:propfind xmlns:d="{DAV}" xmlns:c="{CALDAV}" xmlns:a="{APPLE}" xmlns:l="{NS}"><d:prop><d:resourcetype/><d:displayname/><a:calendar-color/><c:supported-calendar-component-set/><l:state/><l:filters/></d:prop></d:propfind>"#
         );
         let responses = self
             .propfind(&self.home, "1", &body)?
@@ -191,6 +194,7 @@ impl Client {
                 name: r.name,
                 color: r.color,
                 state: r.state,
+                filters: r.filters,
             })
             .collect())
     }
@@ -242,6 +246,18 @@ impl Client {
                 .send_string(&own);
         }
         Ok(())
+    }
+
+    /// Stores the saved filters on a calendar. Best effort, like the list settings.
+    pub fn set_filters(&self, href: &str, value: &str) {
+        let body = format!(
+            r#"<?xml version="1.0" encoding="utf-8"?><d:propertyupdate xmlns:d="{DAV}" xmlns:l="{NS}"><d:set><d:prop><l:filters>{}</l:filters></d:prop></d:set></d:propertyupdate>"#,
+            xml_escape(value)
+        );
+        let _ = self
+            .request("PROPPATCH", href)
+            .set("Content-Type", "application/xml; charset=utf-8")
+            .send_string(&body);
     }
 
     /// Objects in a calendar with their ETags.
@@ -340,6 +356,7 @@ fn parse_multistatus(text: &str) -> Result<Vec<Response>> {
             name: String::new(),
             color: String::new(),
             state: None,
+            filters: None,
             etag: String::new(),
             home: None,
             principal: None,
@@ -379,6 +396,8 @@ fn parse_multistatus(text: &str) -> Result<Vec<Response>> {
                         .any(|n| n.attribute("name").is_some_and(|c| c.eq_ignore_ascii_case("VTODO")));
                 } else if is(&prop, NS, "state") {
                     r.state = Some(text()).filter(|s| !s.is_empty());
+                } else if is(&prop, NS, "filters") {
+                    r.filters = Some(text()).filter(|s| !s.is_empty());
                 } else if is(&prop, DAV, "getetag") {
                     r.etag = text();
                 } else if is(&prop, CALDAV, "calendar-home-set") {

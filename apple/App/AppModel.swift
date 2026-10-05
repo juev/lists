@@ -21,6 +21,8 @@ final class AppModel {
 
     var lists: [TaskList] = []
     var tags: [TagCount] = []
+    var projects: [TaskItem] = []
+    var filters: [SavedFilter] = []
     var counts = Counts(inbox: 0, today: 0, overdue: 0, upcoming: 0, trash: 0)
 
     var scope: Scope = .today { didSet { if scope != oldValue { expanded.removeAll(); selection = nil; reload() } } }
@@ -32,6 +34,13 @@ final class AppModel {
 
     var syncStatus = SyncStatus(configured: false, pending: 0, lastOk: nil, lastError: nil)
     var syncing = false
+    /// Text size factor and font design chosen in Settings.
+    var textScale: Double = UserDefaults.standard.object(forKey: AppFont.scaleKey) as? Double ?? 1.0 {
+        didSet { UserDefaults.standard.set(textScale, forKey: AppFont.scaleKey) }
+    }
+    var fontDesign: String = UserDefaults.standard.string(forKey: AppFont.designKey) ?? "default" {
+        didSet { UserDefaults.standard.set(fontDesign, forKey: AppFont.designKey) }
+    }
     var alert: String?
 
     @ObservationIgnored private var syncDebounce: DispatchWorkItem?
@@ -89,6 +98,8 @@ final class AppModel {
         case .list(let id): return list(id).map(listName) ?? L("List")
         case .tag(let name): return "#\(name)"
         case .search: return L("Search")
+        case .project(let id): return projects.first { $0.id == id }?.title ?? L("Project")
+        case .filter(let id): return filters.first { $0.id == id }?.name ?? L("Filter")
         }
     }
 
@@ -117,6 +128,10 @@ final class AppModel {
             syncStatus = try store.syncStatus()
             if case .list(let id) = scope, list(id) == nil { scope = .inbox }
             if case .tag(let name) = scope, !tags.contains(where: { $0.name == name }) { scope = .inbox }
+            projects = try store.projects()
+            filters = try store.filters()
+            if case .project(let id) = scope, !projects.contains(where: { $0.id == id }) { scope = .inbox }
+            if case .filter(let id) = scope, !filters.contains(where: { $0.id == id }) { scope = .inbox }
             sections = group(try store.tasks(view: effectiveScope))
             var loaded: [String: [TaskItem]] = [:]
             for id in expanded {
@@ -190,6 +205,9 @@ final class AppModel {
         return perform { store in
             if let parent {
                 return try store.createTask(new: NewTask(title: line, parentId: parent))
+            }
+            if case .project(let id) = scope {
+                return try store.quickAddUnder(text: line, parentId: id)
             }
             var task = try store.quickAdd(text: line, listId: targetListId)
             // A task typed into Today belongs to today unless the line says otherwise.

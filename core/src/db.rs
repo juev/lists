@@ -17,6 +17,11 @@ use crate::model::INBOX_ID;
 pub const KIND_LIST: &str = "list";
 pub const KIND_TASK: &str = "task";
 pub const KIND_ATTACHMENT: &str = "attachment";
+pub const KIND_FILTER: &str = "filter";
+
+/// Bumped whenever a derived table changes shape: the tables are then dropped
+/// and rebuilt from `fields`, which never changes shape.
+const DERIVED_VERSION: &str = "2";
 
 const MAX_KEY_LEN: usize = 200;
 
@@ -44,26 +49,7 @@ impl Change {
 /// Entities whose derived rows must be rebuilt before the transaction commits.
 pub type Touched = BTreeSet<(String, String)>;
 
-pub fn migrate(conn: &Connection) -> Result<()> {
-    conn.execute_batch(
-        "
-        PRAGMA journal_mode = WAL;
-        PRAGMA synchronous = NORMAL;
-        PRAGMA busy_timeout = 5000;
-
-        CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) WITHOUT ROWID;
-
-        CREATE TABLE IF NOT EXISTS fields (
-            kind  TEXT NOT NULL,
-            id    TEXT NOT NULL,
-            field TEXT NOT NULL,
-            value TEXT NOT NULL,
-            stamp TEXT NOT NULL,
-            dirty INTEGER NOT NULL DEFAULT 0,
-            PRIMARY KEY (kind, id, field)
-        ) WITHOUT ROWID;
-        CREATE INDEX IF NOT EXISTS fields_dirty ON fields (dirty) WHERE dirty = 1;
-
+const DERIVED_SCHEMA: &str = "
         CREATE TABLE IF NOT EXISTS lists (
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL DEFAULT '',
@@ -95,6 +81,7 @@ pub fn migrate(conn: &Connection) -> Result<()> {
             deleted INTEGER NOT NULL DEFAULT 0,
             purged INTEGER NOT NULL DEFAULT 0,
             log_of TEXT,
+            project INTEGER NOT NULL DEFAULT 0,
             -- derived by rebuild_tree
             eff_parent TEXT,
             eff_list TEXT NOT NULL DEFAULT 'inbox',
@@ -121,6 +108,36 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         ) WITHOUT ROWID;
         CREATE INDEX IF NOT EXISTS attachments_task ON attachments (task_id);
 
+        CREATE TABLE IF NOT EXISTS filters (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL DEFAULT '',
+            spec TEXT NOT NULL DEFAULT '{}',
+            pos TEXT NOT NULL DEFAULT '',
+            deleted INTEGER NOT NULL DEFAULT 0
+        ) WITHOUT ROWID;
+
+";
+
+pub fn migrate(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "
+        PRAGMA journal_mode = WAL;
+        PRAGMA synchronous = NORMAL;
+        PRAGMA busy_timeout = 5000;
+
+        CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) WITHOUT ROWID;
+
+        CREATE TABLE IF NOT EXISTS fields (
+            kind  TEXT NOT NULL,
+            id    TEXT NOT NULL,
+            field TEXT NOT NULL,
+            value TEXT NOT NULL,
+            stamp TEXT NOT NULL,
+            dirty INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (kind, id, field)
+        ) WITHOUT ROWID;
+        CREATE INDEX IF NOT EXISTS fields_dirty ON fields (dirty) WHERE dirty = 1;
+
         -- sync bookkeeping
         CREATE TABLE IF NOT EXISTS peers (device TEXT PRIMARY KEY, seq INTEGER NOT NULL) WITHOUT ROWID;
         CREATE TABLE IF NOT EXISTS outbox (seq INTEGER PRIMARY KEY, body BLOB NOT NULL, changes INTEGER NOT NULL);
@@ -137,9 +154,25 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         ) WITHOUT ROWID;
         CREATE INDEX IF NOT EXISTS caldav_items_uid ON caldav_items (uid);
 
-        INSERT OR IGNORE INTO lists (id) VALUES ('inbox');
         ",
     )?;
+    if meta_get(conn, "derived_version")?.as_deref() != Some(DERIVED_VERSION) {
+        conn.execute_batch("DROP TABLE IF EXISTS lists; DROP TABLE IF EXISTS tasks; DROP TABLE IF EXISTS task_tags; DROP TABLE IF EXISTS attachments; DROP TABLE IF EXISTS filters;")?;
+    }
+    conn.execute_batch(DERIVED_SCHEMA)?;
+    conn.execute("INSERT OR IGNORE INTO lists (id) VALUES ('inbox')", [])?;
+    if meta_get(conn, "derived_version")?.as_deref() != Some(DERIVED_VERSION) {
+        let mut all = Touched::new();
+        {
+            let mut stmt = conn.prepare("SELECT DISTINCT kind, id FROM fields")?;
+            let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+            for row in rows {
+                all.insert(row?);
+            }
+        }
+        settle(conn, &all)?;
+        meta_set(conn, "derived_version", DERIVED_VERSION)?;
+    }
     Ok(())
 }
 
@@ -197,6 +230,7 @@ pub fn settle(conn: &Connection, touched: &Touched) -> Result<()> {
             KIND_LIST => materialize_list(conn, id)?,
             KIND_TASK => materialize_task(conn, id)?,
             KIND_ATTACHMENT => materialize_attachment(conn, id)?,
+            KIND_FILTER => materialize_filter(conn, id)?,
             // Written by a newer version: kept in `fields`, ignored here.
             _ => {}
         }
@@ -274,13 +308,14 @@ fn materialize_task(conn: &Connection, id: &str) -> Result<()> {
     // Derived columns survive the rewrite; rebuild_tree corrects them afterwards.
     conn.execute(
         "INSERT INTO tasks
-         (id, list_id, parent_id, parent_stamp, title, notes, start, due, priority, repeat, remind, pos, done, deleted, purged, log_of)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
+         (id, list_id, parent_id, parent_stamp, title, notes, start, due, priority, repeat, remind, pos, done, deleted, purged, log_of, project)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
          ON CONFLICT (id) DO UPDATE SET
             list_id = excluded.list_id, parent_id = excluded.parent_id, parent_stamp = excluded.parent_stamp,
             title = excluded.title, notes = excluded.notes, start = excluded.start, due = excluded.due,
             priority = excluded.priority, repeat = excluded.repeat, remind = excluded.remind, pos = excluded.pos,
-            done = excluded.done, deleted = excluded.deleted, purged = excluded.purged, log_of = excluded.log_of",
+            done = excluded.done, deleted = excluded.deleted, purged = excluded.purged, log_of = excluded.log_of,
+            project = excluded.project",
         params![
             id,
             r.text("list").unwrap_or_else(|| INBOX_ID.into()),
@@ -298,6 +333,7 @@ fn materialize_task(conn: &Connection, id: &str) -> Result<()> {
             r.flag("deleted"),
             r.flag("purged"),
             r.text("log_of"),
+            r.flag("project"),
         ],
     )?;
     conn.execute("DELETE FROM task_tags WHERE task_id = ?1", [id])?;
@@ -332,6 +368,21 @@ fn materialize_attachment(conn: &Connection, id: &str) -> Result<()> {
             r.text("mime").unwrap_or_default(),
             r.int("size").max(0),
             r.text("sha256").filter(|s| is_sha256(s)).unwrap_or_default(),
+            r.flag("deleted"),
+        ],
+    )?;
+    Ok(())
+}
+
+fn materialize_filter(conn: &Connection, id: &str) -> Result<()> {
+    let r = Registers::load(conn, KIND_FILTER, id)?;
+    conn.execute(
+        "INSERT OR REPLACE INTO filters (id, name, spec, pos, deleted) VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![
+            id,
+            r.text("name").unwrap_or_default(),
+            r.json("spec").unwrap_or_else(|| "{}".into()),
+            r.text("pos").unwrap_or_default(),
             r.flag("deleted"),
         ],
     )?;

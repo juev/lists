@@ -240,3 +240,55 @@ fn attachments_upload_and_download_as_files() {
     assert_eq!(file.header("X-Content-Type-Options"), Some("nosniff"));
     assert_eq!(file.into_string().unwrap(), "<script>alert(1)</script>");
 }
+
+#[test]
+fn projects_and_saved_filters_over_the_api() {
+    let web = web(None);
+    let project = call(&web, "", json!({ "op": "quickAdd", "text": "Запуск сайта" }));
+    let id = project["id"].as_str().unwrap().to_string();
+    call(&web, "", json!({ "op": "setProject", "id": id, "value": true }));
+    let step = call(
+        &web,
+        "",
+        json!({ "op": "quickAdd", "text": "Макеты завтра !!", "scope": format!("project:{id}") }),
+    );
+    assert_eq!(step["parent"], id.as_str());
+    assert_eq!(step["priority"], 2);
+
+    let overview = get(&web, "", "/api/overview");
+    assert_eq!(overview["projects"][0]["title"], "Запуск сайта");
+    assert_eq!(overview["projects"][0]["subtasks"], 1);
+    let inside = get(&web, "", &format!("/api/tasks?scope=project%3A{id}"));
+    assert_eq!(inside[0]["title"], "Макеты");
+
+    let made = call(
+        &web,
+        "",
+        json!({ "op": "createFilter", "name": "Важное на неделе", "spec": { "due": { "kind": "next", "days": 7 }, "min_priority": "medium" } }),
+    );
+    let fid = made["id"].as_str().unwrap().to_string();
+    let overview = get(&web, "", "/api/overview");
+    assert_eq!(overview["filters"][0]["name"], "Важное на неделе");
+    assert_eq!(overview["filters"][0]["open"], 1);
+    assert_eq!(overview["filters"][0]["spec"]["due"]["days"], 7);
+    assert_eq!(
+        get(&web, "", &format!("/api/tasks?scope=filter%3A{fid}"))[0]["title"],
+        "Макеты"
+    );
+
+    call(
+        &web,
+        "",
+        json!({ "op": "updateFilter", "id": fid, "name": "Без даты", "spec": { "due": { "kind": "nodate" } } }),
+    );
+    assert_eq!(
+        get(&web, "", &format!("/api/tasks?scope=filter%3A{fid}"))[0]["title"],
+        "Запуск сайта"
+    );
+    let bad = ureq::post(&format!("{}/api/call", web.base))
+        .set("X-Lists", "1")
+        .send_json(json!({ "op": "createFilter", "name": "x", "spec": { "due": { "kind": "someday" } } }));
+    assert_eq!(status(bad), 400);
+    call(&web, "", json!({ "op": "deleteFilter", "id": fid }));
+    assert_eq!(get(&web, "", "/api/overview")["filters"].as_array().unwrap().len(), 0);
+}

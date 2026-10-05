@@ -92,6 +92,7 @@ struct TaskListView: View {
             Image(systemName: "plus").foregroundStyle(.secondary)
             TextField(placeholder, text: $draft)
                 .textFieldStyle(.plain)
+                .font(AppFont.style(.body))
                 .focused($addFocused)
                 .onSubmit {
                     if model.add(draft) != nil { draft = "" }
@@ -152,7 +153,7 @@ struct Chip: View {
             if let symbol { Image(systemName: symbol) }
             if !text.isEmpty { Text(text) }
         }
-        .font(.caption)
+        .font(AppFont.style(.caption))
         .foregroundStyle(tint)
         .padding(.horizontal, 6)
         .padding(.vertical, 2)
@@ -185,6 +186,8 @@ struct TaskRow: View {
                 }
             }
         }
+        // Rows set the font themselves: a List does not hand its environment font to them.
+        .font(AppFont.style(.body))
         .contextMenu { menu }
     }
 
@@ -194,15 +197,18 @@ struct TaskRow: View {
                 model.toggleDone(task)
             } label: {
                 Image(systemName: task.done != nil ? "checkmark.circle.fill" : "circle")
-                    .font(.title3)
+                    .font(AppFont.style(.title3))
                     .foregroundStyle(task.done != nil ? Color.secondary : (model.list(task.listId)?.tint ?? .accentColor))
             }
             .buttonStyle(.plain)
             .disabled(task.isLog || inTrash)
             .accessibilityLabel(task.done != nil ? L("Reopen") : L("Complete"))
 
+            if task.isProject {
+                Image(systemName: "folder").foregroundStyle(.secondary).accessibilityLabel(L("Project"))
+            }
             if task.priority != .none {
-                Text(task.priority.marks).font(.body.bold()).foregroundStyle(.orange)
+                Text(task.priority.marks).font(AppFont.style(.body, weight: .bold)).foregroundStyle(.orange)
                     .accessibilityLabel(task.priority.title)
             }
             if isExpanded && !inTrash && !task.isLog {
@@ -210,6 +216,7 @@ struct TaskRow: View {
             } else {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(task.title)
+                        .font(AppFont.style(.body))
                         .strikethrough(task.done != nil)
                         .foregroundStyle(task.done != nil ? .secondary : .primary)
                         .lineLimit(2)
@@ -222,7 +229,7 @@ struct TaskRow: View {
                 model.toggleExpanded(task.id)
             } label: {
                 Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                    .font(.caption)
+                    .font(AppFont.style(.caption))
                     .foregroundStyle(.tertiary)
                     .frame(width: 20, height: 20)
                     .contentShape(Rectangle())
@@ -262,7 +269,7 @@ struct TaskRow: View {
                 ForEach(task.tags, id: \.self) { Text("#\($0)") }
                 if showsOrigin { Text(origin).lineLimit(1) }
             }
-            .font(.caption)
+            .font(AppFont.style(.caption))
             .foregroundStyle(.secondary)
             .labelStyle(.titleAndIcon)
         }
@@ -272,7 +279,7 @@ struct TaskRow: View {
     private var showsOrigin: Bool {
         if depth > 0 { return false }
         switch model.effectiveScope {
-        case .today, .upcoming, .tag, .search, .completed, .trash: return true
+        case .today, .upcoming, .tag, .search, .completed, .trash, .filter: return true
         default: return false
         }
     }
@@ -312,6 +319,11 @@ struct TaskRow: View {
                 }
             }
             Button(L("Add subtask")) { if !isExpanded { model.toggleExpanded(task.id) } }
+            if task.parentId == nil {
+                Button(task.isProject ? L("Turn back into a task") : L("Make it a project")) {
+                    model.perform { try $0.setProject(id: task.id, project: !task.isProject) }
+                }
+            }
             Button(L("Duplicate")) { model.perform { _ = try $0.duplicateTask(id: task.id) } }
             Divider()
             Button(L("Delete"), role: .destructive) { model.delete(task) }
@@ -336,7 +348,7 @@ struct SubtaskField: View {
                     focused = true
                 }
         }
-        .font(.callout)
+        .font(AppFont.style(.callout))
     }
 }
 

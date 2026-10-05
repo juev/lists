@@ -556,3 +556,261 @@ fn r8_reminders_list_open_tasks_in_time_order() {
     d.delete_task(early.id).unwrap();
     assert_eq!(titles(&d.reminders().unwrap()), ["поздно"]);
 }
+
+#[test]
+fn projects_are_tasks_with_a_view_of_their_own() {
+    let d = device();
+    let work = d.create_list("Работа".into()).unwrap();
+    let launch = d
+        .create_task(NewTask {
+            title: "Запуск сайта".into(),
+            list_id: Some(work.id.clone()),
+            ..NewTask::default()
+        })
+        .unwrap();
+    add(&d, "обычная задача");
+    assert!(d.projects().unwrap().is_empty());
+
+    d.set_project(launch.id.clone(), true).unwrap();
+    let design = d
+        .quick_add_under("Макеты завтра !! #дизайн".into(), launch.id.clone())
+        .unwrap();
+    assert_eq!(
+        (design.title.as_str(), design.due.as_deref(), design.priority),
+        ("Макеты", Some("2026-10-06"), Priority::Medium)
+    );
+    assert_eq!(
+        design.list_id, work.id,
+        "a task of a project lives in the project's list"
+    );
+    let copy = add_sub(&d, &launch, "Тексты");
+    d.complete_task(copy.id).unwrap();
+
+    let projects = d.projects().unwrap();
+    assert_eq!(titles(&projects), ["Запуск сайта"]);
+    assert!(projects[0].is_project);
+    assert_eq!((projects[0].subtasks_total, projects[0].subtasks_done), (2, 1));
+    assert_eq!(
+        view(&d, Scope::Project { id: launch.id.clone() }),
+        ["Макеты", "Тексты"],
+        "open first, completed last"
+    );
+    assert_eq!(
+        view(&d, Scope::Upcoming),
+        ["Макеты"],
+        "project tasks show up in the date views"
+    );
+
+    // A subtask cannot be a project; turning a project back keeps its tasks.
+    assert!(d.set_project(design.id, true).is_err());
+    d.set_project(launch.id.clone(), false).unwrap();
+    assert!(d.projects().unwrap().is_empty());
+    assert_eq!(d.subtasks(launch.id.clone()).unwrap().len(), 2);
+
+    // A completed project leaves the sidebar.
+    d.set_project(launch.id.clone(), true).unwrap();
+    d.complete_task(launch.id).unwrap();
+    assert!(d.projects().unwrap().is_empty());
+}
+
+fn spec() -> FilterSpec {
+    FilterSpec::default()
+}
+
+#[test]
+fn saved_filters_select_by_date_list_tag_priority_status_and_text() {
+    let d = device();
+    let work = d.create_list("Работа".into()).unwrap();
+    let mk = |title: &str, due: Option<&str>, list: Option<&str>| {
+        d.create_task(NewTask {
+            title: title.into(),
+            due: due.map(str::to_string),
+            list_id: list.map(str::to_string),
+            ..NewTask::default()
+        })
+        .unwrap()
+    };
+    let late = mk("просрочено", Some("2026-10-01"), None);
+    mk("сегодня", Some("2026-10-05T18:00"), Some(&work.id));
+    let soon = mk("через три дня", Some("2026-10-08"), Some(&work.id));
+    mk("через неделю", Some("2026-10-12"), None);
+    mk("без даты", None, Some(&work.id));
+    let done = mk("сделано", Some("2026-10-05"), None);
+    d.complete_task(done.id).unwrap();
+    d.add_tag(soon.id.clone(), "важное".into()).unwrap();
+    d.set_priority(soon.id.clone(), Priority::High).unwrap();
+    d.set_priority(late.id, Priority::Low).unwrap();
+    d.set_notes(soon.id, "позвонить Ивану".into()).unwrap();
+
+    let show = |s: FilterSpec| {
+        titles(&d.preview_filter(s).unwrap())
+            .into_iter()
+            .map(str::to_string)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        show(FilterSpec {
+            due: DueWindow::Next { days: 7 },
+            ..spec()
+        }),
+        ["просрочено", "сегодня", "через три дня"]
+    );
+    assert_eq!(
+        show(FilterSpec {
+            due: DueWindow::Next { days: 8 },
+            ..spec()
+        })
+        .len(),
+        4,
+        "the eighth day is the 12th"
+    );
+    assert_eq!(
+        show(FilterSpec {
+            due: DueWindow::Today,
+            ..spec()
+        }),
+        ["сегодня"]
+    );
+    assert_eq!(
+        show(FilterSpec {
+            due: DueWindow::Overdue,
+            ..spec()
+        }),
+        ["просрочено"]
+    );
+    assert_eq!(
+        show(FilterSpec {
+            due: DueWindow::NoDate,
+            ..spec()
+        }),
+        ["без даты"]
+    );
+    assert_eq!(
+        show(FilterSpec {
+            list_ids: vec![work.id.clone()],
+            ..spec()
+        }),
+        ["сегодня", "через три дня", "без даты"]
+    );
+    assert_eq!(
+        show(FilterSpec {
+            tags: vec!["#Важное".into()],
+            ..spec()
+        }),
+        ["через три дня"]
+    );
+    assert_eq!(
+        show(FilterSpec {
+            min_priority: Priority::Low,
+            ..spec()
+        }),
+        ["просрочено", "через три дня"]
+    );
+    assert_eq!(
+        show(FilterSpec {
+            min_priority: Priority::High,
+            ..spec()
+        }),
+        ["через три дня"]
+    );
+    assert_eq!(
+        show(FilterSpec {
+            status: FilterStatus::Done,
+            ..spec()
+        }),
+        ["сделано"]
+    );
+    assert_eq!(
+        show(FilterSpec {
+            status: FilterStatus::All,
+            due: DueWindow::Today,
+            ..spec()
+        }),
+        ["сегодня", "сделано"]
+    );
+    assert_eq!(
+        show(FilterSpec {
+            text: "ИВАНУ позвонить".into(),
+            ..spec()
+        }),
+        ["через три дня"]
+    );
+    assert_eq!(
+        show(FilterSpec {
+            due: DueWindow::Next { days: 7 },
+            list_ids: vec![work.id],
+            min_priority: Priority::Medium,
+            ..spec()
+        }),
+        ["через три дня"]
+    );
+}
+
+#[test]
+fn saved_filters_are_named_stored_and_shown_as_views() {
+    let d = device();
+    add(&d, "без даты");
+    let t = add(&d, "скоро");
+    d.set_due(t.id, Some("2026-10-07".into())).unwrap();
+    assert!(d.create_filter("  ".into(), spec()).is_err());
+
+    let week = d
+        .create_filter(
+            "Неделя".into(),
+            FilterSpec {
+                due: DueWindow::Next { days: 7 },
+                ..spec()
+            },
+        )
+        .unwrap();
+    assert_eq!((week.name.as_str(), week.open_count), ("Неделя", 1));
+    assert_eq!(view(&d, Scope::Filter { id: week.id.clone() }), ["скоро"]);
+
+    d.update_filter(
+        week.id.clone(),
+        "Без срока".into(),
+        FilterSpec {
+            due: DueWindow::NoDate,
+            ..spec()
+        },
+    )
+    .unwrap();
+    let all = d.filters().unwrap();
+    assert_eq!(all.len(), 1);
+    assert_eq!(
+        (all[0].name.as_str(), all[0].spec.due),
+        ("Без срока", DueWindow::NoDate)
+    );
+    assert_eq!(view(&d, Scope::Filter { id: week.id.clone() }), ["без даты"]);
+
+    d.delete_filter(week.id.clone()).unwrap();
+    assert!(d.filters().unwrap().is_empty());
+    assert!(d.tasks(Scope::Filter { id: week.id }).is_err());
+}
+
+#[test]
+fn derived_tables_are_rebuilt_when_their_shape_changes() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().to_string_lossy().into_owned();
+    let id = {
+        let store = Store::open(path.clone()).unwrap();
+        let t = store
+            .create_task(NewTask {
+                title: "переживёт".into(),
+                ..NewTask::default()
+            })
+            .unwrap();
+        store.add_tag(t.id.clone(), "тег".into()).unwrap();
+        store.set_project(t.id.clone(), true).unwrap();
+        t.id
+    };
+    // What an older version of the app left behind: derived tables of another shape.
+    {
+        let conn = rusqlite::Connection::open(dir.path().join("lists.sqlite")).unwrap();
+        conn.execute_batch("DROP TABLE tasks; CREATE TABLE tasks (id TEXT PRIMARY KEY, title TEXT); UPDATE meta SET value = '1' WHERE key = 'derived_version';").unwrap();
+    }
+    let store = Store::open(path).unwrap();
+    let got = store.task(id).unwrap();
+    assert_eq!((got.title.as_str(), got.is_project), ("переживёт", true));
+    assert_eq!(got.tags, ["тег"]);
+}

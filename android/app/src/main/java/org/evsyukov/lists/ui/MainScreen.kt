@@ -33,6 +33,8 @@ import androidx.compose.material.icons.outlined.CloudDone
 import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.CloudSync
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.FilterList
+import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Inbox
 import androidx.compose.material.icons.outlined.Inventory2
 import androidx.compose.material.icons.outlined.Layers
@@ -108,6 +110,7 @@ import org.evsyukov.lists.today
 import kotlinx.coroutines.launch
 import uniffi.lists_core.Priority
 import uniffi.lists_core.QuickParse
+import uniffi.lists_core.SavedFilter
 import uniffi.lists_core.Scope
 import uniffi.lists_core.TaskItem
 import uniffi.lists_core.TaskList
@@ -127,6 +130,8 @@ fun MainScreen(model: MainViewModel, onReminderSet: () -> Unit) {
     val snackbar = remember { SnackbarHostState() }
     var editingList by remember { mutableStateOf<TaskList?>(null) }
     var creatingList by remember { mutableStateOf(false) }
+    var editingFilter by remember { mutableStateOf<SavedFilter?>(null) }
+    var creatingFilter by remember { mutableStateOf(false) }
     var settings by remember { mutableStateOf(false) }
     var confirmEmptyTrash by remember { mutableStateOf(false) }
     var duePickerFor by remember { mutableStateOf<TaskItem?>(null) }
@@ -150,6 +155,8 @@ fun MainScreen(model: MainViewModel, onReminderSet: () -> Unit) {
                 onSelect = { model.select(it); scope.launch { drawer.close() } },
                 onEditList = { editingList = it },
                 onNewList = { creatingList = true },
+                onEditFilter = { editingFilter = it },
+                onNewFilter = { creatingFilter = true },
                 onSettings = { settings = true; scope.launch { drawer.close() } },
             )
         },
@@ -231,6 +238,8 @@ fun MainScreen(model: MainViewModel, onReminderSet: () -> Unit) {
     }
     editingList?.let { ListDialog(it, model) { editingList = null } }
     if (creatingList) ListDialog(null, model) { creatingList = false }
+    editingFilter?.let { FilterDialog(it, state, model) { editingFilter = null } }
+    if (creatingFilter) FilterDialog(null, state, model) { creatingFilter = false }
     if (settings) SettingsDialog(model) { settings = false }
     if (confirmEmptyTrash) {
         AlertDialog(
@@ -393,7 +402,7 @@ private fun SwipeRow(task: TaskItem, state: UiState, onToggle: () -> Unit, onOpe
 }
 
 private fun UiState.showsOrigin(): Boolean = when (effectiveScope) {
-    Scope.Today, Scope.Upcoming, Scope.Completed, Scope.Trash, is Scope.Tag, is Scope.Search -> true
+    Scope.Today, Scope.Upcoming, Scope.Completed, Scope.Trash, is Scope.Tag, is Scope.Search, is Scope.Filter -> true
     else -> false
 }
 
@@ -418,6 +427,9 @@ fun TaskRow(task: TaskItem, state: UiState, onToggle: () -> Unit, onOpen: () -> 
         }
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
+                if (task.isProject) {
+                    Icon(Icons.Outlined.Folder, str(R.string.project), Modifier.padding(end = 6.dp).size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
                 if (task.priority != Priority.NONE) {
                     Text(
                         task.priority.marks(),
@@ -503,6 +515,12 @@ private fun TaskMenu(task: TaskItem, state: UiState, model: MainViewModel, onOpe
             DropdownMenuItem(text = { Text(str(R.string.priority)) }, onClick = { sub = "priority" })
             DropdownMenuItem(text = { Text(str(R.string.move_to_list)) }, onClick = { sub = "list" })
             DropdownMenuItem(text = { Text(str(R.string.add_subtask)) }, onClick = { run(onOpen) })
+            if (task.parentId == null) {
+                DropdownMenuItem(
+                    text = { Text(str(if (task.isProject) R.string.project_off else R.string.project_on)) },
+                    onClick = { run { model.act { it.setProject(task.id, !task.isProject) } } },
+                )
+            }
             DropdownMenuItem(text = { Text(str(R.string.duplicate)) }, onClick = { run { model.act { it.duplicateTask(task.id) } } })
             HorizontalDivider()
             DropdownMenuItem(
@@ -514,7 +532,15 @@ private fun TaskMenu(task: TaskItem, state: UiState, model: MainViewModel, onOpe
 }
 
 @Composable
-private fun Drawer(state: UiState, onSelect: (Scope) -> Unit, onEditList: (TaskList) -> Unit, onNewList: () -> Unit, onSettings: () -> Unit) {
+private fun Drawer(
+    state: UiState,
+    onSelect: (Scope) -> Unit,
+    onEditList: (TaskList) -> Unit,
+    onNewList: () -> Unit,
+    onEditFilter: (SavedFilter) -> Unit,
+    onNewFilter: () -> Unit,
+    onSettings: () -> Unit,
+) {
     ModalDrawerSheet {
         Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 8.dp)) {
             val inbox = state.list("inbox")
@@ -533,6 +559,23 @@ private fun Drawer(state: UiState, onSelect: (Scope) -> Unit, onEditList: (TaskL
                 DrawerItem(list.name, Icons.AutoMirrored.Outlined.List, list.openCount, state.scope == scope, tint = list.tint(), onLong = { onEditList(list) }) { onSelect(scope) }
             }
             DrawerItem(str(R.string.new_list), Icons.Outlined.Add, 0u, false, onClick = onNewList)
+
+            if (state.projects.isNotEmpty()) {
+                DrawerHeading(str(R.string.projects))
+                for (project in state.projects) {
+                    val scope = Scope.Project(project.id)
+                    DrawerItem(
+                        project.title, Icons.Outlined.Folder, project.subtasksTotal - project.subtasksDone, state.scope == scope,
+                        tint = state.list(project.listId)?.tint(),
+                    ) { onSelect(scope) }
+                }
+            }
+            DrawerHeading(str(R.string.filters))
+            for (filter in state.filters) {
+                val scope = Scope.Filter(filter.id)
+                DrawerItem(filter.name, Icons.Outlined.FilterList, filter.openCount, state.scope == scope, onLong = { onEditFilter(filter) }) { onSelect(scope) }
+            }
+            DrawerItem(str(R.string.new_filter), Icons.Outlined.Add, 0u, false, onClick = onNewFilter)
 
             if (state.tags.isNotEmpty()) {
                 DrawerHeading(str(R.string.tags))

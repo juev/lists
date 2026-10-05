@@ -14,7 +14,7 @@ use uuid::Uuid;
 use super::client::{Calendar, Client, Condition, Written};
 use super::ical;
 use super::map::{self, Registers, Remote, Standard, TaskState};
-use crate::db::{self, Change, Touched, KIND_ATTACHMENT, KIND_LIST, KIND_TASK};
+use crate::db::{self, Change, Touched, KIND_ATTACHMENT, KIND_FILTER, KIND_LIST, KIND_TASK};
 use crate::error::Result;
 use crate::hlc;
 use crate::model::{Repeat, SyncReport, INBOX_ID};
@@ -474,6 +474,54 @@ pub fn sync(store: &Store, client: &Client) -> Result<SyncReport> {
              ON CONFLICT (href) DO UPDATE SET list_id = excluded.list_id, sent = excluded.sent",
             params![href, list_id, state],
         )?;
+    }
+
+    // ---- saved filters: a property of the inbox calendar ----
+    if let Some(inbox) = calendar_of.get(INBOX_ID) {
+        let theirs: BTreeMap<String, Registers> = calendars
+            .iter()
+            .find(|c| c.href == *inbox)
+            .and_then(|c| c.filters.as_deref())
+            .and_then(|raw| base64::engine::general_purpose::STANDARD.decode(raw.trim()).ok())
+            .and_then(|json| serde_json::from_slice(&json).ok())
+            .unwrap_or_default();
+        let mut changes = Vec::new();
+        for (id, registers) in theirs.iter().filter(|(id, _)| usable_id(id)) {
+            for (field, (value, stamp)) in registers {
+                changes.push(Change {
+                    kind: KIND_FILTER.into(),
+                    id: id.clone(),
+                    field: field.clone(),
+                    value: value.clone(),
+                    stamp: stamp.clone(),
+                });
+            }
+        }
+        report.pulled += store.apply_remote(changes)?;
+        let ours: BTreeMap<String, Registers> = {
+            let inner = store.lock();
+            let ids: Vec<String> = {
+                let mut stmt = inner
+                    .conn
+                    .prepare("SELECT DISTINCT id FROM fields WHERE kind = ?1 ORDER BY id")?;
+                let rows = stmt.query_map([KIND_FILTER], |r| r.get(0))?;
+                rows.collect::<rusqlite::Result<_>>()?
+            };
+            ids.into_iter()
+                .map(|id| registers(&inner.conn, KIND_FILTER, &id).map(|r| (id, r)))
+                .collect::<Result<_>>()?
+        };
+        if ours != theirs {
+            let encoded =
+                base64::engine::general_purpose::STANDARD.encode(serde_json::to_vec(&ours).unwrap_or_default());
+            // A server that drops the property is not asked again with the same value.
+            let already = db::meta_get(&store.lock().conn, "caldav_filters_sent")?;
+            if already.as_deref() != Some(encoded.as_str()) {
+                client.set_filters(inbox, &encoded);
+                db::meta_set(&store.lock().conn, "caldav_filters_sent", &encoded)?;
+                report.pushed += 1;
+            }
+        }
     }
 
     // ---- objects the server has ----

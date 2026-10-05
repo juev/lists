@@ -462,7 +462,7 @@ impl Store {
         tx.execute_batch(
             "DELETE FROM peers; DELETE FROM outbox; DELETE FROM blobs_uploaded;
              DELETE FROM caldav_calendars; DELETE FROM caldav_items;
-             DELETE FROM meta WHERE key IN ('sync_ok', 'sync_error');
+             DELETE FROM meta WHERE key IN ('sync_ok', 'sync_error', 'caldav_filters_sent');
              UPDATE fields SET dirty = 1;",
         )?;
         db::meta_set(&tx, "force_snapshot", "1")?;

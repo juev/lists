@@ -11,6 +11,7 @@ struct ListsApp: App {
         Window("Lists", id: "main") {
             MainWindow()
                 .environment(model)
+                .font(AppFont.style(.body))
         }
         .defaultSize(width: 860, height: 600)
         .commands { AppCommands(model: model) }
@@ -18,6 +19,7 @@ struct ListsApp: App {
         MenuBarExtra("Lists", systemImage: model.counts.overdue > 0 ? "checkmark.circle.badge.xmark" : "checkmark.circle") {
             MenuBarView()
                 .environment(model)
+                .font(AppFont.style(.body))
         }
         .menuBarExtraStyle(.window)
 
@@ -149,11 +151,11 @@ struct MenuBarView: View {
                                 Text(task.title).lineLimit(1)
                                 Spacer()
                                 if let due = task.due, Moment.isOverdue(due) {
-                                    Text(Moment.label(due)).font(.caption).foregroundStyle(.red)
+                                    Text(Moment.label(due)).font(AppFont.style(.caption)).foregroundStyle(.red)
                                 }
                             }
                         }
-                        if today.count > 12 { Text(L("and %@ more", "\(today.count - 12)")).font(.caption).foregroundStyle(.secondary) }
+                        if today.count > 12 { Text(L("and %@ more", "\(today.count - 12)")).font(AppFont.style(.caption)).foregroundStyle(.secondary) }
                     }
                 }
                 .frame(maxHeight: 260)
@@ -190,6 +192,15 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
+            Section(L("Text")) {
+                @Bindable var model = model
+                Picker(L("Size"), selection: $model.textScale) {
+                    ForEach(AppFont.scales, id: \.1) { name, value in Text(L(name)).tag(value) }
+                }
+                Picker(L("Typeface"), selection: $model.fontDesign) {
+                    ForEach(AppFont.designs, id: \.1) { name, value in Text(L(name)).tag(value) }
+                }
+            }
             Section(L("Quick Entry")) {
                 KeyboardShortcuts.Recorder(L("Shortcut:"), name: .quickEntry)
             }
@@ -208,20 +219,20 @@ struct SettingsView: View {
                     TextField(L("User name"), text: $user)
                     SecureField(L("Password"), text: $password)
                     Text(L("For Nextcloud and similar servers use an app password. Data on the server is not encrypted."))
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(AppFont.style(.caption)).foregroundStyle(.secondary)
                 case .caldav:
                     TextField(L("Address"), text: $url, prompt: Text("https://example.org/remote.php/dav"))
                     TextField(L("User name"), text: $user)
                     SecureField(L("Password"), text: $password)
                     Text(L("Lists become calendars and tasks stay visible to other CalDAV apps. Attachments up to 5 MB are synced."))
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(AppFont.style(.caption)).foregroundStyle(.secondary)
                 case .folder:
                     HStack {
                         TextField(L("Path"), text: $folder)
                         Button(L("Choose…"), action: chooseFolder)
                     }
                     Text(L("A folder synced by another tool or a network drive will do."))
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(AppFont.style(.caption)).foregroundStyle(.secondary)
                 }
                 HStack {
                     Button(L("Save and sync"), action: save)
@@ -229,7 +240,7 @@ struct SettingsView: View {
                     Spacer()
                 }
                 if let text = message ?? status {
-                    Text(text).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                    Text(text).font(AppFont.style(.caption)).foregroundStyle(.secondary).textSelection(.enabled)
                 }
             }
         }

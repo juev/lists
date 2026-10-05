@@ -2,7 +2,8 @@ use serde::{Deserialize, Serialize};
 
 pub const INBOX_ID: &str = "inbox";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, uniffi::Enum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, uniffi::Enum)]
+#[serde(rename_all = "lowercase")]
 pub enum Priority {
     #[default]
     None,
@@ -131,6 +132,8 @@ pub struct TaskItem {
     pub deleted: bool,
     /// A record of one completed occurrence of a repeating task.
     pub is_log: bool,
+    /// Shown in the sidebar and opened as a view of its own; its subtasks are the project's tasks.
+    pub is_project: bool,
     pub subtasks_total: u32,
     pub subtasks_done: u32,
     pub attachments: u32,
@@ -163,9 +166,76 @@ pub enum Scope {
     All,
     Completed,
     Trash,
-    List { id: String },
-    Tag { name: String },
-    Search { text: String },
+    List {
+        id: String,
+    },
+    Tag {
+        name: String,
+    },
+    Search {
+        text: String,
+    },
+    /// The tasks of a project, completed ones last.
+    Project {
+        id: String,
+    },
+    /// A saved filter.
+    Filter {
+        id: String,
+    },
+}
+
+/// Which dates a filter lets through. The date of a task is its due date, or
+/// its start date when it has no due date.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, uniffi::Enum)]
+#[serde(rename_all = "lowercase", tag = "kind")]
+pub enum DueWindow {
+    #[default]
+    Any,
+    Overdue,
+    Today,
+    /// Today and the following days, `days` in total, plus anything overdue.
+    Next {
+        days: u32,
+    },
+    NoDate,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, uniffi::Enum)]
+#[serde(rename_all = "lowercase")]
+pub enum FilterStatus {
+    #[default]
+    Open,
+    Done,
+    All,
+}
+
+/// What a saved filter selects. Every condition that is set must hold.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, uniffi::Record)]
+pub struct FilterSpec {
+    #[serde(default)]
+    pub due: DueWindow,
+    /// Empty means any list.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub list_ids: Vec<String>,
+    /// The task must carry all of these.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub min_priority: Priority,
+    #[serde(default)]
+    pub status: FilterStatus,
+    /// Words the title or the note must contain; empty means no condition.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct SavedFilter {
+    pub id: String,
+    pub name: String,
+    pub spec: FilterSpec,
+    pub open_count: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]

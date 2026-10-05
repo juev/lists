@@ -159,4 +159,24 @@
     <string name="password_store_failed">Не удалось сохранить пароль в системной связке ключей: %1$s</string>
     <string name="caldav_hint">Списки станут календарями, а задачи будут видны другим CalDAV-приложениям. Вложения синхронизируются до 5 МБ.</string>
     <string name="sync_off">Выключена</string>
+    <string name="project">Проект</string>
+    <string name="filter">Фильтр</string>
+    <string name="projects">Проекты</string>
+    <string name="filters">Фильтры</string>
+    <string name="project_off">Сделать обычной задачей</string>
+    <string name="project_on">Сделать проектом</string>
+    <string name="new_filter">Новый фильтр</string>
+    <string name="delete_filter">Удалить фильтр</string>
+    <string name="next_7_days">Ближайшие 7 дней</string>
+    <string name="high_priority">Высокий приоритет</string>
+    <string name="no_date">Без даты</string>
+    <string name="date">Дата</string>
+    <string name="any">Любой</string>
+    <string name="coming_days">Ближайшие дни</string>
+    <string name="days">Дней</string>
+    <string name="priority_at_least">Приоритет не ниже</string>
+    <string name="status">Состояние</string>
+    <string name="status_open">В работе</string>
+    <string name="contains">Содержит</string>
+    <string name="matching_now">Сейчас подходит задач: %1$s</string>
 </resources>

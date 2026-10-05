@@ -10,7 +10,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-use crate::db::{self, Change, Touched, KIND_ATTACHMENT, KIND_LIST, KIND_TASK};
+use crate::db::{self, Change, Touched, KIND_ATTACHMENT, KIND_FILTER, KIND_LIST, KIND_TASK};
 use crate::error::{AppError, Result};
 use crate::hlc::{Clock, DEVICE_ID_LEN};
 use crate::model::*;
@@ -113,6 +113,7 @@ const TASK_COLUMNS: &str = "
     (SELECT p.title FROM tasks p WHERE p.id = t.eff_parent),
     t.title, t.notes, t.start, t.due, t.priority, t.repeat, t.remind, t.done, t.deleted,
     t.log_of IS NOT NULL,
+    t.project,
     (SELECT count(*) FROM tasks c WHERE c.eff_parent = t.id AND c.deleted = 0 AND c.purged = 0),
     (SELECT count(*) FROM tasks c WHERE c.eff_parent = t.id AND c.deleted = 0 AND c.purged = 0 AND c.done IS NOT NULL),
     (SELECT count(*) FROM attachments a WHERE a.task_id = t.id AND a.deleted = 0),
@@ -124,7 +125,7 @@ const NOT_ARCHIVED: &str = "t.eff_list NOT IN (SELECT id FROM lists WHERE archiv
 
 fn task_from_row(r: &Row) -> rusqlite::Result<TaskItem> {
     let repeat: Option<String> = r.get(9)?;
-    let tags: Option<String> = r.get(17)?;
+    let tags: Option<String> = r.get(18)?;
     Ok(TaskItem {
         id: r.get(0)?,
         list_id: r.get(1)?,
@@ -140,9 +141,10 @@ fn task_from_row(r: &Row) -> rusqlite::Result<TaskItem> {
         done: r.get(11)?,
         deleted: r.get(12)?,
         is_log: r.get(13)?,
-        subtasks_total: r.get(14)?,
-        subtasks_done: r.get(15)?,
-        attachments: r.get(16)?,
+        is_project: r.get(14)?,
+        subtasks_total: r.get(15)?,
+        subtasks_done: r.get(16)?,
+        attachments: r.get(17)?,
         tags: tags
             .map(|t| t.split('\u{1f}').map(str::to_string).collect())
             .unwrap_or_default(),
@@ -490,6 +492,18 @@ impl Store {
                 ),
                 &[&clean_tag(&name)],
             ),
+            Scope::Project { id } => query_tasks(
+                conn,
+                "WHERE t.eff_parent = ?1 AND t.deleted = 0 AND t.purged = 0 ORDER BY t.done IS NOT NULL, t.pos, t.id",
+                &[&id],
+            ),
+            Scope::Filter { id } => {
+                let spec: String = conn
+                    .query_row("SELECT spec FROM filters WHERE id = ?1 AND deleted = 0", [&id], |r| r.get(0))
+                    .optional()?
+                    .ok_or_else(|| AppError::not_found(format!("filter {id}")))?;
+                filter_tasks(conn, &serde_json::from_str(&spec).unwrap_or_default(), &today)
+            }
             Scope::Search { text } => {
                 // SQLite's LIKE folds case for ASCII only, so matching is done here.
                 let needle = text.trim().to_lowercase();
@@ -570,6 +584,137 @@ impl Store {
             )?,
             trash: count("t.deleted = 1 AND t.purged = 0", &[])?,
         })
+    }
+
+    // ---- projects ----
+
+    /// Open projects in the order of their lists.
+    pub fn projects(&self) -> Result<Vec<TaskItem>> {
+        query_tasks(
+            &self.lock().conn,
+            &format!(
+                "WHERE {LIVE} AND {NOT_ARCHIVED} AND t.project = 1 AND t.done IS NULL AND t.eff_parent IS NULL
+                 ORDER BY t.eff_list != 'inbox', (SELECT pos FROM lists WHERE id = t.eff_list), t.eff_list, t.pos, t.id"
+            ),
+            &[],
+        )
+    }
+
+    /// Turns a top-level task into a project or back. Nothing else about it changes:
+    /// a project is a task whose subtasks are shown as a list of their own.
+    pub fn set_project(&self, id: String, project: bool) -> Result<()> {
+        self.write(|w| {
+            let task = get_task(w.tx, &id)?;
+            if project && task.parent_id.is_some() {
+                return Err(AppError::invalid("only a top-level task can be a project"));
+            }
+            w.task(&id, "project", json!(project))
+        })
+    }
+
+    /// Creates a task inside a project (or under any task) from one line of text.
+    pub fn quick_add_under(&self, text: String, parent_id: String) -> Result<TaskItem> {
+        self.write(|w| {
+            let parsed = quickadd::parse(&text, w.today());
+            // A list named in the line makes no sense here: the parent decides the list.
+            let title = match parsed.list_name {
+                Some(name) => format!("{} @{name}", parsed.title).trim().to_string(),
+                None => parsed.title,
+            };
+            create_task(
+                w,
+                NewTask {
+                    title,
+                    parent_id: Some(parent_id),
+                    due: parsed.due,
+                    priority: (parsed.priority != Priority::None).then_some(parsed.priority),
+                    tags: parsed.tags,
+                    ..NewTask::default()
+                },
+            )
+        })
+    }
+
+    // ---- saved filters ----
+
+    pub fn filters(&self) -> Result<Vec<SavedFilter>> {
+        let inner = self.lock();
+        let today = inner.now().date().format(DATE_FMT).to_string();
+        let mut stmt = inner
+            .conn
+            .prepare_cached("SELECT id, name, spec FROM filters WHERE deleted = 0 ORDER BY pos, id")?;
+        let rows: Vec<(String, String, String)> = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        rows.into_iter()
+            .map(|(id, name, spec)| {
+                let spec: FilterSpec = serde_json::from_str(&spec).unwrap_or_default();
+                let open_count = filter_tasks(&inner.conn, &spec, &today)?
+                    .iter()
+                    .filter(|t| t.done.is_none())
+                    .count() as u32;
+                Ok(SavedFilter {
+                    id,
+                    name,
+                    spec,
+                    open_count,
+                })
+            })
+            .collect()
+    }
+
+    /// What a filter would show, without saving it.
+    pub fn preview_filter(&self, spec: FilterSpec) -> Result<Vec<TaskItem>> {
+        let inner = self.lock();
+        let today = inner.now().date().format(DATE_FMT).to_string();
+        filter_tasks(&inner.conn, &spec, &today)
+    }
+
+    pub fn create_filter(&self, name: String, spec: FilterSpec) -> Result<SavedFilter> {
+        let name = name.trim().to_string();
+        if name.is_empty() {
+            return Err(AppError::invalid("filter name is empty"));
+        }
+        let id = self.write(|w| {
+            let id = new_id();
+            let last = last_pos(w.tx, "SELECT max(pos) FROM filters", &[])?;
+            w.set(KIND_FILTER, &id, "name", json!(name))?;
+            w.set(KIND_FILTER, &id, "spec", serde_json::to_value(&spec)?)?;
+            w.set(KIND_FILTER, &id, "pos", json!(order::between(last.as_deref(), None)))?;
+            Ok(id)
+        })?;
+        self.filters()?
+            .into_iter()
+            .find(|f| f.id == id)
+            .ok_or_else(|| AppError::not_found("filter"))
+    }
+
+    pub fn update_filter(&self, id: String, name: String, spec: FilterSpec) -> Result<()> {
+        let name = name.trim().to_string();
+        if name.is_empty() {
+            return Err(AppError::invalid("filter name is empty"));
+        }
+        self.write(|w| {
+            let (old_name, old_spec): (String, String) =
+                w.tx.query_row(
+                    "SELECT name, spec FROM filters WHERE id = ?1 AND deleted = 0",
+                    [&id],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .optional()?
+                .ok_or_else(|| AppError::not_found(format!("filter {id}")))?;
+            if old_name != name {
+                w.set(KIND_FILTER, &id, "name", json!(name))?;
+            }
+            if serde_json::from_str::<FilterSpec>(&old_spec).ok().as_ref() != Some(&spec) {
+                w.set(KIND_FILTER, &id, "spec", serde_json::to_value(&spec)?)?;
+            }
+            Ok(())
+        })
+    }
+
+    pub fn delete_filter(&self, id: String) -> Result<()> {
+        self.write(|w| w.set(KIND_FILTER, &id, "deleted", json!(true)))
     }
 
     // ---- creating ----
@@ -928,6 +1073,67 @@ fn list_tasks(conn: &Connection, list_id: &str) -> Result<Vec<TaskItem>> {
         ),
         &[list_id],
     )
+}
+
+/// Tasks a filter selects, subtasks included, dated ones first.
+fn filter_tasks(conn: &Connection, spec: &FilterSpec, today: &str) -> Result<Vec<TaskItem>> {
+    let mut sql = format!("WHERE {LIVE} AND {NOT_ARCHIVED}");
+    let mut args: Vec<String> = Vec::new();
+    let arg = |value: String, args: &mut Vec<String>| {
+        args.push(value);
+        format!("?{}", args.len())
+    };
+    match spec.status {
+        FilterStatus::Open => sql.push_str(" AND t.done IS NULL"),
+        FilterStatus::Done => sql.push_str(" AND t.done IS NOT NULL"),
+        FilterStatus::All => {}
+    }
+    let date = "substr(coalesce(t.due, t.start), 1, 10)";
+    match spec.due {
+        DueWindow::Any => {}
+        DueWindow::NoDate => sql.push_str(" AND t.due IS NULL AND t.start IS NULL"),
+        DueWindow::Overdue => sql.push_str(&format!(
+            " AND substr(t.due, 1, 10) < {}",
+            arg(today.to_string(), &mut args)
+        )),
+        DueWindow::Today => sql.push_str(&format!(" AND {date} = {}", arg(today.to_string(), &mut args))),
+        DueWindow::Next { days } => {
+            let last = recur::shift(today, i64::from(days.clamp(1, 3660)) - 1).unwrap_or_else(|| today.to_string());
+            sql.push_str(&format!(" AND {date} <= {}", arg(last, &mut args)));
+        }
+    }
+    if !spec.list_ids.is_empty() {
+        let marks: Vec<String> = spec.list_ids.iter().map(|id| arg(id.clone(), &mut args)).collect();
+        sql.push_str(&format!(" AND t.eff_list IN ({})", marks.join(", ")));
+    }
+    for tag in spec.tags.iter().map(|t| clean_tag(t)).filter(|t| !t.is_empty()) {
+        sql.push_str(&format!(
+            " AND EXISTS (SELECT 1 FROM task_tags g WHERE g.task_id = t.id AND g.tag = {})",
+            arg(tag, &mut args)
+        ));
+    }
+    if spec.min_priority != Priority::None {
+        sql.push_str(&format!(" AND t.priority >= {}", spec.min_priority.as_i64()));
+    }
+    sql.push_str(&format!(
+        " ORDER BY t.done IS NOT NULL, {date} IS NULL, coalesce(t.due, t.start), t.priority DESC, t.pos, t.id"
+    ));
+    let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    let mut tasks = query_tasks(conn, &sql, &refs)?;
+    // Matching text is done here: SQLite folds case for ASCII only.
+    let words: Vec<String> = spec
+        .text
+        .to_lowercase()
+        .split_whitespace()
+        .map(str::to_string)
+        .collect();
+    if !words.is_empty() {
+        tasks.retain(|t| {
+            let hay = format!("{}\n{}", t.title, t.notes).to_lowercase();
+            words.iter().all(|w| hay.contains(w))
+        });
+    }
+    Ok(tasks)
 }
 
 fn find_list_by_name(conn: &Connection, name: &str) -> Result<Option<String>> {

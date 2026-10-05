@@ -18,10 +18,10 @@ struct QuickEntryField: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
-                Image(systemName: "checkmark.circle").font(.title2).foregroundStyle(.secondary)
+                Image(systemName: "checkmark.circle").font(AppFont.style(.title2)).foregroundStyle(.secondary)
                 TextField(L("New task"), text: $text)
                     .textFieldStyle(.plain)
-                    .font(.title3)
+                    .font(AppFont.style(.title3))
                     .focused($focused)
                     .onSubmit(save)
             }
@@ -82,6 +82,7 @@ final class QuickEntryPanel: NSPanel {
         // A fresh view each time: the field starts empty and focused.
         let view = QuickEntryField(onDone: { [weak self] in self?.close() })
             .environment(AppModel.shared)
+            .font(AppFont.style(.body))
             .padding(16)
             .frame(width: 560)
         contentView = NSHostingView(rootView: view)
