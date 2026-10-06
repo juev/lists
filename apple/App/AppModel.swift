@@ -32,7 +32,8 @@ final class AppModel {
     var expanded: Set<String> = []
     /// Expanded tasks whose subtasks are on show; they stay folded until asked for.
     var subtasksShown: Set<String> = []
-    var selection: String?
+    /// Moving to another row closes the open card: one card is open at a time.
+    var selection: String? { didSet { if let selection, selection != oldValue { closeCards(except: selection) } } }
     /// The card of a task that does not exist yet, while it is open (⌘N).
     var draft: TaskDraft?
     // Sheets of the sidebar; here so that the menu bar can open them too.
@@ -312,7 +313,19 @@ final class AppModel {
         case .project(let id): new.parentId = id
         default: break
         }
+        expanded.removeAll()
         draft = new
+    }
+
+    /// Closes the card of a new task the way Esc does: a task with a title is created, an empty card is dropped.
+    func finishDraft() {
+        guard let open = draft else { return }
+        if open.isBlank {
+            open.files.forEach(IncomingFiles.discard)
+        } else {
+            save(open)
+        }
+        draft = nil
     }
 
     /// Creates the task of a draft. What the fields say wins over what the title says.
@@ -355,9 +368,8 @@ final class AppModel {
     }
 
     func showSubtasks(_ id: String) {
-        expanded.insert(id)
         subtasksShown.insert(id)
-        reload()
+        expand(id)
     }
 
     func toggleSubtasks(_ id: String) {
@@ -369,9 +381,46 @@ final class AppModel {
         task.isProject || subtasksShown.contains(task.id)
     }
 
+    /// Opens the card of a task and closes the one that was open.
+    func expand(_ id: String) {
+        if let draft, !draft.isBlank {
+            // The table takes the row of the new task first and the open card on the next
+            // turn: both in one update make it call back into its delegate.
+            finishDraft()
+            DispatchQueue.main.async { self.expand(id) }
+            return
+        }
+        finishDraft()
+        selection = id
+        closeCards(except: id)
+        expanded.insert(id)
+        reload()
+    }
+
+    /// Closes a card together with the cards of the subtasks inside it.
     func collapse(_ id: String) {
+        if let selection, ancestors(of: selection).contains(id) { self.selection = id }
+        expanded.subtract(expanded.filter { ancestors(of: $0).contains(id) })
         expanded.remove(id)
         reload()
+    }
+
+    /// The rows a row is drawn inside of, nearest first.
+    private func ancestors(of id: String) -> [String] {
+        var path: [String] = []
+        var current = id
+        while let parent = children.first(where: { entry in
+            expanded.contains(entry.key) && entry.value.contains { $0.id == current }
+        })?.key, !path.contains(parent) {
+            path.append(parent)
+            current = parent
+        }
+        return path
+    }
+
+    /// Leaves open only the row itself and the rows it is drawn inside of.
+    private func closeCards(except id: String) {
+        expanded.formIntersection(ancestors(of: id) + [id])
     }
 
     func toggleDone(_ task: TaskItem) {
@@ -406,6 +455,7 @@ final class AppModel {
     /// Shows a task in its list, expanded, with every ancestor expanded too.
     func reveal(_ id: String) {
         guard let store, var task = try? store.task(id: id) else { return }
+        finishDraft()
         search = ""
         scope = task.listId == "inbox" ? .inbox : .list(id: task.listId)
         var path = [task.id]
@@ -413,9 +463,10 @@ final class AppModel {
             path.append(next.id)
             task = next
         }
-        expanded.formUnion(path)
-        subtasksShown.formUnion(path.dropFirst())
+        // The selection first: it closes every card that is not around the row it lands on.
         selection = id
+        expanded = Set(path)
+        subtasksShown.formUnion(path.dropFirst())
         reload()
     }
 
@@ -445,8 +496,7 @@ final class AppModel {
     }
 
     func toggleExpanded(_ id: String) {
-        if expanded.contains(id) { expanded.remove(id) } else { expanded.insert(id) }
-        reload()
+        if expanded.contains(id) { collapse(id) } else { expand(id) }
     }
 
     /// Reorders within the single section of a manually sorted list.
@@ -465,7 +515,11 @@ final class AppModel {
         let siblings = task.parentId.flatMap { children[$0] } ?? allTasks.filter { $0.parentId == nil }
         guard let index = siblings.firstIndex(where: { $0.id == task.id }), index > 0 else { return }
         let parent = siblings[index - 1]
+        // The parent opens to show where the task went; the task keeps its own card if it had one.
+        let open = expanded.contains(task.id)
+        closeCards(except: parent.id)
         expanded.insert(parent.id)
+        if open { expanded.insert(task.id) }
         subtasksShown.insert(parent.id)
         perform { store in
             let last = try store.subtasks(parentId: parent.id).last?.id
@@ -480,6 +534,8 @@ final class AppModel {
             let parent = try store.task(id: parentId)
             try store.moveTask(id: task.id, listId: nil, parentId: parent.parentId, after: parent.id)
         }
+        // The task has left its parent, so the parent's card is no longer around the selection.
+        if let selection { closeCards(except: selection) }
     }
 
     // MARK: Import

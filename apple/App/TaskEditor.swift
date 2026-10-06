@@ -29,8 +29,8 @@ struct TaskEditor: View {
         }
         .disabled(locked)
         .background {
-            // The dates of the selected open task are one key away; with
-            // several cards open only the selected one answers.
+            // The dates of the selected open task are one key away; the card
+            // of a parent stays open around its subtask, and only the selected one answers.
             Group {
                 Button("") { popover = .start }.keyboardShortcut("s", modifiers: .command)
                 Button("") { popover = .due }.keyboardShortcut("d", modifiers: .command)
