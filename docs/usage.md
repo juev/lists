@@ -40,7 +40,7 @@ On macOS ⌘N, or the "+" button in the toolbar, opens the card of a new task ri
 
 Files get into a card on macOS in three ways: the paperclip button, dropping them on the card, and ⌘V with files or an image on the clipboard. This works in the card of a new task, in the quick-entry window and in an open task. ⌘V with text on the clipboard pastes the text as usual.
 
-Return in the notes starts a new line and Esc finishes editing. Settings → New tasks can turn that around: Return finishes, ⌥Return starts a new line. ⌘S and ⌘D open the start date and the due date from anywhere in the card; the calendar takes the arrow keys, and Return confirms. ⇧⌘R opens the repeat the same way.
+Return in the notes starts a new line and Esc finishes editing. Settings → New tasks can turn that around: Return finishes, ⌥Return starts a new line. ⌘S and ⌘D open the start date and the due date from anywhere in the card; the calendar takes the arrow keys, and Return confirms. In the open date popover one key sets a common choice and closes it: T for today, M for tomorrow, W for a week from now, and a digit from 1 to 9 for that many days ahead. + and − move the day selected in the calendar forward and back and leave the popover open; ⌫ removes the date. The keys are the same in any keyboard layout, and each is shown next to its button. While the time field has the keyboard, they go to it. ⇧⌘R opens the repeat the same way.
 
 ### Notes in Markdown
 
@@ -143,6 +143,10 @@ A reminder set on a task itself replaces the one derived from its due date. The 
 |---|---|
 | ⌘N | new task, as a card in the list |
 | ⌘S and ⌘D | start date and due date of the open card |
+| T, M, W | in the open date popover: today, tomorrow, in a week |
+| 1 … 9 | in the open date popover: in that many days |
+| + and − | in the open date popover: a day later, a day earlier |
+| ⌫ | in the open date popover: remove the date |
 | ⇧⌘R | repeat of the open card |
 | ⌘V | attach the files or the image on the clipboard to the open card |
 | ↑ ↓ | select |
