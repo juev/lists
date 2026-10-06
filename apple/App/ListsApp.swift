@@ -315,7 +315,7 @@ struct SettingsView: View {
                     TextField(L("Address"), text: $url, prompt: Text("https://example.org/remote.php/dav"))
                     TextField(L("User name"), text: $user)
                     SecureField(L("Password"), text: $password)
-                    Text(L("Lists become calendars and tasks stay visible to other CalDAV apps. Attachments up to 5 MB are synced."))
+                    Text(L("Lists become calendars and tasks stay visible to other CalDAV apps. Attachments up to 5 MB are synced, up to 20 MB per task."))
                         .font(AppFont.style(.caption)).foregroundStyle(.secondary)
                 case .folder:
                     HStack {

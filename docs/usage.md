@@ -30,7 +30,7 @@ Only the title is required. A task can also have notes, a start date, a due date
 - **Dates** are a day or a day with a time, without a time zone: "tomorrow at 9:00" stays nine in the morning after a flight. A task with a start date in the future is hidden from Today until that day.
 - **Priority** is none, low, medium or high.
 - **Tags** are created by typing them. A tag that no task carries disappears from the sidebar.
-- **Attachments** are files and images in any number. Once downloaded to a device they open without a network. With CalDAV sync, attachments up to 5 MB are synced.
+- **Attachments** are files and images in any number. Once downloaded to a device they open without a network. With CalDAV sync, attachments up to 5 MB are synced, up to 20 MB per task; the rest stay on the device they were added on.
 
 On macOS a task opens in place in the list as an outlined card; on Android it opens as a bottom sheet over the list. The card always shows the start date and the due date. Other empty fields take no room: they are added from the "+" button.
 

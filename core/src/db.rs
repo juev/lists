@@ -171,6 +171,8 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     )?;
     // The task's registers as they were when the object was last found to say the same (C17).
     add_column(conn, "caldav_items", "synced", "TEXT")?;
+    // Why the object could not be read; such a row may have no task (C23).
+    add_column(conn, "caldav_items", "problem", "TEXT")?;
     // The calendar's change tag when its objects were last listed in full (C19).
     add_column(conn, "caldav_calendars", "tag", "TEXT")?;
     // The sync token that describes the calendar as it was last read (C20).

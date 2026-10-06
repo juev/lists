@@ -14,7 +14,7 @@ const DAV: &str = "DAV:";
 const CALDAV: &str = "urn:ietf:params:xml:ns:caldav";
 const APPLE: &str = "http://apple.com/ns/ical/";
 const CALSERVER: &str = "http://calendarserver.org/ns/";
-/// One object with an inline attachment stays far below this.
+/// An object this app wrote stays below this: see `MAX_INLINE_TOTAL`.
 const MAX_BODY: u64 = 32 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -56,6 +56,15 @@ enum Answer {
     Refused,
     TooLarge,
     Body(String),
+}
+
+/// What a GET finds at an address.
+pub enum Object {
+    Missing,
+    /// Longer than the client reads; the ETag says which version that was.
+    TooLarge(String),
+    /// The text and its ETag.
+    Found(String, String),
 }
 
 pub enum Condition<'a> {
@@ -429,19 +438,25 @@ impl Client {
             .collect())
     }
 
-    pub fn get(&self, href: &str) -> Result<Option<(String, String)>> {
+    pub fn get(&self, href: &str) -> Result<Object> {
         match self.request("GET", href).call() {
             Ok(response) => {
                 let etag = response.header("ETag").unwrap_or_default().to_string();
-                let mut text = String::new();
+                // Bytes first: a cut at the limit may fall inside a character.
+                let mut bytes = Vec::new();
                 response
                     .into_reader()
-                    .take(MAX_BODY)
-                    .read_to_string(&mut text)
+                    .take(MAX_BODY + 1)
+                    .read_to_end(&mut bytes)
                     .map_err(|e| AppError::sync(format!("GET {href}: {e}")))?;
-                Ok(Some((text, etag)))
+                if bytes.len() as u64 > MAX_BODY {
+                    return Ok(Object::TooLarge(etag));
+                }
+                String::from_utf8(bytes)
+                    .map(|text| Object::Found(text, etag))
+                    .map_err(|_| AppError::sync(format!("GET {href}: the object is not UTF-8")))
             }
-            Err(ureq::Error::Status(404, _)) => Ok(None),
+            Err(ureq::Error::Status(404, _)) => Ok(Object::Missing),
             Err(e) => Err(self.failure("GET", href, e)),
         }
     }

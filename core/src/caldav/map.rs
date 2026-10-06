@@ -19,6 +19,9 @@ pub const SHA_PARAM: &str = "X-LISTS-SHA256";
 pub const PRODID: &str = "-//org.evsyukov//Lists//EN";
 /// Larger attachments stay on the device: the whole object is re-sent on every edit.
 pub const MAX_INLINE: usize = 5 * 1024 * 1024;
+/// All inline attachments of one object together. In base64 and folded lines
+/// this is 28 MB, which leaves the object readable (`MAX_BODY` in the client).
+pub const MAX_INLINE_TOTAL: usize = 20 * 1024 * 1024;
 
 /// field → (value, stamp)
 pub type Registers = BTreeMap<String, (Value, String)>;
@@ -269,6 +272,9 @@ pub fn render(
         .filter_map(|a| a.get("sha256").and_then(|(v, _)| v.as_str()))
         .filter(|s| is_sha256(s))
         .collect();
+    // What does not fit the object stays out of it. The order is that of the
+    // hashes, so every device leaves out the same attachments.
+    let mut room = MAX_INLINE_TOTAL;
     for sha in wanted {
         let fresh = blob(sha).filter(|bytes| bytes.len() <= MAX_INLINE).map(|bytes| {
             Prop::new("ATTACH", base64::engine::general_purpose::STANDARD.encode(bytes))
@@ -277,7 +283,12 @@ pub fn render(
                 .with(SHA_PARAM, sha)
         });
         // A device that has not downloaded the content yet must not drop it from the object.
-        if let Some(prop) = fresh.or_else(|| kept.remove(sha)) {
+        let Some(prop) = fresh.or_else(|| kept.remove(sha)) else {
+            continue;
+        };
+        let size = prop.value.trim_end_matches('=').len() * 3 / 4;
+        if size <= room {
+            room -= size;
             todo.props.push(prop);
         }
     }
@@ -720,6 +731,41 @@ mod tests {
             .unwrap()
             .insert("deleted".into(), (json!(true), stamp(10)));
         assert!(blobs(&render("t", &s, Some(&with_blob), &|_| None, now())).is_empty());
+    }
+
+    #[test]
+    fn c5_inline_attachments_are_capped_in_hash_order() {
+        let shas: Vec<String> = (1..=5).map(|i| format!("{i:064x}")).collect();
+        let mut s = state(&[("title", json!("x"))]);
+        for sha in &shas {
+            s.attachments.insert(
+                format!("att-{sha}"),
+                [("sha256".to_string(), (json!(sha), stamp(9)))].into(),
+            );
+        }
+        let inline = |c: &Component| -> Vec<String> {
+            c.sub("VTODO")
+                .unwrap()
+                .all("ATTACH")
+                .filter_map(|p| p.param(SHA_PARAM).map(str::to_string))
+                .collect()
+        };
+        let largest = vec![0u8; MAX_INLINE];
+        let capped = render("t", &s, None, &|_| Some(largest.clone()), now());
+        assert_eq!(inline(&capped), shas[..4]);
+        assert!(
+            ical::serialize(&capped).len() < 30 * 1024 * 1024,
+            "a full object stays readable"
+        );
+
+        // An object written before the cap shrinks the same way, also on a device without the contents.
+        let mut old = capped.clone();
+        let todo = old.sub_mut("VTODO").unwrap();
+        let content = todo.get("ATTACH").unwrap().value.clone();
+        todo.props
+            .insert(0, Prop::new("ATTACH", content).with(SHA_PARAM, &shas[4]));
+        assert_eq!(inline(&old).len(), 5);
+        assert_eq!(inline(&render("t", &s, Some(&old), &|_| None, now())), shas[..4]);
     }
 
     #[test]

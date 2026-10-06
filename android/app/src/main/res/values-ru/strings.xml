@@ -168,7 +168,7 @@
     <string name="reminders_channel">Напоминания</string>
     <string name="password_missing">Введите пароль в настройках синхронизации.</string>
     <string name="password_store_failed">Не удалось сохранить пароль в системной связке ключей: %1$s</string>
-    <string name="caldav_hint">Списки станут календарями, а задачи будут видны другим CalDAV-приложениям. Вложения синхронизируются до 5 МБ.</string>
+    <string name="caldav_hint">Списки станут календарями, а задачи будут видны другим CalDAV-приложениям. Вложения синхронизируются до 5 МБ, не больше 20 МБ на задачу.</string>
     <string name="sync_off">Выключена</string>
     <string name="project">Проект</string>
     <string name="filter">Фильтр</string>
