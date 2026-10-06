@@ -130,6 +130,7 @@ struct AppCommands: Commands {
             scope(L("Upcoming"), .upcoming, "3")
             scope(L("All"), .all, "4")
             scope(L("Completed"), .completed, "5")
+                .disabled(!model.showCompletedView)
             Divider()
             Button(L("Sync now")) { model.syncNow() }
                 .keyboardShortcut("r")
@@ -139,6 +140,8 @@ struct AppCommands: Commands {
 
     private func scope(_ title: String, _ scope: Scope, _ key: KeyEquivalent) -> some View {
         Button(title) {
+            // The menu may not have caught up with the setting yet.
+            if scope == .completed, !model.showCompletedView { return }
             model.search = ""
             model.scope = scope
             openWindow(id: "main")
@@ -232,6 +235,10 @@ struct SettingsView: View {
                 Picker(L("Typeface"), selection: $model.fontDesign) {
                     ForEach(AppFont.designs, id: \.1) { name, value in Text(L(name)).tag(value) }
                 }
+            }
+            Section(L("Sidebar")) {
+                @Bindable var model = model
+                Toggle(L("Show Completed in the sidebar"), isOn: $model.showCompletedView)
             }
             Section(L("Notifications")) {
                 @Bindable var model = model

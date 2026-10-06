@@ -73,6 +73,8 @@ fn r2_list_settings_are_stored_and_applied() {
     assert_eq!(of(&d), ["b"]);
     d.set_list_show_done(list.id.clone(), true).unwrap();
     assert_eq!(of(&d), ["b", "a"], "completed tasks go last");
+    d.set_list_show_done(list.id.clone(), false).unwrap();
+    assert_eq!(of(&d), ["b"], "switched off, completed tasks leave the list again");
     assert_eq!(d.list(list.id).unwrap().open_count, 1);
 }
 

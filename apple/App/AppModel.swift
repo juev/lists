@@ -107,6 +107,14 @@ final class AppModel {
         didSet { UserDefaults.standard.set(returnAddsLine, forKey: "returnAddsLine") }
     }
 
+    /// Whether the sidebar and the Go menu offer the Completed view on this Mac; not synced.
+    var showCompletedView: Bool = UserDefaults.standard.object(forKey: "showCompletedView") == nil || UserDefaults.standard.bool(forKey: "showCompletedView") {
+        didSet {
+            UserDefaults.standard.set(showCompletedView, forKey: "showCompletedView")
+            if !showCompletedView, scope == .completed { scope = .inbox }
+        }
+    }
+
     /// Whether dates, priority, tags and a list are picked out of the typed title.
     var parseQuickText: Bool = UserDefaults.standard.object(forKey: "parseQuickText") == nil || UserDefaults.standard.bool(forKey: "parseQuickText") {
         didSet { UserDefaults.standard.set(parseQuickText, forKey: "parseQuickText") }
