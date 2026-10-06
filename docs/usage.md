@@ -65,7 +65,7 @@ A project is a top-level task marked as a project. It appears in the sidebar wit
 
 ## Repeats
 
-A repeat is set in the card of a task. On macOS the card of a new task, in the main window, in the quick-entry window and in the menu bar, always has a Repeat chip. In an open task the chip appears once a rule is set; until then Repeat is under the "+" button. ⇧⌘R opens it from anywhere in either card. On Android the quick-entry window has a Repeat chip, and in the editor Repeat is under the "+" button until a rule is set. The rule counts from the due date, or from the start date when there is no due date.
+A repeat is set in the card of a task. On macOS the card of a new task, in the main window, in the quick-entry window and in the menu bar, always has a Repeat chip. In an open task the chip appears once a rule is set; until then Repeat is under the "+" button. ⇧⌘R opens it from anywhere in either card. On Android the card of a new task and the quick-entry window have a Repeat chip, and in the editor Repeat is under the "+" button until a rule is set. The rule counts from the due date, or from the start date when there is no due date.
 
 Presets: every day, on weekdays, every week, every two weeks, every month, every quarter, every year.
 
@@ -95,7 +95,7 @@ Settings → New tasks (Settings in the drawer on Android) chooses the list a ta
 Where the entry field is:
 
 - **macOS**: the card in the main window (⌘N); a global hotkey that opens a small window over any app (⌃⌥Space by default, changeable in Settings); the menu bar item, which also lists today's tasks; the share extension; the Services menu; the `lists://add?text=…` URL.
-- **Android**: the bar at the bottom of the main screen; a small window over the current app from Share, from the text-selection menu, from the launcher shortcut and from the quick settings tile.
+- **Android**: the "+" button on the main screen, which opens the card of a new task as a bottom sheet and keeps it open for the next task after Done on the keyboard or Add (back or a tap outside closes it); a small window over the current app from Share, from the text-selection menu, from the launcher shortcut and from the quick settings tile.
 - **Web**: the New task field in the task list.
 
 ## Saved filters
