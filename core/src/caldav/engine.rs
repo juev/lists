@@ -600,6 +600,34 @@ fn sync(store: &Store, client: &Client, calendars: Vec<Calendar>) -> Result<Sync
         }
     }
 
+    // ---- nudge addresses: one more property of the inbox calendar (C22) ----
+    let me = store.device_id();
+    let mut nudged: BTreeMap<String, String> = calendar_of
+        .get(INBOX_ID)
+        .and_then(|inbox| calendars.iter().find(|c| c.href == *inbox))
+        .and_then(|c| c.push.as_deref())
+        .and_then(|raw| base64::engine::general_purpose::STANDARD.decode(raw.trim()).ok())
+        .and_then(|json| serde_json::from_slice(&json).ok())
+        .unwrap_or_default();
+    let endpoint = store.push_endpoint()?;
+    if nudged.get(&me) != endpoint.as_ref() {
+        match &endpoint {
+            Some(url) => nudged.insert(me.clone(), url.clone()),
+            None => nudged.remove(&me),
+        };
+        if let Some(inbox) = calendar_of.get(INBOX_ID) {
+            let encoded =
+                base64::engine::general_purpose::STANDARD.encode(serde_json::to_vec(&nudged).unwrap_or_default());
+            // A server that drops the property is not asked again with the same value.
+            let already = db::meta_get(&store.lock().conn, "push_published")?;
+            if already.as_deref() != Some(encoded.as_str()) {
+                client.set_push(inbox, &encoded);
+                db::meta_set(&store.lock().conn, "push_published", &encoded)?;
+            }
+        }
+    }
+    nudged.remove(&me);
+
     // ---- objects the server has ----
     let mut listed: BTreeSet<String> = BTreeSet::new();
     let mut seen_uids: BTreeSet<String> = BTreeSet::new();
@@ -852,6 +880,9 @@ fn sync(store: &Store, client: &Client, calendars: Vec<Calendar>) -> Result<Sync
                 report.pushed += 1;
             }
         }
+    }
+    if report.pushed > 0 || report.blobs_uploaded > 0 {
+        crate::push::poke(nudged.values().map(String::as_str));
     }
     Ok(report)
 }

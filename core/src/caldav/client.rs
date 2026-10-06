@@ -27,6 +27,8 @@ pub struct Calendar {
     pub state: Option<String>,
     /// Saved filters, kept on the inbox calendar the same way.
     pub filters: Option<String>,
+    /// Where devices take nudges, kept on the inbox calendar too.
+    pub push: Option<String>,
     /// Changes whenever an object in the calendar does; empty when the server has no such mark.
     pub tag: String,
     /// Where a `sync-collection` report can start from; empty when the server offers none.
@@ -89,6 +91,7 @@ struct Response {
     color: String,
     state: Option<String>,
     filters: Option<String>,
+    push: Option<String>,
     etag: String,
     ctag: String,
     sync_token: String,
@@ -314,7 +317,7 @@ impl Client {
     /// Calendars that accept tasks; `None` when the home collection does not exist.
     pub fn calendars(&self) -> Result<Option<Vec<Calendar>>> {
         let body = format!(
-            r#"<?xml version="1.0" encoding="utf-8"?><d:propfind xmlns:d="{DAV}" xmlns:c="{CALDAV}" xmlns:a="{APPLE}" xmlns:cs="{CALSERVER}" xmlns:l="{NS}"><d:prop><d:resourcetype/><d:displayname/><a:calendar-color/><c:supported-calendar-component-set/><cs:getctag/><d:sync-token/><l:state/><l:filters/></d:prop></d:propfind>"#
+            r#"<?xml version="1.0" encoding="utf-8"?><d:propfind xmlns:d="{DAV}" xmlns:c="{CALDAV}" xmlns:a="{APPLE}" xmlns:cs="{CALSERVER}" xmlns:l="{NS}"><d:prop><d:resourcetype/><d:displayname/><a:calendar-color/><c:supported-calendar-component-set/><cs:getctag/><d:sync-token/><l:state/><l:filters/><l:push/></d:prop></d:propfind>"#
         );
         let Some(responses) = self.propfind(&self.home, "1", &body)? else {
             return Ok(None);
@@ -329,6 +332,7 @@ impl Client {
                     color: r.color,
                     state: r.state,
                     filters: r.filters,
+                    push: r.push,
                     tag: if r.ctag.is_empty() {
                         r.sync_token.clone()
                     } else {
@@ -391,8 +395,17 @@ impl Client {
 
     /// Stores the saved filters on a calendar. Best effort, like the list settings.
     pub fn set_filters(&self, href: &str, value: &str) {
+        self.set_own(href, "filters", value);
+    }
+
+    /// Stores the table of nudge addresses on a calendar. Best effort as well.
+    pub fn set_push(&self, href: &str, value: &str) {
+        self.set_own(href, "push", value);
+    }
+
+    fn set_own(&self, href: &str, name: &str, value: &str) {
         let body = format!(
-            r#"<?xml version="1.0" encoding="utf-8"?><d:propertyupdate xmlns:d="{DAV}" xmlns:l="{NS}"><d:set><d:prop><l:filters>{}</l:filters></d:prop></d:set></d:propertyupdate>"#,
+            r#"<?xml version="1.0" encoding="utf-8"?><d:propertyupdate xmlns:d="{DAV}" xmlns:l="{NS}"><d:set><d:prop><l:{name}>{}</l:{name}></d:prop></d:set></d:propertyupdate>"#,
             xml_escape(value)
         );
         let _ = self
@@ -499,6 +512,7 @@ fn parse_multistatus(text: &str) -> Result<(Vec<Response>, String)> {
             color: String::new(),
             state: None,
             filters: None,
+            push: None,
             etag: String::new(),
             ctag: String::new(),
             sync_token: String::new(),
@@ -548,6 +562,8 @@ fn parse_multistatus(text: &str) -> Result<(Vec<Response>, String)> {
                     r.state = Some(text()).filter(|s| !s.is_empty());
                 } else if is(&prop, NS, "filters") {
                     r.filters = Some(text()).filter(|s| !s.is_empty());
+                } else if is(&prop, NS, "push") {
+                    r.push = Some(text()).filter(|s| !s.is_empty());
                 } else if is(&prop, DAV, "getetag") {
                     r.etag = text();
                 } else if is(&prop, CALSERVER, "getctag") {
