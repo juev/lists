@@ -214,6 +214,90 @@ fn r9_trash_restore_and_purge() {
 }
 
 #[test]
+fn r46_completed_is_cleared_in_whole_or_before_a_day() {
+    let d = device();
+    d.set_now_for_tests("2026-08-01T09:00");
+    let old = add(&d, "давняя");
+    add_sub(&d, &old, "её часть");
+    d.complete_task(old.id.clone()).unwrap();
+    d.set_now_for_tests("2026-08-01T10:00");
+    let rep = add(&d, "зарядка");
+    d.set_due(rep.id.clone(), Some("2026-08-01".into())).unwrap();
+    d.set_repeat(rep.id.clone(), Some(weekly())).unwrap();
+    d.complete_task(rep.id.clone()).unwrap();
+    d.set_now_for_tests("2026-09-20T09:00");
+    let mid = add(&d, "сентябрьская");
+    d.complete_task(mid.id).unwrap();
+    d.set_now_for_tests(NOW);
+    let fresh = add(&d, "свежая");
+    d.complete_task(fresh.id).unwrap();
+    let open = add(&d, "в работе");
+    let part = add_sub(&d, &open, "сделанная часть");
+    d.complete_task(part.id.clone()).unwrap();
+    let binned = add(&d, "в корзине");
+    d.complete_task(binned.id.clone()).unwrap();
+    d.delete_task(binned.id.clone()).unwrap();
+    assert_eq!(
+        view(&d, Scope::Completed),
+        ["свежая", "сентябрьская", "зарядка", "давняя"]
+    );
+
+    assert!(d.clear_completed(Some("в августе".into())).is_err());
+    assert!(
+        d.clear_completed(Some(String::new())).is_err(),
+        "an empty day does not mean everything"
+    );
+    assert_eq!(
+        d.clear_completed(Some("2026-08-01".into())).unwrap(),
+        0,
+        "the day itself is kept"
+    );
+    assert_eq!(d.clear_completed(Some("2026-09-05".into())).unwrap(), 2);
+    assert_eq!(view(&d, Scope::Completed), ["свежая", "сентябрьская"]);
+    assert!(d.task(old.id).is_err(), "cleared for good, not moved to the trash");
+    assert!(
+        view(
+            &d,
+            Scope::Search {
+                text: "её часть".into()
+            }
+        )
+        .is_empty(),
+        "subtasks go with their task"
+    );
+    assert!(
+        d.task(rep.id.clone()).unwrap().done.is_none(),
+        "the repeating task itself stays"
+    );
+    assert_eq!(view(&d, Scope::Trash), ["в корзине"]);
+
+    assert_eq!(d.clear_completed(None).unwrap(), 2);
+    assert!(view(&d, Scope::Completed).is_empty());
+    assert_eq!(view(&d, Scope::Inbox), ["зарядка", "в работе"]);
+    assert!(
+        d.task(part.id).unwrap().done.is_some(),
+        "a completed subtask of an open task stays"
+    );
+    assert_eq!(view(&d, Scope::Trash), ["в корзине"]);
+    d.restore_task(binned.id).unwrap();
+    assert_eq!(view(&d, Scope::Completed), ["в корзине"], "the trash was not cleared");
+}
+
+#[test]
+fn r46_completed_lists_the_whole_log() {
+    let d = device();
+    let t = add(&d, "зарядка");
+    d.set_due(t.id.clone(), Some("2026-10-05".into())).unwrap();
+    let mut daily = weekly();
+    daily.freq = Freq::Daily;
+    d.set_repeat(t.id.clone(), Some(daily)).unwrap();
+    for _ in 0..501 {
+        d.complete_task(t.id.clone()).unwrap();
+    }
+    assert_eq!(d.tasks(Scope::Completed).unwrap().len(), 501);
+}
+
+#[test]
 fn r10_subtasks_carry_every_field_and_nest() {
     let d = device();
     let top = add(&d, "проект");

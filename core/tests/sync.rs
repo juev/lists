@@ -250,6 +250,38 @@ fn s7_same_occurrence_completed_on_two_devices_is_recorded_once() {
 }
 
 #[test]
+fn s25_clearing_completed_reaches_the_other_device_and_outlives_a_reopen() {
+    let storage = tempfile::tempdir().unwrap();
+    let (a, b) = (device(), device());
+    let mut ids = Vec::new();
+    for (day, title) in [
+        ("2026-08-01", "давняя"),
+        ("2026-09-20", "сентябрьская"),
+        ("2026-10-05", "свежая"),
+    ] {
+        a.set_now_for_tests(&format!("{day}T09:00"));
+        let t = add(&a, title);
+        a.complete_task(t.id.clone()).unwrap();
+        ids.push(t.id);
+    }
+    settle(&a, &b, &storage);
+    assert_eq!(view(&b, Scope::Completed), ["свежая", "сентябрьская", "давняя"]);
+
+    assert_eq!(a.clear_completed(Some("2026-09-05".into())).unwrap(), 1);
+    b.reopen_task(ids[0].clone()).unwrap();
+    settle(&a, &b, &storage);
+    for d in [&a, &b] {
+        assert_eq!(view(d, Scope::Completed), ["свежая", "сентябрьская"]);
+        assert!(
+            view(d, Scope::Inbox).is_empty(),
+            "a reopen made without knowing does not bring it back"
+        );
+        assert!(view(d, Scope::Trash).is_empty());
+    }
+    assert_eq!(dump(&a), dump(&b));
+}
+
+#[test]
 fn s8_truncated_log_file_is_retried_not_skipped() {
     let storage = tempfile::tempdir().unwrap();
     let (a, b) = (device(), device());

@@ -2,6 +2,14 @@
 <resources>
     <string name="empty_trash_question">Удалить всё из корзины навсегда?</string>
     <string name="empty_trash">Очистить корзину</string>
+    <string name="clear">Очистить</string>
+    <string name="clear_more">Очистить…</string>
+    <string name="older_than_month">Старше месяца</string>
+    <string name="older_than_year">Старше года</string>
+    <string name="everything">Всё</string>
+    <string name="clear_month_question">Удалить навсегда выполненное старше месяца?</string>
+    <string name="clear_year_question">Удалить навсегда выполненное старше года?</string>
+    <string name="clear_all_question">Удалить навсегда всё выполненное?</string>
     <string name="cannot_undo">Это действие нельзя отменить.</string>
     <string name="new_task">Новая задача</string>
     <string name="empty_today">На сегодня всё</string>

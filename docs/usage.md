@@ -16,7 +16,7 @@ The fixed views next to the lists:
 | Today | tasks due today or earlier, and tasks without a due date whose start date has come |
 | Upcoming | tasks with a future date, by day |
 | All | every open task |
-| Completed | finished tasks and the record of each finished repeat |
+| Completed | finished tasks and the record of each finished repeat; Clear… at the bottom removes those older than a month, older than a year, or all of them |
 | Trash | deleted tasks; they can be restored until the trash is emptied by hand |
 
 Search looks through titles and notes in all lists.
@@ -40,7 +40,7 @@ Files get into a card on macOS in three ways: the paperclip button, dropping the
 
 Return in the notes starts a new line and Esc finishes editing. Settings → New tasks can turn that around: Return finishes, ⌥Return starts a new line. ⌘S and ⌘D open the start date and the due date from anywhere in the card; the calendar takes the arrow keys, and Return confirms. ⇧⌘R opens the repeat the same way.
 
-Deleting and completing can be undone: ⌘Z on macOS, the Undo bar on Android. Only emptying the trash asks for confirmation.
+Deleting and completing can be undone: ⌘Z on macOS, the Undo bar on Android. Only emptying the trash and clearing Completed ask for confirmation: both remove tasks for good. Clearing takes finished tasks with their subtasks and the records of finished repeats; open tasks and the trash stay as they are. Over CalDAV the cleared tasks end up in the trash of the other devices instead of disappearing there.
 
 ## Subtasks and projects
 

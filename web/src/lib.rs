@@ -309,6 +309,11 @@ impl App {
                 "delete" => s.delete_task(id()?).map(|_| done)?,
                 "restore" => s.restore_task(id()?).map(|_| done)?,
                 "emptyTrash" => json!({ "removed": s.empty_trash()? }),
+                // An empty day is refused by the core rather than read as "everything".
+                "clearCompleted" => {
+                    let before = a.get("before").and_then(Value::as_str).map(str::to_string);
+                    json!({ "removed": s.clear_completed(before)? })
+                }
                 "moveToList" => s.move_to_list(id()?, text_arg(a, "list")?).map(|_| done)?,
                 "duplicate" => task_json(&s.duplicate_task(id()?)?),
                 "createList" => list_json(&s.create_list(text_arg(a, "name")?)?),

@@ -3,6 +3,14 @@
     <string name="app_name" translatable="false">Lists</string>
     <string name="empty_trash_question">Delete everything in the trash for good?</string>
     <string name="empty_trash">Empty Trash</string>
+    <string name="clear">Clear</string>
+    <string name="clear_more">Clear…</string>
+    <string name="older_than_month">Older than a month</string>
+    <string name="older_than_year">Older than a year</string>
+    <string name="everything">Everything</string>
+    <string name="clear_month_question">Delete completed tasks older than a month for good?</string>
+    <string name="clear_year_question">Delete completed tasks older than a year for good?</string>
+    <string name="clear_all_question">Delete all completed tasks for good?</string>
     <string name="cannot_undo">This cannot be undone.</string>
     <string name="new_task">New task</string>
     <string name="empty_today">All done for today</string>
