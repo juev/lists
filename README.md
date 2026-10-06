@@ -59,7 +59,7 @@ Open `http://<host>:8080` and sign in with the password. Sync, OpenID Connect, a
 
 ## First steps
 
-1. Type a task into the entry field and press Enter. One line is enough: `report friday 10:00 !! #work @Projects` sets the due date, a medium priority, a tag and the list.
+1. Add a task: ⌘N on macOS, the "+" button on Android, the New task field in the web interface. Type it and press Enter. One line is enough: `report friday 10:00 !! #work @Projects` sets the due date, a medium priority, a tag and the list.
 2. Open Settings → Sync on each device and point them all at the same WebDAV folder or CalDAV server. Until then the data stays on the device, and the app is fully usable.
 3. Coming from another task manager? Import a 2Do backup, a Todoist CSV, a Trello board or Microsoft To Do lists: File → Import… on macOS, Settings on Android, the sidebar in the web interface.
 
