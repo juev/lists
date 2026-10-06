@@ -89,6 +89,8 @@ struct TaskEditor: View {
     }
 
     private func finish() {
+        // Esc with a popover open is for the popover: it reaches the card as well.
+        if popover != nil { return popover = nil }
         commitNotes()
         model.closeCard(task.id)
     }

@@ -28,6 +28,8 @@ import SwiftUI
 /// `shot:/path/to.png` (draws that note into a file, on screen or not),
 /// `caret:5` (puts the cursor of that note at the offset), `box:0` (clicks the checkbox with that number in it),
 /// `chips` (prints which chip of the card has the keyboard and which of its popovers is open; `key:backtab+shift` is ⇧Tab),
+/// `ghost` (puts the windows of a hidden app on screen transparent, deaf to the mouse and without the keyboard, popovers that open later among them:
+/// a hidden app shows no popovers; key presses then go to the open popover first, as they do when it has the keyboard),
 /// `completedview:on` and `completedview:off` (flip the setting that offers the Completed view), `scope` (prints the current view),
 /// `appearance:dark`, `appearance:light` and `appearance:system` (choose the look the way Settings does),
 /// `appearance` alone prints the choice and the look each window of the app has, the quick-entry panel among them,
@@ -175,6 +177,20 @@ enum DebugScript {
                         }
                         print("debug: appearance \(AppModel.shared.appearance), windows \(looks.sorted { $0.key < $1.key }.map { "\($0.key) \($0.value)" })")
                     }
+                case "ghost":
+                    ghost = true
+                    for window in NSApp.windows where !(window is NSPanel) && window.styleMask.contains(.titled) { hide(window) }
+                    for name in [NSPopover.willShowNotification, NSPopover.didShowNotification] {
+                        NotificationCenter.default.addObserver(forName: name, object: nil, queue: nil) { note in
+                            MainActor.assumeIsolated {
+                                let popover = note.object as? NSPopover
+                                popover?.animates = false
+                                popover?.contentViewController?.view.window.map(hide)
+                            }
+                        }
+                    }
+                    NSApp.unhideWithoutActivation()
+                    try? await _Concurrency.Task.sleep(for: .milliseconds(300))
                 case "chips": print("debug: chip \(chip ?? "none"), popover \(popover ?? "none")")
                 case "scope": print("debug: scope \(AppModel.shared.scopeTitle), completed view \(AppModel.shared.showCompletedView ? "on" : "off")")
                 case "menu":
@@ -307,15 +323,27 @@ enum DebugScript {
                 windowNumber: window.windowNumber, context: nil, characters: characters,
                 charactersIgnoringModifiers: characters, isARepeat: false, keyCode: code) {
                 // The application hands key events to its key window only; a window
-                // in the background takes them directly.
-                if window.isKeyWindow { NSApp.sendEvent(event) } else { window.sendEvent(event) }
+                // in the background takes them directly, shortcuts as key equivalents.
+                if window.isKeyWindow {
+                    NSApp.sendEvent(event)
+                } else if type != .keyDown || !flags.contains(.command) || !window.performKeyEquivalent(with: event) {
+                    window.sendEvent(event)
+                }
             }
         }
     }
 
     /// The window the script types into: the key window, or the main window of
     /// an app that was left in the background.
-    static var target: NSWindow? { NSApp.keyWindow ?? backgroundWindow }
+    static var target: NSWindow? { NSApp.keyWindow ?? (ghost ? popoverWindow : nil) ?? backgroundWindow }
+
+    /// True after `ghost`: the windows are on screen, unseen.
+    private static var ghost = false
+
+    private static func hide(_ window: NSWindow) {
+        window.alphaValue = 0
+        window.ignoresMouseEvents = true
+    }
 
     /// The window of the popover that is open, if one is.
     private static var popoverWindow: NSWindow? {
