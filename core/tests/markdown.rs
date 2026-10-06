@@ -185,7 +185,68 @@ fn r48_rule_and_table() {
     assert_eq!(of("до\n\n---\n\nпосле", Rule), ["---"]);
     let table = "| а | б |\n|---|---|\n| 1 | 2 |";
     assert_eq!(of(table, TableRow), ["| а | б |", "|---|---|", "| 1 | 2 |"]);
-    assert_eq!(blocks(table).len(), 3);
+    assert_eq!(blocks(table), [table]);
+}
+
+/// The rows of the tables of a note: whether a header, and what each cell says.
+fn grid(text: &str) -> Vec<(bool, Vec<String>)> {
+    markdown_layout(text.into())
+        .tables
+        .iter()
+        .flat_map(|t| t.rows.iter())
+        .map(|r| (r.header, r.cells.iter().map(|c| cut(text, c.start, c.end)).collect()))
+        .collect()
+}
+
+#[test]
+fn r60_table_reports_cells_and_alignment() {
+    let text =
+        "до\n\nимя | 😀 длинная ячейка | c\n:-- | :-: | --:\n**ж** | два |\nодна\n| a | b | c | лишняя |\n\nпосле";
+    let layout = markdown_layout(text.into());
+    let [table] = &layout.tables[..] else {
+        panic!("one table expected")
+    };
+    assert_eq!(
+        table.columns,
+        [MarkdownAlign::Left, MarkdownAlign::Center, MarkdownAlign::Right]
+    );
+    // The table is one block, so the cursor anywhere in it shows all of its source.
+    let block = &layout.blocks[table.block as usize];
+    assert_eq!((block.start, block.end), (table.start, table.end));
+    assert!(cut(text, table.start, table.end).starts_with("имя"));
+    assert!(cut(text, table.start, table.end).ends_with("лишняя |"));
+    // The line of dashes is not a row; a short row is filled up, a long one cut.
+    let row = |header: bool, cells: [&str; 3]| (header, cells.map(String::from).to_vec());
+    assert_eq!(
+        grid(text),
+        [
+            row(true, ["имя", "😀 длинная ячейка", "c"]),
+            row(false, ["**ж**", "два", ""]),
+            row(false, ["одна", "", ""]),
+            row(false, ["a", "b", "c"]),
+        ]
+    );
+    // What styles the text of a cell lies inside the cell.
+    let cell = &table.rows[1].cells[0];
+    let strong = layout.spans.iter().find(|s| s.kind == Strong).unwrap();
+    assert!(cell.start <= strong.start && strong.end <= cell.end);
+}
+
+#[test]
+fn r60_tables_in_a_list_item_and_in_a_quote() {
+    let text = "- пункт\n\n  | a | b |\n  |---|---|\n  | 1 |   |\n> | q | w |\n> |---|---|\n> | 1 | 2 |";
+    let row = |header: bool, cells: [&str; 2]| (header, cells.map(String::from).to_vec());
+    assert_eq!(
+        grid(text),
+        [
+            row(true, ["a", "b"]),
+            row(false, ["1", ""]),
+            row(true, ["q", "w"]),
+            row(false, ["1", "2"]),
+        ]
+    );
+    assert_eq!(markdown_layout(text.into()).tables.len(), 2);
+    assert!(markdown_layout("просто | текст".into()).tables.is_empty());
 }
 
 #[test]

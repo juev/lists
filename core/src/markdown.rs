@@ -7,7 +7,7 @@
 
 use std::ops::Range;
 
-use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, LinkType, Options, Parser, Tag};
+use pulldown_cmark::{Alignment, CodeBlockKind, Event, HeadingLevel, LinkType, Options, Parser, Tag};
 
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
 pub enum MarkdownKind {
@@ -35,7 +35,8 @@ pub enum MarkdownKind {
         checked: bool,
     },
     Rule,
-    /// A line of a table: monospaced, not laid out as a grid.
+    /// A line of a table as it is typed: monospaced. Outside the block that
+    /// holds the cursor the table is drawn as a grid from `MarkdownLayout::tables`.
     TableRow,
     /// Markup characters: hidden unless the cursor is in their block.
     Markup,
@@ -51,12 +52,47 @@ pub struct MarkdownSpan {
 }
 
 /// A paragraph, a heading, a list item without the items nested in it, a code
-/// block or a table line. Markup shows in the block that holds the cursor,
+/// block or a table. Markup shows in the block that holds the cursor,
 /// its end included.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct MarkdownBlock {
     pub start: u32,
     pub end: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum MarkdownAlign {
+    /// Not said: as the text runs.
+    None,
+    Left,
+    Center,
+    Right,
+}
+
+/// What a cell says, without the bars and the spaces around it. An empty cell
+/// has `start == end`; spans that lie inside the range style its text.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct MarkdownCell {
+    pub start: u32,
+    pub end: u32,
+}
+
+/// A row of a table with one cell per column. The line of dashes is not a row.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct MarkdownTableRow {
+    pub header: bool,
+    pub cells: Vec<MarkdownCell>,
+}
+
+/// A table to draw as a grid (R60) while the cursor is outside its block.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct MarkdownTable {
+    pub start: u32,
+    pub end: u32,
+    /// Index into `MarkdownLayout::blocks`.
+    pub block: u32,
+    pub columns: Vec<MarkdownAlign>,
+    pub rows: Vec<MarkdownTableRow>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, uniffi::Record)]
@@ -65,6 +101,8 @@ pub struct MarkdownLayout {
     pub spans: Vec<MarkdownSpan>,
     /// Ordered, not overlapping.
     pub blocks: Vec<MarkdownBlock>,
+    /// Ordered by start.
+    pub tables: Vec<MarkdownTable>,
 }
 
 /// A replacement in the note: `start..end` becomes `text`, the cursor moves to `cursor`.
@@ -79,9 +117,37 @@ pub struct MarkdownEdit {
 /// What to style, hide and replace in a note.
 #[uniffi::export]
 pub fn markdown_layout(text: String) -> MarkdownLayout {
-    let (spans, blocks) = layout(&text);
+    let (spans, blocks, tables) = layout(&text);
     let units = Utf16::of(&text);
     MarkdownLayout {
+        tables: tables
+            .into_iter()
+            .filter_map(|t| {
+                let block = blocks
+                    .iter()
+                    .position(|b| b.start <= t.range.start && t.range.start < b.end)?;
+                Some(MarkdownTable {
+                    start: units.at(t.range.start),
+                    end: units.at(t.range.end),
+                    block: block as u32,
+                    columns: t.columns,
+                    rows: t
+                        .rows
+                        .into_iter()
+                        .map(|(header, cells)| MarkdownTableRow {
+                            header,
+                            cells: cells
+                                .into_iter()
+                                .map(|c| MarkdownCell {
+                                    start: units.at(c.start),
+                                    end: units.at(c.end),
+                                })
+                                .collect(),
+                        })
+                        .collect(),
+                })
+            })
+            .collect(),
         spans: spans
             .into_iter()
             .map(|s| MarkdownSpan {
@@ -116,7 +182,7 @@ pub fn markdown_newline(text: String, cursor: u32) -> Option<MarkdownEdit> {
         return None;
     }
     // The parser has the last word: `- - -` is a rule and a `-` in a code block is text.
-    let (spans, _) = layout(&text);
+    let (spans, _, _) = layout(&text);
     let marked = spans.iter().any(|s| {
         (line_start..line_start + prefix.end.max(1)).contains(&s.range.start)
             && matches!(
@@ -338,7 +404,25 @@ fn lines(text: &str, range: &Range<usize>) -> Vec<Range<usize>> {
     out
 }
 
-fn layout(text: &str) -> (Vec<Span>, Vec<Range<usize>>) {
+/// A table as the parser saw it, in bytes: rows are (header, cells).
+struct Table {
+    range: Range<usize>,
+    columns: Vec<MarkdownAlign>,
+    rows: Vec<(bool, Vec<Range<usize>>)>,
+}
+
+/// The text of a cell: what the parser gives for it without the spaces around.
+fn cell(text: &str, range: &Range<usize>) -> Range<usize> {
+    let slice = &text[range.clone()];
+    let start = range.start + (slice.len() - slice.trim_start().len());
+    let end = range.end - (slice.len() - slice.trim_end().len());
+    start..end.max(start)
+}
+
+fn layout(text: &str) -> (Vec<Span>, Vec<Range<usize>>, Vec<Table>) {
+    let mut tables: Vec<Table> = Vec::new();
+    let mut rows: Vec<(bool, Vec<Range<usize>>)> = Vec::new();
+    let mut cells: Vec<Range<usize>> = Vec::new();
     let mut found: Vec<(Range<usize>, MarkdownKind)> = Vec::new();
     let mut leaves: Vec<Range<usize>> = Vec::new();
     let mut stack: Vec<Frame> = Vec::new();
@@ -361,6 +445,25 @@ fn layout(text: &str) -> (Vec<Span>, Vec<Range<usize>>) {
             Event::End(_) => {
                 let Some(mut frame) = stack.pop() else { continue };
                 let depth = stack.iter().filter(|f| matches!(f.tag, Tag::BlockQuote(_))).count();
+                match &frame.tag {
+                    Tag::TableCell => cells.push(cell(text, &frame.range)),
+                    Tag::TableHead => rows.push((true, std::mem::take(&mut cells))),
+                    Tag::TableRow => rows.push((false, std::mem::take(&mut cells))),
+                    Tag::Table(columns) => tables.push(Table {
+                        range: trimmed(text, &frame.range),
+                        columns: columns
+                            .iter()
+                            .map(|a| match a {
+                                Alignment::None => MarkdownAlign::None,
+                                Alignment::Left => MarkdownAlign::Left,
+                                Alignment::Center => MarkdownAlign::Center,
+                                Alignment::Right => MarkdownAlign::Right,
+                            })
+                            .collect(),
+                        rows: std::mem::take(&mut rows),
+                    }),
+                    _ => {}
+                }
                 close(text, &mut frame, depth, &mut found, &mut leaves);
                 if let Some(parent) = stack.last_mut() {
                     if is_inline(&frame.tag) {
@@ -416,7 +519,8 @@ fn layout(text: &str) -> (Vec<Span>, Vec<Range<usize>>) {
             }
         }
     }
-    arrange(text, found, leaves)
+    let (spans, blocks) = arrange(text, found, leaves);
+    (spans, blocks, tables)
 }
 
 fn extend(extent: &mut Option<Range<usize>>, range: &Range<usize>) {
@@ -610,8 +714,10 @@ fn close(
             }
         }
         Tag::Table(_) => {
-            for line in lines(text, &trimmed(text, &range)) {
-                leaves.push(line.clone());
+            // One block: the cursor anywhere in the table shows all of its source.
+            let table = trimmed(text, &range);
+            leaves.push(table.clone());
+            for line in lines(text, &table) {
                 found.push((line, MarkdownKind::TableRow));
             }
         }
