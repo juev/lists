@@ -53,7 +53,7 @@ struct TaskListView: View {
                     }
                     .onKeyPress(.return) {
                         guard !typing, let id = model.selection else { return .ignored }
-                        model.toggleExpanded(id)
+                        model.toggleEditing(id)
                         return .handled
                     }
                     .onKeyPress(.space) {
@@ -67,6 +67,7 @@ struct TaskListView: View {
                         if !typing { listFocused = true }
                         withAnimation { proxy.scrollTo(new) }
                     }
+                    .onChange(of: model.listFocusRequests) { _, _ in listFocused = true }
                 }
             }
             if case .trash = model.effectiveScope {
@@ -86,9 +87,7 @@ struct TaskListView: View {
     }
 
     /// True while a text view or the field editor of a text field has the keyboard.
-    private var typing: Bool {
-        NSApp.keyWindow?.firstResponder is NSText
-    }
+    private var typing: Bool { Keyboard.text != nil }
 
     @State private var confirmEmptyTrash = false
 
@@ -183,6 +182,7 @@ struct TaskRow: View {
         .contextMenu { menu }
         if isExpanded {
             content
+                .onExitCommand { model.closeCard(task.id) }
                 .padding(.horizontal, 4)
                 .padding(.top, 4)
                 .padding(.bottom, 10)
@@ -279,7 +279,7 @@ struct TaskRow: View {
             model.selection == task.id ? Color.primary.opacity(0.07) : .clear,
             in: RoundedRectangle(cornerRadius: 6))
         .contentShape(Rectangle())
-        .onTapGesture(count: 2) { model.toggleExpanded(task.id) }
+        .onTapGesture(count: 2) { model.toggleEditing(task.id) }
         .simultaneousGesture(TapGesture().onEnded { model.selection = task.id })
     }
 
@@ -386,6 +386,19 @@ struct SubtaskField: View {
                 }
         }
         .font(AppFont.style(.callout))
+    }
+}
+
+@MainActor
+enum Keyboard {
+    /// The text being typed into: a text view, or the field editor of a text field.
+    static var text: NSText? {
+        #if DEBUG
+        let window = NSApp.keyWindow ?? DebugScript.backgroundWindow
+        #else
+        let window = NSApp.keyWindow
+        #endif
+        return window?.firstResponder as? NSText
     }
 }
 

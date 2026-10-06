@@ -5,20 +5,22 @@ import AppKit
 /// outside process send them without the Accessibility permission. Debug
 /// builds only. `LISTS_DEBUG_SCRIPT` holds steps separated by `;`:
 /// `type:text`, `key:return`, `key:n+cmd`, `sleep:0.5`, `click:x,y`, `quick`, `settings`,
-/// `state` (prints who has the keyboard), `copyfiles:path,path` and `copyimage`
+/// `state` (prints who has the keyboard and the text being typed into), `copyfiles:path,path` and `copyimage`
 /// (fill the pasteboard), `draft` (prints the files of the open new-task card),
 /// `inbox` (switches to the Inbox view), `open` (expands the selected task), `select:1` and `select:-1` (move the selection the way the arrow keys do),
 /// `pick:title` (selects a row the way a click does), `indent` and `outdent` (move the selected task under the one above and back),
 /// `newtask` (opens the card of a new task), `title:text` (fills its title), `finish` (closes it the way Esc does),
 /// `cards` (prints the open cards and the selected row), `rows` (prints the rows in the order they are drawn), `panel` (prints whether quick entry is on screen and what runs modally),
+/// `windows` (prints the windows of the app),
 /// `quicktrace` (shows quick entry transparent and without the keyboard, and prints its geometry frame by frame:
 /// a line that differs from the next one is a card that moved after it was shown).
-/// With `LISTS_DEBUG_QUIET` set the script leaves the app in the background instead of bringing its window forward.
+/// With `LISTS_DEBUG_QUIET` set the script leaves the app in the background instead of bringing its window forward;
+/// key presses then go straight to the main window, which takes them hidden as well.
 @MainActor
 enum DebugScript {
     private static let codes: [String: (UInt16, String)] = [
         "return": (36, "\r"), "esc": (53, "\u{1b}"), "space": (49, " "), "down": (125, "\u{F701}"), "up": (126, "\u{F700}"),
-        "]": (30, "]"), "[": (33, "["),
+        "]": (30, "]"), "[": (33, "["), "tab": (48, "\t"),
     ]
 
     static func runIfAsked() {
@@ -109,9 +111,13 @@ enum DebugScript {
                     QuickEntryPanel.debugSilent = false
                     try? await _Concurrency.Task.sleep(for: .milliseconds(300))
                 case "settings": NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+                case "windows":
+                    for window in NSApp.windows {
+                        print("debug: window \(type(of: window)) titled \(window.styleMask.contains(.titled)) resizable \(window.styleMask.contains(.resizable)) visible \(window.isVisible) key \(window.isKeyWindow) frame \(NSStringFromRect(window.frame))")
+                    }
                 case "state":
-                    let window = NSApp.keyWindow
-                    print("debug: key window \(window.map { type(of: $0) }.map(String.init(describing:)) ?? "none"), first responder \(window?.firstResponder.map { String(describing: type(of: $0)) } ?? "none")")
+                    let window = target
+                    print("debug: key window \(window.map { type(of: $0) }.map(String.init(describing:)) ?? "none"), first responder \(window?.firstResponder.map { String(describing: type(of: $0)) } ?? "none")\((window?.firstResponder as? NSText).map { " with \"\($0.string)\"" } ?? "")")
                 default: print("debug: unknown step \(step)")
                 }
                 try? await _Concurrency.Task.sleep(for: .milliseconds(60))
@@ -146,15 +152,28 @@ enum DebugScript {
     }
 
     private static func press(_ characters: String, code: UInt16, flags: NSEvent.ModifierFlags) {
-        guard let window = NSApp.keyWindow else { return print("debug: no key window for \(characters)") }
+        guard let window = target else { return print("debug: no key window for \(characters)") }
         for type in [NSEvent.EventType.keyDown, .keyUp] {
             if let event = NSEvent.keyEvent(
                 with: type, location: .zero, modifierFlags: flags, timestamp: ProcessInfo.processInfo.systemUptime,
                 windowNumber: window.windowNumber, context: nil, characters: characters,
                 charactersIgnoringModifiers: characters, isARepeat: false, keyCode: code) {
-                NSApp.sendEvent(event)
+                // The application hands key events to its key window only; a window
+                // in the background takes them directly.
+                if window.isKeyWindow { NSApp.sendEvent(event) } else { window.sendEvent(event) }
             }
         }
+    }
+
+    /// The window the script types into: the key window, or the main window of
+    /// an app that was left in the background.
+    static var target: NSWindow? { NSApp.keyWindow ?? backgroundWindow }
+
+    /// The main window of an app that a quiet script left hidden. `canBecomeMain`
+    /// is false for it, so it is told by its look.
+    static var backgroundWindow: NSWindow? {
+        guard ProcessInfo.processInfo.environment["LISTS_DEBUG_QUIET"] != nil else { return nil }
+        return NSApp.windows.first { !($0 is NSPanel) && $0.styleMask.contains(.resizable) }
     }
 }
 #endif
