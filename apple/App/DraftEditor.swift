@@ -5,6 +5,8 @@ import SwiftUI
 struct TaskDraft: Equatable {
     var title = ""
     var notes = ""
+    /// The note as it came from the clipboard (R58); nil when it was typed.
+    var pastedNotes: String?
     var start: String?
     var due: String?
     /// The due date came from the view (Today), not from the user: a date
@@ -54,16 +56,26 @@ struct DraftEditor: View {
                 if model.parseQuickText { QuickChips(text: draft.title) }
             }
             Group {
-                ZStack(alignment: .topLeading) {
-                    if draft.notes.isEmpty {
-                        Text(L("Notes")).foregroundStyle(.tertiary).allowsHitTesting(false)
+                HStack(alignment: .top, spacing: 6) {
+                    ZStack(alignment: .topLeading) {
+                        if draft.notes.isEmpty {
+                            Text(L("Notes")).foregroundStyle(.tertiary).allowsHitTesting(false)
+                        }
+                        NotesTextView(
+                            text: $draft.notes, font: AppFont.native(.body), returnAddsLine: model.returnAddsLine,
+                            wantsFocus: .constant(false), onEditingChanged: { _ in }, onFinish: close)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    NotesTextView(
-                        text: $draft.notes, font: AppFont.native(.body), returnAddsLine: model.returnAddsLine,
-                        wantsFocus: .constant(false), onEditingChanged: { _ in }, onFinish: close)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    // R58: the text taken from the clipboard goes in one click while it is untouched.
+                    if let pasted = draft.pastedNotes, draft.notes == pasted {
+                        Button { draft.notes = "" } label: {
+                            Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary)
+                        }
+                        .buttonStyle(.plain)
+                        .help(L("Remove the text taken from the clipboard"))
+                    }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
                 .font(AppFont.style(.body))
                 chips
                 if !draft.files.isEmpty { files }

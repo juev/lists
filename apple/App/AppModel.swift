@@ -119,6 +119,10 @@ final class AppModel {
     var parseQuickText: Bool = UserDefaults.standard.object(forKey: "parseQuickText") == nil || UserDefaults.standard.bool(forKey: "parseQuickText") {
         didSet { UserDefaults.standard.set(parseQuickText, forKey: "parseQuickText") }
     }
+    /// Whether quick entry starts the note with what is on the clipboard (R58).
+    var clipboardNotes: Bool = UserDefaults.standard.object(forKey: "clipboardNotes") == nil || UserDefaults.standard.bool(forKey: "clipboardNotes") {
+        didSet { UserDefaults.standard.set(clipboardNotes, forKey: "clipboardNotes") }
+    }
 
     /// The list for a task entered where no list is implied: quick entry, Today, a tag.
     var defaultListId: String {

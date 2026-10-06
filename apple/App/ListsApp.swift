@@ -284,6 +284,9 @@ struct SettingsView: View {
                 Toggle(L("Recognize dates, priority, tags and lists in the title"), isOn: $model.parseQuickText)
                 Text(L("“report friday 10:00 !! #work @Projects” sets the due date, the priority, a tag and the list. Off: the title is kept as typed."))
                     .font(AppFont.style(.caption)).foregroundStyle(.secondary)
+                Toggle(L("Start the note with the clipboard in quick entry"), isOn: $model.clipboardNotes)
+                Text(L("Text or a link copied just before the quick-entry window is opened becomes the note. Each copy is used once."))
+                    .font(AppFont.style(.caption)).foregroundStyle(.secondary)
                 Picker(L("Return in the notes"), selection: $model.returnAddsLine) {
                     Text(L("Starts a new line")).tag(true)
                     Text(L("Finishes editing")).tag(false)
