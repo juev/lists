@@ -33,9 +33,18 @@ final class AppModel {
     /// Expanded tasks whose subtasks are on show; they stay folded until asked for.
     var subtasksShown: Set<String> = []
     /// Moving to another row closes the open card: one card is open at a time.
-    var selection: String? { didSet { if let selection, selection != oldValue { closeCards(except: selection) } } }
+    var selection: String? {
+        didSet {
+            if titleFocus != selection { titleFocus = nil }
+            if let selection, selection != oldValue { closeCards(except: selection) }
+        }
+    }
     /// The card of a task that does not exist yet, while it is open (⌘N).
     var draft: TaskDraft?
+    /// The task whose title takes the keyboard as soon as its card is on screen.
+    var titleFocus: String?
+    /// Counts the cards closed from the keyboard: each time the list takes the keyboard back.
+    var listFocusRequests = 0
     // Sheets of the sidebar; here so that the menu bar can open them too.
     var creatingList = false
     var creatingFilter = false
@@ -416,8 +425,22 @@ final class AppModel {
         reload()
     }
 
+    /// Opens the card for typing, the way Return and a double click do: the caret goes to the title.
+    func edit(_ id: String) {
+        expand(id)
+        titleFocus = id
+    }
+
+    /// Closes a card from the keyboard: the row stays selected and the list has the keyboard again.
+    func closeCard(_ id: String) {
+        collapse(id)
+        selection = id
+        listFocusRequests += 1
+    }
+
     /// Closes a card together with the cards of the subtasks inside it.
     func collapse(_ id: String) {
+        if titleFocus == id { titleFocus = nil }
         if let selection, ancestors(of: selection).contains(id) { self.selection = id }
         expanded.subtract(expanded.filter { ancestors(of: $0).contains(id) })
         expanded.remove(id)
@@ -516,6 +539,11 @@ final class AppModel {
 
     func toggleExpanded(_ id: String) {
         if expanded.contains(id) { collapse(id) } else { expand(id) }
+    }
+
+    /// Return and a double click: an open card closes, a closed one opens for typing.
+    func toggleEditing(_ id: String) {
+        if expanded.contains(id) { closeCard(id) } else { edit(id) }
     }
 
     /// Reorders within the single section of a manually sorted list.

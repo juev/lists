@@ -73,7 +73,7 @@ struct TaskEditor: View {
 
     private func finish() {
         commitNotes()
-        model.collapse(task.id)
+        model.closeCard(task.id)
     }
 
     private func load() {
@@ -232,10 +232,29 @@ struct TaskTitleField: View {
             .font(AppFont.style(.body))
             .focused($focused)
             .onSubmit(commit)
-            .onAppear { title = task.title }
+            .onAppear {
+                title = task.title
+                takeKeyboard()
+            }
+            .onChange(of: model.titleFocus) { _, _ in takeKeyboard() }
             .onChange(of: task.title) { _, new in if !focused { title = new } }
             .onChange(of: focused) { _, now in if !now { commit() } }
             .onDisappear(perform: commit)
+    }
+
+    /// Takes the keyboard when the card was opened for typing, with the caret after the title.
+    private func takeKeyboard() {
+        guard model.titleFocus == task.id else { return }
+        model.titleFocus = nil
+        // On the next turn: the row is not in the table yet while it appears.
+        DispatchQueue.main.async {
+            focused = true
+            // A field that takes the keyboard selects its text; the caret goes in once it has.
+            DispatchQueue.main.async {
+                guard let text = Keyboard.text else { return }
+                text.selectedRange = NSRange(location: text.string.utf16.count, length: 0)
+            }
+        }
     }
 
     private func commit() {

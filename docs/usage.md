@@ -32,7 +32,7 @@ Only the title is required. A task can also have notes, a start date, a due date
 
 On macOS a task opens in place in the list as an outlined card; on Android it opens as a bottom sheet over the list. The card always shows the start date and the due date. Other empty fields take no room: they are added from the "+" button.
 
-On macOS one card is open at a time. Opening another task, or moving to another row with a click or the arrow keys, closes the open card and keeps what was typed in it. A task stays open while one of its subtasks is selected or open. The card of a new task closes an open task, and opening a task closes the card of a new one the way Esc does.
+On macOS Return on the selected row, or a double click, opens its card with the cursor at the end of the title, and Esc closes the card and hands the keyboard back to the list with the same row selected. The chevron at the end of a row only opens and closes the card. One card is open at a time. Opening another task, or moving to another row with a click or the arrow keys, closes the open card and keeps what was typed in it. A task stays open while one of its subtasks is selected or open. The card of a new task closes an open task, and opening a task closes the card of a new one the way Esc does.
 
 On macOS ⌘N, or the "+" button in the toolbar, opens the card of a new task right in the list with every field at hand: title, notes, start date, due date, priority, tags, list and files. Return in the title creates the task. Esc creates it when it has a title and drops an empty card.
 
@@ -121,7 +121,9 @@ A reminder set on a task itself replaces the one derived from its due date. The 
 | ⌘S and ⌘D | start date and due date of the open card |
 | ⌘V | attach the files or the image on the clipboard to the open card |
 | ↑ ↓ | select |
-| Enter | open the selected task |
+| Enter | open the selected task with the cursor in its title; close it when it is open |
+| Tab | from the title to the notes |
+| Esc | close the open card and go back to the list |
 | Space or ⌘Enter | complete |
 | ⌘T | due today |
 | ⌘] and ⌘[ | make a subtask, move a level up |
