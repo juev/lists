@@ -36,6 +36,13 @@ struct Vault {
     vault: String,
 }
 
+/// `push/<device>.json`: where the device takes nudges (S18).
+#[derive(Serialize, Deserialize)]
+struct PushRecord {
+    v: u32,
+    url: String,
+}
+
 #[derive(Serialize, Deserialize)]
 struct Header {
     v: u32,
@@ -297,6 +304,46 @@ impl Store {
         Ok(pushed)
     }
 
+    /// S18: keeps this device's record in `push/` in step with the address it was given.
+    fn publish_push(&self, remote: &dyn Remote, me: &str) -> Result<()> {
+        let wanted = self.push_endpoint()?;
+        if wanted == db::meta_get(&self.lock().conn, "push_published")? {
+            return Ok(());
+        }
+        let path = format!("{ROOT}/push/{me}.json");
+        match &wanted {
+            Some(url) => {
+                remote.put(
+                    &path,
+                    &serde_json::to_vec(&PushRecord {
+                        v: FORMAT,
+                        url: url.clone(),
+                    })?,
+                )?;
+                db::meta_set(&self.lock().conn, "push_published", url)
+            }
+            None => {
+                remote.delete(&path)?;
+                db::meta_del(&self.lock().conn, "push_published")
+            }
+        }
+    }
+
+    /// S19: tells the other devices that there is something to read. Nothing
+    /// here can fail the run.
+    fn poke_peers(&self, remote: &dyn Remote, me: &str) {
+        let own = format!("{me}.json");
+        let names = remote.list(&format!("{ROOT}/push")).unwrap_or_default();
+        let urls: Vec<String> = names
+            .iter()
+            .filter(|name| **name != own && name.ends_with(".json"))
+            .filter_map(|name| remote.get(&format!("{ROOT}/push/{name}")).ok().flatten())
+            .filter_map(|data| serde_json::from_slice::<PushRecord>(&data).ok())
+            .map(|record| record.url)
+            .collect();
+        crate::push::poke(urls.iter().map(String::as_str));
+    }
+
     /// Replaces this device's log files with one snapshot of its full state.
     fn compact(
         &self,
@@ -427,6 +474,10 @@ impl Store {
         }
 
         self.sync_blobs(remote, &mut report)?;
+        self.publish_push(remote, &me)?;
+        if report.pushed > 0 || report.blobs_uploaded > 0 {
+            self.poke_peers(remote, &me);
+        }
         Ok(report)
     }
 
@@ -537,7 +588,7 @@ impl Store {
         tx.execute_batch(
             "DELETE FROM peers; DELETE FROM outbox; DELETE FROM blobs_uploaded;
              DELETE FROM caldav_calendars; DELETE FROM caldav_items;
-             DELETE FROM meta WHERE key IN ('sync_ok', 'sync_error', 'caldav_filters_sent', 'caldav_home');
+             DELETE FROM meta WHERE key IN ('sync_ok', 'sync_error', 'caldav_filters_sent', 'caldav_home', 'push_published');
              UPDATE fields SET dirty = 1;",
         )?;
         db::meta_set(&tx, "force_snapshot", "1")?;
