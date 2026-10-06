@@ -17,7 +17,8 @@ use std::time::{Duration, Instant};
 pub use oidc::OidcConfig;
 
 use lists_core::{
-    AppError, Attachment, FilterSpec, NewTask, Priority, Repeat, Scope, SortMode, Store, SyncConfig, TaskItem, TaskList,
+    markdown_layout, AppError, Attachment, FilterSpec, MarkdownKind, NewTask, Priority, Repeat, Scope, SortMode, Store,
+    SyncConfig, TaskItem, TaskList,
 };
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -145,6 +146,32 @@ fn task_json(t: &TaskItem) -> Value {
         "project": t.is_project,
         "subtasks": t.subtasks_total, "subtasksDone": t.subtasks_done, "attachments": t.attachments,
     })
+}
+
+/// The ranges of a note to style, hide and replace (R53), in UTF-16 units, which
+/// is how the page indexes the text. The page builds text nodes from them and
+/// never markup.
+fn markdown_json(notes: &str) -> Value {
+    let spans = markdown_layout(notes.to_string()).spans.into_iter().map(|span| {
+        let (kind, detail) = match span.kind {
+            MarkdownKind::Heading { level } => ("heading", json!(level)),
+            MarkdownKind::Strong => ("strong", Value::Null),
+            MarkdownKind::Emphasis => ("emphasis", Value::Null),
+            MarkdownKind::Strikethrough => ("strike", Value::Null),
+            MarkdownKind::Code => ("code", Value::Null),
+            MarkdownKind::CodeBlock => ("codeBlock", Value::Null),
+            MarkdownKind::Quote => ("quote", Value::Null),
+            MarkdownKind::Link { url } => ("link", json!(url)),
+            MarkdownKind::ListMarker { ordered } => ("marker", json!(ordered)),
+            MarkdownKind::QuoteMarker => ("quoteMarker", Value::Null),
+            MarkdownKind::Checkbox { checked } => ("checkbox", json!(checked)),
+            MarkdownKind::Rule => ("rule", Value::Null),
+            MarkdownKind::TableRow => ("tableRow", Value::Null),
+            MarkdownKind::Markup => ("markup", Value::Null),
+        };
+        json!([span.start, span.end, kind, detail])
+    });
+    Value::Array(spans.collect())
 }
 
 fn list_json(l: &TaskList) -> Value {
@@ -512,10 +539,12 @@ impl App {
                 }
                 (Method::Get, "/api/task") => {
                     let id = query(&url, "id").unwrap_or_default();
+                    let task = self.store.task(id.clone())?;
                     json_reply(
                         200,
                         json!({
-                            "task": task_json(&self.store.task(id.clone())?),
+                            "markdown": markdown_json(&task.notes),
+                            "task": task_json(&task),
                             "subtasks": self.store.subtasks(id.clone())?.iter().map(task_json).collect::<Vec<_>>(),
                             "attachments": self.store.attachments(id)?.iter().map(attachment_json).collect::<Vec<_>>(),
                         }),
