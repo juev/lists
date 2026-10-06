@@ -92,6 +92,7 @@ import org.evsyukov.lists.str
 import org.evsyukov.lists.ordinal
 import org.evsyukov.lists.NotifyPrefs
 import org.evsyukov.lists.EntryPrefs
+import org.evsyukov.lists.LookPrefs
 import org.evsyukov.lists.Repo
 import org.evsyukov.lists.Secrets
 import org.evsyukov.lists.dateLabel
@@ -745,6 +746,7 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
     var newTaskList by remember { mutableStateOf(EntryPrefs.newTaskList(context)) }
     var parse by remember { mutableStateOf(EntryPrefs.parse(context)) }
     var clipboard by remember { mutableStateOf(EntryPrefs.clipboard(context)) }
+    val lookLabels = listOf(str(R.string.appearance_system), str(R.string.appearance_light), str(R.string.appearance_dark))
     var allDay by remember { mutableStateOf(NotifyPrefs.allDay(context)) }
     var summary by remember { mutableStateOf(NotifyPrefs.summary(context)) }
     var choosing by remember { mutableStateOf<String?>(null) }
@@ -773,6 +775,8 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
         title = { Text(str(R.string.settings)) },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
+                SettingRow(str(R.string.appearance), lookLabels[LookPrefs.choices.indexOf(LookPrefs.appearance(context))]) { choosing = "appearance" }
+                HorizontalDivider(Modifier.padding(vertical = 8.dp))
                 Text(str(R.string.notifications), style = MaterialTheme.typography.labelLarge)
                 SwitchRow(str(R.string.show_notifications), notifyOn) { notifyOn = it; saveNotify() }
                 if (notifyOn) {
@@ -861,6 +865,9 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
         },
     )
     when (choosing) {
+        "appearance" -> ChoiceDialog(str(R.string.appearance), lookLabels, LookPrefs.choices.indexOf(LookPrefs.appearance(context)), { choosing = null }) {
+            LookPrefs.setAppearance(context, LookPrefs.choices[it])
+        }
         "lead" -> MultiChoiceDialog(str(R.string.due_at_time_setting), NotifyPrefs.leads.map(::leadLabel), NotifyPrefs.leads.map { it in leads }, { choosing = null }) { index, on ->
             leads = if (on) (leads + NotifyPrefs.leads[index]).distinct().sorted() else leads - NotifyPrefs.leads[index]
             saveNotify()

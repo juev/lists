@@ -10,6 +10,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import androidx.compose.runtime.mutableStateOf
 import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
@@ -173,6 +174,25 @@ object NotifyPrefs {
         allDayAt = allDay(context).ifEmpty { null },
         summaryAt = summary(context).ifEmpty { null },
     )
+}
+
+/** The look of the app on this device (R59); not synced. */
+object LookPrefs {
+    val choices = listOf("system", "light", "dark")
+
+    private fun prefs(context: Context) = context.getSharedPreferences("look", Context.MODE_PRIVATE)
+
+    /** Set once the look is chosen; the theme reads it, so the screen is repainted at once. */
+    private val chosen = mutableStateOf<String?>(null)
+
+    /** `system`, `light` or `dark`. */
+    fun appearance(context: Context): String =
+        chosen.value ?: prefs(context).getString("appearance", null).takeIf { it in choices } ?: "system"
+
+    fun setAppearance(context: Context, value: String) {
+        prefs(context).edit().putString("appearance", value).apply()
+        chosen.value = value
+    }
 }
 
 /** How new tasks are entered on this device; not synced. */

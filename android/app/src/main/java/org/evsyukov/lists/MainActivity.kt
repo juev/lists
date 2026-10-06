@@ -1,5 +1,6 @@
 package org.evsyukov.lists
 
+import android.app.Activity
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
@@ -15,7 +16,10 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.WindowCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
@@ -24,10 +28,26 @@ import org.evsyukov.lists.ui.MainViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
+/** [bars] is set by a screen that draws under the system bars: their icons then follow the look of the app. */
 @Composable
-fun AppTheme(content: @Composable () -> Unit) {
-    val dark = isSystemInDarkTheme()
+fun AppTheme(bars: Boolean = false, content: @Composable () -> Unit) {
     val context = LocalContext.current
+    val dark = when (LookPrefs.appearance(context)) {
+        "light" -> false
+        "dark" -> true
+        else -> isSystemInDarkTheme()
+    }
+    if (bars) {
+        val view = LocalView.current
+        SideEffect {
+            (view.context as? Activity)?.window?.let { window ->
+                WindowCompat.getInsetsController(window, view).run {
+                    isAppearanceLightStatusBars = !dark
+                    isAppearanceLightNavigationBars = !dark
+                }
+            }
+        }
+    }
     val colors = when {
         Build.VERSION.SDK_INT >= 31 -> if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
         dark -> darkColorScheme()
@@ -43,7 +63,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        setContent { AppTheme { MainScreen(model, onReminderSet = ::ensureNotifications) } }
+        setContent { AppTheme(bars = true) { MainScreen(model, onReminderSet = ::ensureNotifications) } }
         openFromIntent(intent)
 
         // Sync when the app comes forward and once a minute while it stays there.

@@ -213,4 +213,8 @@
     <string name="parse_title">Recognize dates, priority, tags and lists in the title</string>
     <string name="clipboard_note">Start the note with the clipboard in quick entry</string>
     <string name="remove_clipboard_note">Remove the text taken from the clipboard</string>
+    <string name="appearance">Appearance</string>
+    <string name="appearance_system">Same as the system</string>
+    <string name="appearance_light">Light</string>
+    <string name="appearance_dark">Dark</string>
 </resources>
