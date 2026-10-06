@@ -92,6 +92,8 @@ Dates are understood in English and in Russian. Example: `buy milk tomorrow 18:3
 
 Settings → New tasks (Settings in the drawer on Android) chooses the list a task goes to when neither the line nor the view names one: Inbox, the list used last, or a fixed list.
 
+The quick-entry window starts the note with the clipboard: copy a link or a piece of text, open the window, and it is already in the note while the cursor waits in the title. This applies to the window opened with the global shortcut on macOS and from the launcher shortcut or the tile on Android; Share and the text-selection menu bring their own text. Each copy is used once, so opening the window again gives an empty note. Only text of up to 2000 characters is taken; files, images, longer text and what a password manager marks as hidden are left alone. The button next to the note removes the text in one go until you edit it. Settings → New tasks → "Start the note with the clipboard in quick entry" turns this off, and the clipboard is then not read at all. The setting belongs to the device and does not sync. Android 12 and later show their own notice when an app reads the clipboard; it appears once per copy.
+
 Where the entry field is:
 
 - **macOS**: the card in the main window (⌘N); a global hotkey that opens a small window over any app (⌃⌥Space by default, changeable in Settings); the menu bar item, which also lists today's tasks; the share extension; the Services menu; the `lists://add?text=…` URL.
