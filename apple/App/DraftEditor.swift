@@ -42,7 +42,10 @@ struct DraftEditor: View {
     }
 
     @State private var popover: Popover?
+    @State private var wantsNotes = false
+    @State private var menus = MenuAnchors()
     @FocusState private var titleFocused: Bool
+    @FocusState private var chip: CardChip?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -63,7 +66,7 @@ struct DraftEditor: View {
                         }
                         NotesTextView(
                             text: $draft.notes, font: AppFont.native(.body), returnAddsLine: model.returnAddsLine,
-                            wantsFocus: .constant(false), onEditingChanged: { _ in }, onFinish: close)
+                            wantsFocus: $wantsNotes, onEditingChanged: { _ in }, onFinish: close, onTab: { chip = stops.first })
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -95,6 +98,12 @@ struct DraftEditor: View {
         }
         .onAppear { titleFocused = true }
         .onExitCommand(perform: close)
+        // A chip that is gone, a tag just removed for one, hands the keyboard to the chip that took its place.
+        .onChange(of: stops) { before, now in
+            guard let chip, !now.contains(chip), let index = before.firstIndex(of: chip) else { return }
+            self.chip = now[min(index, now.count - 1)]
+        }
+        .reportsCard("draft", chip: chip, popover: popover.map { "\($0)" })
         .onChange(of: draft.notes) { _, _ in onResize() }
         .onChange(of: draft.tags) { _, _ in onResize() }
         .onChange(of: draft.repeat) { _, _ in onResize() }
@@ -148,6 +157,34 @@ struct DraftEditor: View {
         }
     }
 
+    /// The chips in the order they are drawn, which is the order Tab walks them in (R62).
+    private var stops: [CardChip] {
+        [.start, .due, .repeat, .priority] + draft.tags.map(CardChip.tag) + [.newTag] + (draft.parentId == nil ? [.list] : []) + [.file]
+    }
+
+    private var keys: ChipKeys {
+        ChipKeys(step: { from, by in
+            guard let index = stops.firstIndex(of: from) else { return }
+            if index + by < 0 {
+                wantsNotes = true
+            } else if index + by >= stops.count {
+                titleFocused = true
+            } else {
+                chip = stops[index + by]
+            }
+        }, cancel: close)
+    }
+
+    private var priorityChoices: [MenuChoice] {
+        Priority.all.map { priority in MenuChoice(title: priority.title, on: draft.priority == priority) { draft.priority = priority } }
+    }
+
+    private var listChoices: [MenuChoice] {
+        model.lists.filter { !$0.archived }.map { list in
+            MenuChoice(title: model.listName(list), on: draft.listId == list.id) { draft.listId = list.id }
+        }
+    }
+
     private var chips: some View {
         FlowLayout(spacing: 6) {
             chipButton(.start, symbol: "calendar.badge.clock",
@@ -157,6 +194,7 @@ struct DraftEditor: View {
                     DateEditor(title: L("Start: hidden from Today until"), value: draft.start) { draft.start = $0 }
                 }
                 .help(L("Start date (⌘S)"))
+                .chipStop(.start, focus: $chip, keys: keys) { popover = .start }
             chipButton(.due, symbol: "calendar",
                        text: shownDue.map { L("Due: ") + Moment.label($0).lowercased() } ?? L("Due"),
                        tint: shownDue == nil ? .secondary : .accentColor)
@@ -167,16 +205,16 @@ struct DraftEditor: View {
                     }
                 }
                 .help(L("Due date (⌘D)"))
+                .chipStop(.due, focus: $chip, keys: keys) { popover = .due }
             chipButton(.repeat, symbol: "repeat", text: draft.repeat?.summary ?? L("Repeat"),
                        tint: draft.repeat == nil ? .secondary : .accentColor)
                 .popover(isPresented: isOpen(.repeat)) {
                     RepeatEditor(value: draft.repeat) { draft.repeat = $0 }
                 }
                 .help(L("Repeat (⇧⌘R)"))
+                .chipStop(.repeat, focus: $chip, keys: keys) { popover = .repeat }
             Menu {
-                ForEach(Priority.all, id: \.self) { priority in
-                    Toggle(priority.title, isOn: Binding(get: { draft.priority == priority }, set: { _ in draft.priority = priority }))
-                }
+                ChoiceItems(choices: priorityChoices)
             } label: {
                 Chip(symbol: "flag", text: draft.priority == .none ? "" : draft.priority.title, tint: draft.priority == .none ? .secondary : .orange)
             }
@@ -185,6 +223,8 @@ struct DraftEditor: View {
             .menuIndicator(.hidden)
             .fixedSize()
             .help(L("Priority"))
+            .menuAnchor(menus, .priority)
+            .chipStop(.priority, focus: $chip, keys: keys) { menus.show(priorityChoices, under: .priority) }
 
             ForEach(draft.tags, id: \.self) { tag in
                 Button {
@@ -194,6 +234,7 @@ struct DraftEditor: View {
                 }
                 .buttonStyle(.plain)
                 .help(L("Remove tag"))
+                .chipStop(.tag(tag), focus: $chip, keys: keys) { draft.tags.removeAll { $0 == tag } }
             }
             chipButton(.tag, symbol: "number", text: "", tint: .secondary)
                 .popover(isPresented: isOpen(.tag)) {
@@ -202,12 +243,11 @@ struct DraftEditor: View {
                     }
                 }
                 .help(L("Tag"))
+                .chipStop(.newTag, focus: $chip, keys: keys) { popover = .tag }
 
             if draft.parentId == nil {
                 Menu {
-                    ForEach(model.lists.filter { !$0.archived }, id: \.id) { list in
-                        Toggle(model.listName(list), isOn: Binding(get: { draft.listId == list.id }, set: { _ in draft.listId = list.id }))
-                    }
+                    ChoiceItems(choices: listChoices)
                 } label: {
                     Chip(symbol: "list.bullet", text: model.list(draft.listId).map(model.listName) ?? L("Inbox"))
                 }
@@ -216,11 +256,14 @@ struct DraftEditor: View {
                 .menuIndicator(.hidden)
                 .fixedSize()
                 .help(L("List"))
+                .menuAnchor(menus, .list)
+                .chipStop(.list, focus: $chip, keys: keys) { menus.show(listChoices, under: .list) }
             }
 
             Button { add(IncomingFiles.pick()) } label: { Chip(symbol: "paperclip", text: "") }
                 .buttonStyle(.plain)
                 .help(L("File or image"))
+                .chipStop(.file, focus: $chip, keys: keys) { add(IncomingFiles.pick()) }
         }
     }
 

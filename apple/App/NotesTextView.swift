@@ -17,6 +17,8 @@ struct NotesTextView: NSViewRepresentable {
     var onFinish: () -> Void
     /// A checkbox in the note was clicked; the text is already changed.
     var onToggle: () -> Void = {}
+    /// Tab was pressed: the keyboard moves on to the chips of the card (R62). ⌥Tab still types a tab.
+    var onTab: (() -> Void)?
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -95,6 +97,10 @@ struct NotesTextView: NSViewRepresentable {
             case #selector(NSResponder.insertNewline(_:)), #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)),
                  #selector(NSResponder.insertLineBreak(_:)):
                 return (view as? MarkdownTextView)?.continueList() ?? false
+            case #selector(NSResponder.insertTab(_:)):
+                guard let onTab = parent.onTab else { return false }
+                onTab()
+                return true
             default:
                 return false
             }
