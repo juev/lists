@@ -10,10 +10,14 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.OutOfQuotaPolicy
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
@@ -21,7 +25,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -69,15 +72,16 @@ object Repo {
     private val syncMutex = Mutex()
     private var pending: Job? = null
 
-    /** Call after a local write: refreshes screens and reminders, syncs after two quiet seconds. */
+    /**
+     * Call after a local write: refreshes screens and reminders, syncs after two quiet seconds.
+     * The sync is handed to the system, so it still happens when the process is gone by then
+     * (a task shared into the app closes its window at once) or the network comes back later.
+     */
     fun changed() {
         revision.update { it + 1 }
         pending?.cancel()
-        pending = scope.launch {
-            Reminders.refresh(ListsApp.instance)
-            delay(2000)
-            sync()
-        }
+        pending = scope.launch { Reminders.refresh(ListsApp.instance) }
+        SyncWorker.soon(ListsApp.instance)
     }
 
     suspend fun sync(): Result<SyncReport> = withContext(Dispatchers.IO) {
@@ -94,15 +98,42 @@ object Repo {
     }
 }
 
-/** Keeps the device in step while the app is closed. The interval is the platform minimum. */
+/**
+ * Sync as a system job: every 15 minutes (the platform minimum) to pull what
+ * was changed elsewhere while the app is closed, and once after a local write.
+ */
 class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result =
         if (Repo.sync().isSuccess) Result.success() else Result.retry()
 
     companion object {
+        private val online = Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()
+
+        /** One run at once, for a nudge from another device. The system lets it start even from the background. */
+        fun now(context: Context) {
+            val request = OneTimeWorkRequestBuilder<SyncWorker>()
+                .setConstraints(online)
+                // Before Android 12 an expedited job needs a foreground notification; a plain one will do there.
+                .apply { if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST) }
+                .build()
+            WorkManager.getInstance(context)
+                .enqueueUniqueWork("sync-now", ExistingWorkPolicy.REPLACE, request)
+        }
+
+        /** One run two seconds from now; a newer call replaces one still waiting. */
+        fun soon(context: Context) {
+            val request = OneTimeWorkRequestBuilder<SyncWorker>()
+                .setInitialDelay(2, TimeUnit.SECONDS)
+                .setConstraints(online)
+                .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
+                .build()
+            WorkManager.getInstance(context)
+                .enqueueUniqueWork("sync-soon", ExistingWorkPolicy.REPLACE, request)
+        }
+
         fun schedule(context: Context) {
             val request = PeriodicWorkRequestBuilder<SyncWorker>(15, TimeUnit.MINUTES)
-                .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+                .setConstraints(online)
                 .build()
             WorkManager.getInstance(context)
                 .enqueueUniquePeriodicWork("sync", ExistingPeriodicWorkPolicy.KEEP, request)

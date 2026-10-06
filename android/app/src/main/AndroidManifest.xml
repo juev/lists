@@ -81,6 +81,15 @@
                 android:resource="@xml/file_paths" />
         </provider>
 
+        <!-- Receives "sync now" from other devices through a UnifiedPush distributor. -->
+        <service
+            android:name=".PushReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="org.unifiedpush.android.connector.PUSH_EVENT" />
+            </intent-filter>
+        </service>
+
         <receiver android:name=".ReminderReceiver" android:exported="false" />
         <receiver
             android:name=".BootReceiver"

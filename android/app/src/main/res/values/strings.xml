@@ -140,6 +140,9 @@
     <string name="archived_switch">Archived</string>
     <string name="via_webdav">Through WebDAV</string>
     <string name="local_only">Data is kept on this device only.</string>
+    <string name="push_switch">Sync at once after a change elsewhere</string>
+    <string name="push_hint">Other devices ask this one to sync through a UnifiedPush app such as ntfy. No data passes through it.</string>
+    <string name="push_no_distributor">Install a UnifiedPush app such as ntfy and try again.</string>
     <string name="syncing">Syncing…</string>
     <string name="close">Close</string>
     <string name="undo">Undo</string>
