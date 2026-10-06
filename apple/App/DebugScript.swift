@@ -1,5 +1,6 @@
 #if DEBUG
 import AppKit
+import Quartz
 import SwiftUI
 
 /// Drives the app from inside for checks that need key presses: macOS lets no
@@ -12,7 +13,10 @@ import SwiftUI
 /// `dateeditor:2026-10-05` (builds the editor of the date popover with that value, or with none, in a window that is never shown,
 /// and prints each value it applies: a hidden app shows no popovers), `datefield:time` and `datefield:calendar` (give the keyboard to its time field or to its calendar),
 /// `dateeditor` alone prints who has the keyboard in the date editor and the day selected in its calendar,
-/// `files` (prints the attachments of the selected task: the name of the copy made for Quick Look, the type the system sees in it and the size of the thumbnail),
+/// `files` (prints the attachments of the selected task: the name of the copy made for Quick Look, the type the system sees in it and the size of the thumbnail;
+/// then the file whose row has the keyboard and how many times a card asked Quick Look for a file),
+/// `attach:/path` (attaches the file to the selected task), `showfile:0` (shows the attachment with that number the way a click on its name does;
+/// a hidden app shows no panel), `preview` (prints whether the Quick Look panel is open) and `preview:close` (closes it),
 /// `inbox` (switches to the Inbox view), `open` (expands the selected task), `edit` (opens it with the caret in the title, the way Return does), `select:1` and `select:-1` (move the selection the way the arrow keys do),
 /// `pick:title` (selects a row the way a click does), `indent` and `outdent` (move the selected task under the one above and back),
 /// `newtask` (opens the card of a new task), `title:text` (fills its title), `finish` (closes it the way Esc does),
@@ -40,6 +44,12 @@ enum DebugScript {
     /// The chip of the card that has the keyboard and the popover it has open, as the cards report them.
     static var chip: String?
     static var popover: String?
+    /// The attachment whose row has the keyboard, as its card reports it.
+    static var file: String?
+    /// How many times a card asked Quick Look for a file; a hidden app shows no panel.
+    static var shows = 0
+    /// Asks the card of the selected task to show the attachment with the number in `object`.
+    static let showFile = Notification.Name("org.evsyukov.lists.debug.showFile")
 
     private static let codes: [String: (UInt16, String)] = [
         "return": (36, "\r"), "esc": (53, "\u{1b}"), "space": (49, " "), "down": (125, "\u{F701}"), "up": (126, "\u{F700}"),
@@ -122,6 +132,17 @@ enum DebugScript {
                         let thumbnail = file.localPath.flatMap { AttachmentFiles.thumbnail(path: $0, pixels: 56) }
                         let type = named.flatMap { try? $0.resourceValues(forKeys: [.contentTypeKey]).contentType?.identifier } ?? "-"
                         print("debug: file \(file.name) named=\(named?.lastPathComponent ?? "-") type=\(type) thumbnail=\(thumbnail.map { "\($0.width)x\($0.height)" } ?? "-")")
+                    }
+                    print("debug: file row with the keyboard \(file ?? "none"), asked to show \(shows) times")
+                case "attach":
+                    if let id = AppModel.shared.selection { AppModel.shared.attach([URL(fileURLWithPath: argument)], to: id) }
+                case "showfile": NotificationCenter.default.post(name: showFile, object: Int(argument) ?? 0)
+                case "preview":
+                    if step.contains(":") {
+                        if QLPreviewPanel.sharedPreviewPanelExists() { QLPreviewPanel.shared().close() }
+                    } else {
+                        let panel = QLPreviewPanel.sharedPreviewPanelExists() ? QLPreviewPanel.shared() : nil
+                        print("debug: preview \(panel?.isVisible == true ? "open" : "closed"), app \(NSApp.isHidden ? "hidden" : "shown") \(NSApp.isActive ? "active" : "inactive")")
                     }
                 case "open":
                     if let id = AppModel.shared.selection { AppModel.shared.toggleExpanded(id) }
