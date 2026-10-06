@@ -22,3 +22,6 @@ android/.kotlin/
 
 # Release artifacts built by scripts/release-*.sh
 dist/
+
+# Tracked here although the global gitignore excludes it
+!/AGENTS.md
