@@ -66,6 +66,7 @@ Everything is configured through environment variables, so that no password show
 | `LISTS_SYNC_USER` | storage user name | none |
 | `LISTS_SYNC_PASSWORD` | storage password | none |
 | `LISTS_SYNC_PATH` | directory for `folder` | none |
+| `LISTS_PUSH_SERVER` | address of an [ntfy](https://ntfy.sh) server through which other devices ask this one to sync at once; see [Sync](usage.md#sync) | none |
 | `LISTS_OIDC_ISSUER` | address of the OpenID Connect provider | none |
 | `LISTS_OIDC_CLIENT_ID` | client id registered with the provider | none |
 | `LISTS_OIDC_CLIENT_SECRET` | client secret; leave out for a public client | none |

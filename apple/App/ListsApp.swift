@@ -219,6 +219,7 @@ struct SettingsView: View {
     @State private var user = ""
     @State private var password = ""
     @State private var folder = ""
+    @State private var pushServer = ""
     @State private var message: String?
 
     var body: some View {
@@ -317,6 +318,11 @@ struct SettingsView: View {
                     Text(L("A folder synced by another tool or a network drive will do."))
                         .font(AppFont.style(.caption)).foregroundStyle(.secondary)
                 }
+                if kind != .off {
+                    TextField(L("Push server"), text: $pushServer, prompt: Text("https://ntfy.sh"))
+                    Text(L("Optional. Through an ntfy server other devices ask this Mac to sync at once. No data passes through it."))
+                        .font(AppFont.style(.caption)).foregroundStyle(.secondary)
+                }
                 HStack {
                     Button(L("Save and sync"), action: save)
                     if model.syncing { ProgressView().controlSize(.small) }
@@ -340,6 +346,7 @@ struct SettingsView: View {
     }
 
     private func load() {
+        pushServer = (try? model.store?.pushServer()) ?? ""
         guard let config = try? model.store?.syncConfig() else { return }
         switch config {
         case .off: kind = .off
@@ -372,6 +379,7 @@ struct SettingsView: View {
         guard let store = model.store else { return }
         do {
             try store.setSyncConfig(config: config)
+            try store.setPushServer(server: kind == .off ? nil : pushServer)
             if kind == .webdav || kind == .caldav {
                 do {
                     try Keychain.save(password, account: Keychain.account(url: url, user: user))

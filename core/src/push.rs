@@ -1,13 +1,20 @@
 //! A content-free nudge between devices: "something changed, sync now".
 //! Rules: S18–S21 in docs/specs/sync.md.
 
-use std::time::Duration;
+use std::io::{BufRead, BufReader};
+use std::time::{Duration, Instant};
+
+use sha2::{Digest, Sha256};
 
 use crate::db;
 use crate::error::{AppError, Result};
 use crate::store::Store;
 
 const ENDPOINT_KEY: &str = "push_endpoint";
+const SERVER_KEY: &str = "push_server";
+const TOPIC_KEY: &str = "push_topic";
+/// ntfy sends a keep-alive line every 45 seconds; silence longer than this is a dead connection.
+const SILENCE: Duration = Duration::from_secs(120);
 
 fn is_http(url: &str) -> bool {
     url.starts_with("https://") || url.starts_with("http://")
@@ -37,5 +44,88 @@ impl Store {
 
     pub fn push_endpoint(&self) -> Result<Option<String>> {
         db::meta_get(&self.lock().conn, ENDPOINT_KEY)
+    }
+
+    /// S22: takes nudges through an ntfy server, or stops with `None`. The
+    /// device picks a random topic once and publishes `<server>/<topic>` as
+    /// its address; `wait_for_nudge` listens there.
+    pub fn set_push_server(&self, server: Option<String>) -> Result<()> {
+        let Some(server) = server
+            .as_deref()
+            .map(|s| s.trim().trim_end_matches('/'))
+            .filter(|s| !s.is_empty())
+        else {
+            db::meta_del(&self.lock().conn, SERVER_KEY)?;
+            return self.set_push_endpoint(None);
+        };
+        if !is_http(server) {
+            return Err(AppError::sync("the address must start with https:// or http://"));
+        }
+        // Read first: a guard held across the match would deadlock the arms.
+        let known = db::meta_get(&self.lock().conn, TOPIC_KEY)?;
+        let topic = match known {
+            Some(topic) => topic,
+            None => {
+                // The name is the only secret: it has to be unguessable, not just unique.
+                let mut seed = Sha256::new();
+                seed.update(uuid::Uuid::now_v7().as_bytes());
+                seed.update(self.device_id());
+                seed.update(format!("{:?}{:p}", Instant::now(), self));
+                let topic = crate::store::hex(&seed.finalize())[..32].to_string();
+                db::meta_set(&self.lock().conn, TOPIC_KEY, &topic)?;
+                topic
+            }
+        };
+        db::meta_set(&self.lock().conn, SERVER_KEY, server)?;
+        self.set_push_endpoint(Some(format!("{server}/{topic}")))
+    }
+
+    pub fn push_server(&self) -> Result<Option<String>> {
+        db::meta_get(&self.lock().conn, SERVER_KEY)
+    }
+
+    /// Blocks until another device asks this one to sync and returns `true`;
+    /// the caller then runs a sync and calls again. Returns `false` when
+    /// there was nothing to wait for or the wait has to start over: no server
+    /// is set, it could not be reached, or the setting changed meanwhile. It
+    /// never returns sooner than ten seconds after a failure, so calling it
+    /// in a loop is safe. Meant for a thread of its own.
+    pub fn wait_for_nudge(&self) -> bool {
+        let started = Instant::now();
+        let retry = *self.push_retry.lock().unwrap_or_else(|p| p.into_inner());
+        // Holds back a caller that would otherwise come straight back.
+        let pause = || std::thread::sleep(retry.saturating_sub(started.elapsed()));
+        let listening_at = match (self.push_server(), self.push_endpoint()) {
+            (Ok(Some(_)), Ok(Some(endpoint))) => endpoint,
+            _ => {
+                pause();
+                return false;
+            }
+        };
+        let agent = ureq::AgentBuilder::new()
+            .timeout_connect(Duration::from_secs(15))
+            .timeout_read(SILENCE)
+            .build();
+        let Ok(response) = agent.get(&format!("{listening_at}/json")).call() else {
+            pause();
+            return false;
+        };
+        for line in BufReader::new(response.into_reader()).lines() {
+            match line {
+                Ok(line) if line.contains(r#""event":"message""#) => return true,
+                Ok(_) => {
+                    // Any other line, a keep-alive among them, is the moment to
+                    // notice that the setting changed.
+                    if self.push_endpoint().ok().flatten().as_ref() != Some(&listening_at) {
+                        return false;
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+        // S23: the connection broke; a nudge may have been missed. A server
+        // that drops everyone at once must not be asked in a tight loop.
+        pause();
+        true
     }
 }

@@ -39,6 +39,8 @@ pub struct Store {
     pub(crate) storage_seen: Mutex<Option<String>>,
     /// Names in the log of the sync folder when it was last looked at.
     pub(crate) folder_seen: Mutex<Option<Vec<String>>>,
+    /// How long a failed wait for a nudge holds back the next one.
+    pub(crate) push_retry: Mutex<std::time::Duration>,
     /// How many objects CalDAV sync has built for upload or comparison.
     pub(crate) caldav_renders: AtomicU64,
 }
@@ -302,6 +304,11 @@ impl Store {
     }
 
     #[doc(hidden)]
+    pub fn set_push_retry_for_tests(&self, millis: u64) {
+        *self.push_retry.lock().unwrap() = std::time::Duration::from_millis(millis);
+    }
+
+    #[doc(hidden)]
     pub fn caldav_renders_for_tests(&self) -> u64 {
         self.caldav_renders.load(Ordering::Relaxed)
     }
@@ -339,6 +346,7 @@ impl Store {
             sync_password: Mutex::new(None),
             storage_seen: Mutex::new(None),
             folder_seen: Mutex::new(None),
+            push_retry: Mutex::new(std::time::Duration::from_secs(10)),
             caldav_renders: AtomicU64::new(0),
         }))
     }
