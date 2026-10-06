@@ -58,6 +58,13 @@ final class AppModel {
     var fontDesign: String = UserDefaults.standard.string(forKey: AppFont.designKey) ?? "default" {
         didSet { UserDefaults.standard.set(fontDesign, forKey: AppFont.designKey) }
     }
+    /// "system", "light" or "dark" (R59); belongs to this Mac.
+    var appearance: String = UserDefaults.standard.string(forKey: "appearance") ?? "system" {
+        didSet {
+            UserDefaults.standard.set(appearance, forKey: "appearance")
+            applyAppearance()
+        }
+    }
     var alert: String?
     /// False while `alert` carries a report rather than a failure.
     var alertIsError = true
@@ -125,6 +132,15 @@ final class AppModel {
     }
 
     /// The list for a task entered where no list is implied: quick entry, Today, a tag.
+    /// Gives every window of the app the chosen look; `nil` follows the system.
+    func applyAppearance() {
+        switch appearance {
+        case "light": NSApp.appearance = NSAppearance(named: .aqua)
+        case "dark": NSApp.appearance = NSAppearance(named: .darkAqua)
+        default: NSApp.appearance = nil
+        }
+    }
+
     var defaultListId: String {
         let id = newTaskList == "last" ? UserDefaults.standard.string(forKey: "lastUsedList") ?? "inbox" : newTaskList
         return lists.contains { $0.id == id && !$0.archived } ? id : "inbox"

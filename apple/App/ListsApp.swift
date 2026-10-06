@@ -35,6 +35,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         KeyboardShortcuts.onKeyUp(for: .quickEntry) { QuickEntryPanel.shared.toggle() }
         NSApp.servicesProvider = self
         AttachmentFiles.clear()
+        MainActor.assumeIsolated { AppModel.shared.applyAppearance() }
         #if DEBUG
         MainActor.assumeIsolated { DebugScript.runIfAsked() }
         #endif
@@ -228,6 +229,14 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
+            Section(L("Appearance")) {
+                @Bindable var model = model
+                Picker(L("Appearance"), selection: $model.appearance) {
+                    Text(L("Same as the system")).tag("system")
+                    Text(L("Light")).tag("light")
+                    Text(L("Dark")).tag("dark")
+                }
+            }
             Section(L("Text")) {
                 @Bindable var model = model
                 Picker(L("Size"), selection: $model.textScale) {

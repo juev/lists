@@ -24,6 +24,8 @@ import SwiftUI
 /// `shot:/path/to.png` (draws that note into a file, on screen or not),
 /// `caret:5` (puts the cursor of that note at the offset), `box:0` (clicks the checkbox with that number in it),
 /// `completedview:on` and `completedview:off` (flip the setting that offers the Completed view), `scope` (prints the current view),
+/// `appearance:dark`, `appearance:light` and `appearance:system` (choose the look the way Settings does),
+/// `appearance` alone prints the choice and the look each window of the app has, the quick-entry panel among them,
 /// `menu:Title` (prints whether the menu bar item with that title is enabled),
 /// `sidebar` (prints how many rows each list of the main window has, the sidebar among them),
 /// `copytext:text`, `copysecret:text` and `copyfile:path` (fill the pasteboard quick entry reads; with `LISTS_DEBUG_PASTEBOARD=name` that is a pasteboard of its own, not the general one),
@@ -136,6 +138,15 @@ enum DebugScript {
                     print("debug: task \(task?.title ?? "none"), due \(task?.due ?? "none"), repeat \(task?.repeat?.summary ?? "none")")
                 case "inbox": AppModel.shared.scope = .inbox
                 case "completedview": AppModel.shared.showCompletedView = argument != "off"
+                case "appearance":
+                    if step.contains(":") {
+                        AppModel.shared.appearance = argument
+                    } else {
+                        let looks = (NSApp.windows + [QuickEntryPanel.shared]).reduce(into: [String: String]()) {
+                            $0[String(describing: type(of: $1))] = $1.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? "dark" : "light"
+                        }
+                        print("debug: appearance \(AppModel.shared.appearance), windows \(looks.sorted { $0.key < $1.key }.map { "\($0.key) \($0.value)" })")
+                    }
                 case "scope": print("debug: scope \(AppModel.shared.scopeTitle), completed view \(AppModel.shared.showCompletedView ? "on" : "off")")
                 case "menu":
                     let items = (NSApp.mainMenu?.items ?? []).flatMap { $0.submenu?.items ?? [] }
