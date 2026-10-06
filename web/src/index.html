@@ -13,12 +13,15 @@
 <title>Lists</title>
 <style>
 :root {
+  color-scheme: light;
   --bg: #ffffff; --panel: #f4f5f7; --text: #1c1d21; --muted: #6d7078; --line: #e3e5ea;
   --accent: #2f6fed; --danger: #d93a3a; --warn: #e8890c; --hover: rgba(0,0,0,.05);
 }
+/* Dark follows the system unless the look is chosen in this browser (R59): then the root element carries `light` or `dark`. */
 @media (prefers-color-scheme: dark) {
-  :root { --bg: #17181c; --panel: #1f2126; --text: #ececf0; --muted: #9a9da6; --line: #2e3037; --hover: rgba(255,255,255,.07); }
+  :root:not(.light) { color-scheme: dark; --bg: #17181c; --panel: #1f2126; --text: #ececf0; --muted: #9a9da6; --line: #2e3037; --hover: rgba(255,255,255,.07); }
 }
+:root.dark { color-scheme: dark; --bg: #17181c; --panel: #1f2126; --text: #ececf0; --muted: #9a9da6; --line: #2e3037; --hover: rgba(255,255,255,.07); }
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; }
 body { background: var(--bg); color: var(--text); font: 16px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
@@ -42,6 +45,7 @@ header input { border: 1px solid var(--line); border-radius: 8px; padding: 6px 1
 .nav.on { background: var(--hover); font-weight: 600; }
 .nav .n { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; font-weight: 400; }
 .nav .n.bad { color: var(--danger); }
+.nav select { margin-left: auto; border: 0; outline: 0; background: transparent; cursor: pointer; }
 .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); flex: none; }
 .side-title { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; padding: 14px 10px 4px; }
 .section { color: var(--accent); font-size: 13px; font-weight: 600; padding: 14px 10px 4px; }
@@ -99,6 +103,10 @@ header input { border: 1px solid var(--line); border-radius: 8px; padding: 6px 1
   .edit { padding-left: 14px; }
 }
 </style>
+<script>
+// Before the page is drawn, so that the chosen look does not flash in after the system one.
+try { const look = localStorage.getItem("appearance"); if (look === "light" || look === "dark") document.documentElement.className = look; } catch {}
+</script>
 </head>
 <body>
 <div id="root"></div>
@@ -126,7 +134,8 @@ const RU = {
   "Projects": "Проекты", "Filters": "Фильтры", "New filter": "Новый фильтр", "Make it a project": "Сделать проектом", "Turn back into a task": "Сделать обычной задачей",
   "Filter": "Фильтр", "Date": "Дата", "Any": "Любой", "The coming days": "Ближайшие дни", "No date": "Без даты", "Days": "Дней", "Priority at least": "Приоритет не ниже",
   "Status": "Состояние", "Open": "В работе", "Contains": "Содержит", "Save": "Сохранить", "Cancel": "Отмена", "Delete filter": "Удалить фильтр", "Edit": "Изменить",
-  "all of these, separated by spaces": "все сразу, через пробел", "Next 7 days": "Ближайшие 7 дней", "High priority": "Высокий приоритет", "Any list unless some are checked": "Любой список, если ничего не отмечено"
+  "all of these, separated by spaces": "все сразу, через пробел", "Next 7 days": "Ближайшие 7 дней", "High priority": "Высокий приоритет", "Any list unless some are checked": "Любой список, если ничего не отмечено",
+  "Appearance": "Оформление", "Same as the system": "Как в системе", "Light": "Светлое", "Dark": "Тёмное"
 };
 const ru = (navigator.language || "en").toLowerCase().startsWith("ru");
 const t = s => (ru && RU[s]) || s;
@@ -152,6 +161,13 @@ function preview(a, href) {
     $("div", { class: "body" }, body));
   document.addEventListener("keydown", key);
   document.body.append(box);
+}
+// The look of the page (R59) belongs to this browser: `light` or `dark` in `localStorage`, nothing for the system's.
+const look = () => { try { const v = localStorage.getItem("appearance"); return v === "light" || v === "dark" ? v : "system"; } catch { return "system"; } };
+function setLook(v) {
+  try { if (v === "system") localStorage.removeItem("appearance"); else localStorage.setItem("appearance", v); } catch {}
+  const c = document.documentElement.classList;
+  c.toggle("light", v === "light"); c.toggle("dark", v === "dark");
 }
 const state = { filterEdit: null, scope: "today", search: "", overview: null, tasks: [], open: new Set(), details: {}, drawer: false, typing: false };
 const root = document.getElementById("root");
@@ -459,6 +475,9 @@ function render() {
       $("button", { class: "nav", style: "color:var(--muted)", onclick: () => { state.filterEdit = {}; state.drawer = false; render(); } }, "+ " + t("New filter")),
       o.tags.length ? $("div", { class: "side-title" }, t("Tags")) : null, o.tags.map(g => nav("tag:" + g.name, "#" + g.name, g.open)),
       $("div", { class: "side-title" }),
+      $("label", { class: "nav", style: "color:var(--muted)" }, t("Appearance"),
+        $("select", { id: "look", onchange: e => setLook(e.target.value) },
+          [["system", "Same as the system"], ["light", "Light"], ["dark", "Dark"]].map(([v, n]) => $("option", { value: v, selected: look() === v }, t(n))))),
       $("button", { class: "nav", style: "color:var(--muted)", onclick: () => importer.click() }, t("Import…")), importer,
       $("button", { class: "nav", style: "color:var(--muted)", onclick: () => api("/api/logout", { method: "POST", headers: { "X-Lists": "1" } }).then(showLogin) }, t("Sign out"))),
     $("div", { id: "shade", onclick: () => { state.drawer = false; render(); } }),
