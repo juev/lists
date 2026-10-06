@@ -19,6 +19,9 @@ struct TaskEditor: View {
     @State private var importing = false
     @State private var attachments: [Attachment] = []
     @State private var notesFocused = false
+    @State private var wantsNotes = false
+    @State private var menus = MenuAnchors()
+    @FocusState private var chip: CardChip?
     @State private var previewed: URL?
     @State private var previewable: [URL] = []
     @FocusState private var focusedFile: String?
@@ -47,6 +50,12 @@ struct TaskEditor: View {
         }
         .onAppear(perform: load)
         .onChange(of: task) { _, _ in load() }
+        // A chip that is gone, a tag just removed for one, hands the keyboard to the chip that took its place.
+        .onChange(of: stops) { before, now in
+            guard let chip, !now.contains(chip), let index = before.firstIndex(of: chip) else { return }
+            self.chip = now[min(index, now.count - 1)]
+        }
+        .reportsCard(task.id, chip: chip, popover: popover.map { "\($0)" })
         .onDisappear(perform: commitNotes)
         .fileImporter(isPresented: $importing, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
             if case .success(let urls) = result { attach(urls) }
@@ -64,14 +73,15 @@ struct TaskEditor: View {
             }
             NotesTextView(
                 text: $notes, font: AppFont.native(.body), returnAddsLine: model.returnAddsLine,
-                wantsFocus: .constant(false),
+                wantsFocus: $wantsNotes,
                 onEditingChanged: { editing in
                     notesFocused = editing
                     if !editing { commitNotes() }
                 },
                 onFinish: finish,
                 // The binding gets the new text first; the note is saved right after it.
-                onToggle: { DispatchQueue.main.async { commitNotes() } })
+                onToggle: { DispatchQueue.main.async { commitNotes() } },
+                onTab: { chip = stops.first })
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -110,6 +120,43 @@ struct TaskEditor: View {
 
     // MARK: Chips
 
+    /// The chips in the order they are drawn, which is the order Tab walks them in (R62).
+    private var stops: [CardChip] {
+        [.start, .due] + (showsRepeat ? [.repeat] : []) + (showsRemind ? [.remind] : []) + [.priority] + task.tags.map(CardChip.tag) + [.add]
+    }
+
+    private var showsRepeat: Bool { task.repeat != nil || popover == .repeat }
+    private var showsRemind: Bool { task.remind != nil || popover == .remind }
+
+    private var keys: ChipKeys {
+        ChipKeys(step: { from, by in
+            guard let index = stops.firstIndex(of: from) else { return }
+            if index + by < 0 {
+                wantsNotes = true
+            } else if index + by >= stops.count {
+                model.titleFocus = task.id
+            } else {
+                chip = stops[index + by]
+            }
+        }, cancel: finish)
+    }
+
+    private var priorityChoices: [MenuChoice] {
+        Priority.all.map { priority in
+            MenuChoice(title: priority.title, on: task.priority == priority) { model.perform { try $0.setPriority(id: task.id, priority: priority) } }
+        }
+    }
+
+    private var addChoices: [MenuChoice] {
+        var choices: [MenuChoice] = []
+        if task.repeat == nil { choices.append(MenuChoice(title: L("Repeat")) { popover = .repeat }) }
+        if task.remind == nil { choices.append(MenuChoice(title: L("Reminder")) { popover = .remind }) }
+        choices.append(MenuChoice(title: L("Tag")) { popover = .tag })
+        if !model.showsSubtasks(task) { choices.append(MenuChoice(title: L("Subtask")) { model.showSubtasks(task.id) }) }
+        choices.append(MenuChoice(title: L("File or image…")) { importing = true })
+        return choices
+    }
+
     private var chips: some View {
         FlowLayout(spacing: 6) {
             // Both dates are always on show: when the work begins and when it is due.
@@ -119,33 +166,33 @@ struct TaskEditor: View {
                     DateEditor(title: L("Start: hidden from Today until"), value: task.start) { value in model.perform { try $0.setStart(id: task.id, start: value) } }
                 }
                 .help(L("Start date (⌘S)"))
+                .chipStop(.start, focus: $chip, keys: keys) { popover = .start }
             chipButton(.due, symbol: "calendar", text: task.due.map { L("Due: ") + Moment.label($0).lowercased() } ?? L("Due"),
                        tint: task.due.map { Moment.isOverdue($0) && task.done == nil ? Color.red : .accentColor } ?? .secondary)
                 .popover(isPresented: isOpen(.due)) {
                     DateEditor(title: L("Due"), value: task.due) { value in model.perform { try $0.setDue(id: task.id, due: value) } }
                 }
                 .help(L("Due date (⌘D)"))
-            if task.repeat != nil || popover == .repeat {
+                .chipStop(.due, focus: $chip, keys: keys) { popover = .due }
+            if showsRepeat {
                 chipButton(.repeat, symbol: "repeat", text: task.repeat?.summary ?? L("Repeat"), tint: .accentColor)
                     .popover(isPresented: isOpen(.repeat)) {
                         RepeatEditor(value: task.repeat) { rule in model.perform { try $0.setRepeat(id: task.id, repeat: rule) } }
                     }
                     .help(L("Repeat (⇧⌘R)"))
+                    .chipStop(.repeat, focus: $chip, keys: keys) { popover = .repeat }
             }
-            if task.remind != nil || popover == .remind {
+            if showsRemind {
                 chipButton(.remind, symbol: "bell", text: task.remind.map(Moment.label) ?? L("Reminder"), tint: .accentColor)
                     .popover(isPresented: isOpen(.remind)) {
                         DateEditor(title: L("Remind me"), value: task.remind, timeRequired: true) { value in
                             model.perform { try $0.setRemind(id: task.id, remind: value) }
                         }
                     }
+                    .chipStop(.remind, focus: $chip, keys: keys) { popover = .remind }
             }
             Menu {
-                ForEach(Priority.all, id: \.self) { priority in
-                    Toggle(priority.title, isOn: Binding(
-                        get: { task.priority == priority },
-                        set: { _ in model.perform { try $0.setPriority(id: task.id, priority: priority) } }))
-                }
+                ChoiceItems(choices: priorityChoices)
             } label: {
                 Chip(symbol: "flag", text: task.priority == .none ? "" : task.priority.title, tint: task.priority == .none ? .secondary : .orange)
             }
@@ -154,6 +201,8 @@ struct TaskEditor: View {
             .menuIndicator(.hidden)
             .fixedSize()
             .help(L("Priority"))
+            .menuAnchor(menus, .priority)
+            .chipStop(.priority, focus: $chip, keys: keys) { menus.show(priorityChoices, under: .priority) }
 
             ForEach(task.tags, id: \.self) { tag in
                 Button {
@@ -163,14 +212,11 @@ struct TaskEditor: View {
                 }
                 .buttonStyle(.plain)
                 .help(L("Remove tag"))
+                .chipStop(.tag(tag), focus: $chip, keys: keys) { model.perform { try $0.removeTag(id: task.id, tag: tag) } }
             }
 
             Menu {
-                if task.repeat == nil { Button(L("Repeat")) { popover = .repeat } }
-                if task.remind == nil { Button(L("Reminder")) { popover = .remind } }
-                Button(L("Tag")) { popover = .tag }
-                if !model.showsSubtasks(task) { Button(L("Subtask")) { model.showSubtasks(task.id) } }
-                Button(L("File or image…")) { importing = true }
+                ChoiceItems(choices: addChoices)
             } label: {
                 Chip(symbol: "plus", text: "")
             }
@@ -184,6 +230,8 @@ struct TaskEditor: View {
                     model.perform { try $0.addTag(id: task.id, tag: tag) }
                 }
             }
+            .menuAnchor(menus, .add)
+            .chipStop(.add, focus: $chip, keys: keys) { menus.show(addChoices, under: .add) }
         }
     }
 

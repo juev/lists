@@ -13,7 +13,7 @@ import SwiftUI
 /// and prints each value it applies: a hidden app shows no popovers), `datefield:time` and `datefield:calendar` (give the keyboard to its time field or to its calendar),
 /// `dateeditor` alone prints who has the keyboard in the date editor and the day selected in its calendar,
 /// `files` (prints the attachments of the selected task: the name of the copy made for Quick Look, the type the system sees in it and the size of the thumbnail),
-/// `inbox` (switches to the Inbox view), `open` (expands the selected task), `select:1` and `select:-1` (move the selection the way the arrow keys do),
+/// `inbox` (switches to the Inbox view), `open` (expands the selected task), `edit` (opens it with the caret in the title, the way Return does), `select:1` and `select:-1` (move the selection the way the arrow keys do),
 /// `pick:title` (selects a row the way a click does), `indent` and `outdent` (move the selected task under the one above and back),
 /// `newtask` (opens the card of a new task), `title:text` (fills its title), `finish` (closes it the way Esc does),
 /// `due:2026-10-05` and `repeat:2` (give the new-task card a due date and the preset with that index, the way its popovers do),
@@ -23,6 +23,7 @@ import SwiftUI
 /// `notes` (prints the note of the open card as it is drawn: what is hidden, what is replaced and which fonts differ),
 /// `shot:/path/to.png` (draws that note into a file, on screen or not),
 /// `caret:5` (puts the cursor of that note at the offset), `box:0` (clicks the checkbox with that number in it),
+/// `chips` (prints which chip of the card has the keyboard and which of its popovers is open; `key:backtab+shift` is ⇧Tab),
 /// `completedview:on` and `completedview:off` (flip the setting that offers the Completed view), `scope` (prints the current view),
 /// `appearance:dark`, `appearance:light` and `appearance:system` (choose the look the way Settings does),
 /// `appearance` alone prints the choice and the look each window of the app has, the quick-entry panel among them,
@@ -36,9 +37,13 @@ import SwiftUI
 /// key presses then go straight to the main window, which takes them hidden as well.
 @MainActor
 enum DebugScript {
+    /// The chip of the card that has the keyboard and the popover it has open, as the cards report them.
+    static var chip: String?
+    static var popover: String?
+
     private static let codes: [String: (UInt16, String)] = [
         "return": (36, "\r"), "esc": (53, "\u{1b}"), "space": (49, " "), "down": (125, "\u{F701}"), "up": (126, "\u{F700}"),
-        "]": (30, "]"), "[": (33, "["), "tab": (48, "\t"),
+        "]": (30, "]"), "[": (33, "["), "tab": (48, "\t"), "backtab": (48, "\u{19}"),
     ]
 
     static func runIfAsked() {
@@ -120,6 +125,8 @@ enum DebugScript {
                     }
                 case "open":
                     if let id = AppModel.shared.selection { AppModel.shared.toggleExpanded(id) }
+                case "edit":
+                    if let id = AppModel.shared.selection { AppModel.shared.edit(id) }
                 case "select": AppModel.shared.moveSelection(Int(argument) ?? 1)
                 case "pick": AppModel.shared.selection = taskId(titled: argument)
                 case "indent": AppModel.shared.selectedTask.map(AppModel.shared.indent)
@@ -147,6 +154,7 @@ enum DebugScript {
                         }
                         print("debug: appearance \(AppModel.shared.appearance), windows \(looks.sorted { $0.key < $1.key }.map { "\($0.key) \($0.value)" })")
                     }
+                case "chips": print("debug: chip \(chip ?? "none"), popover \(popover ?? "none")")
                 case "scope": print("debug: scope \(AppModel.shared.scopeTitle), completed view \(AppModel.shared.showCompletedView ? "on" : "off")")
                 case "menu":
                     let items = (NSApp.mainMenu?.items ?? []).flatMap { $0.submenu?.items ?? [] }
