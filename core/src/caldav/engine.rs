@@ -213,6 +213,21 @@ impl Store {
         Ok(())
     }
 
+    /// C25: remembers the version of an object that is not a task of this app,
+    /// so that it is not fetched again. The row of a task is left as it is: an
+    /// object that stopped being one is compared again when the task is written.
+    fn save_foreign(&self, href: &str, calendar: &str, etag: &str) -> Result<()> {
+        if etag.is_empty() {
+            return Ok(()); // nothing to tell a later version from this one by
+        }
+        self.lock().conn.execute(
+            "INSERT INTO caldav_items (href, calendar, uid, etag, raw) VALUES (?1, ?2, '', ?3, '')
+             ON CONFLICT (href) DO UPDATE SET etag = excluded.etag, problem = NULL WHERE caldav_items.uid = ''",
+            params![href, calendar, etag],
+        )?;
+        Ok(())
+    }
+
     fn mark_synced(&self, href: &str, version: &str) -> Result<()> {
         self.lock().conn.execute(
             "UPDATE caldav_items SET synced = ?2 WHERE href = ?1",
@@ -749,7 +764,10 @@ fn sync(store: &Store, client: &Client, calendars: Vec<Calendar>) -> Result<Sync
                     continue;
                 };
                 let Some(remote) = map::read(&parsed).filter(|r| usable_id(&r.uid)) else {
-                    continue; // an event, or something this app cannot identify
+                    // An event, or something this app cannot identify.
+                    let etag = if fresh_etag.is_empty() { etag } else { &fresh_etag };
+                    store.save_foreign(href, calendar, etag)?;
+                    continue;
                 };
                 report.pulled += store.merge_object(list_id, &remote)?;
                 report.blobs_downloaded += store.save_blobs(&parsed)?;
