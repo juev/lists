@@ -124,6 +124,7 @@ final class AppModel {
 
     @ObservationIgnored private var syncDebounce: DispatchWorkItem?
     @ObservationIgnored private var timer: Timer?
+    @ObservationIgnored private let folderWatcher = FolderWatcher()
     @ObservationIgnored weak var undoManager: UndoManager?
 
     private init() {
@@ -152,6 +153,7 @@ final class AppModel {
         timer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.syncNow() }
         }
+        watchSyncFolder()
     }
 
     // MARK: Reading
@@ -612,6 +614,20 @@ final class AppModel {
         DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: work)
     }
 
+    /// With sync through a folder, a file another program brings into its log
+    /// starts a run. Called again after the settings change and after a run,
+    /// since the log does not exist before the first one.
+    func watchSyncFolder() {
+        guard case .folder(let path)? = try? store?.syncConfig() else {
+            folderWatcher.watch(nil) {}
+            return
+        }
+        let log = URL(fileURLWithPath: path).appendingPathComponent("lists/v1/log", isDirectory: true)
+        folderWatcher.watch(log) { [weak self] in
+            MainActor.assumeIsolated { self?.scheduleSync() }
+        }
+    }
+
     func syncNow() {
         guard let store, syncStatus.configured, !syncing else { return }
         syncing = true
@@ -619,6 +635,7 @@ final class AppModel {
             let result = Result { try store.syncNow() }
             await MainActor.run {
                 self.syncing = false
+                self.watchSyncFolder()
                 // A failure is kept in the status and shown by the toolbar icon, never as an alert.
                 if case .success(let report) = result, report.pulled > 0 || report.blobsDownloaded > 0 {
                     self.reload()

@@ -37,6 +37,8 @@ pub struct Store {
     pub(crate) sync_password: Mutex<Option<String>>,
     /// The storage this process has already checked the format of and listed the snapshots of.
     pub(crate) storage_seen: Mutex<Option<String>>,
+    /// Names in the log of the sync folder when it was last looked at.
+    pub(crate) folder_seen: Mutex<Option<Vec<String>>>,
     /// How many objects CalDAV sync has built for upload or comparison.
     pub(crate) caldav_renders: AtomicU64,
 }
@@ -336,6 +338,7 @@ impl Store {
             compact_after: Mutex::new(64),
             sync_password: Mutex::new(None),
             storage_seen: Mutex::new(None),
+            folder_seen: Mutex::new(None),
             caldav_renders: AtomicU64::new(0),
         }))
     }

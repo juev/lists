@@ -506,6 +506,37 @@ fn s16_configured_sync_reports_status_and_keeps_changes_after_a_failure() {
 }
 
 #[test]
+fn s15_a_file_brought_into_the_sync_folder_is_noticed_once() {
+    let storage = tempfile::tempdir().unwrap();
+    let folder = SyncConfig::Folder {
+        path: storage.path().to_string_lossy().into_owned(),
+    };
+    let (a, b) = (device(), device());
+    a.set_sync_config(folder.clone()).unwrap();
+    b.set_sync_config(folder).unwrap();
+    add(&a, "от A");
+    a.sync_now().unwrap();
+    assert!(!a.folder_changed(), "its own file is not news");
+
+    assert!(b.folder_changed(), "A's file is there");
+    assert!(!b.folder_changed(), "and is reported once");
+    b.sync_now().unwrap();
+    assert!(!b.folder_changed());
+    // B's first run there published its snapshot and the mark for it.
+    assert!(a.folder_changed());
+    a.sync_now().unwrap();
+    assert!(!a.folder_changed());
+    assert!(!b.folder_changed(), "A had nothing to write");
+
+    add(&b, "от B");
+    b.sync_now().unwrap();
+    assert!(a.folder_changed());
+
+    // Other kinds of sync are not watched.
+    assert!(!device().folder_changed());
+}
+
+#[test]
 fn switching_storage_publishes_the_whole_state_there() {
     let (old, new) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
     let folder = |d: &TempDir| SyncConfig::Folder {

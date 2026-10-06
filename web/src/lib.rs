@@ -647,12 +647,13 @@ pub fn start(config: Config) -> Result<Running, Box<dyn std::error::Error>> {
     }
 
     // Like the apps: two seconds after a change, and once a minute regardless.
+    // A sync folder is also watched for files brought in by another program.
     std::thread::spawn(move || {
         let mut idle = 0u32;
         loop {
             std::thread::sleep(Duration::from_secs(2));
             idle += 2;
-            if app.dirty.swap(false, Ordering::Relaxed) || idle >= 60 {
+            if app.dirty.swap(false, Ordering::Relaxed) || idle >= 60 || app.store.folder_changed() {
                 idle = 0;
                 // A failure is kept in the sync status, which the page shows.
                 let _ = app.store.sync_now();
