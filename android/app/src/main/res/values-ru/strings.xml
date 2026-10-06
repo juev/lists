@@ -210,4 +210,6 @@
     <string name="default_list">Список по умолчанию</string>
     <string name="last_used_list">Последний использованный</string>
     <string name="parse_title">Распознавать в названии даты, приоритет, теги и список</string>
+    <string name="clipboard_note">Заметка из буфера обмена в быстром вводе</string>
+    <string name="remove_clipboard_note">Убрать текст из буфера обмена</string>
 </resources>

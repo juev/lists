@@ -731,6 +731,7 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
     var leads by remember { mutableStateOf(NotifyPrefs.leads(context)) }
     var newTaskList by remember { mutableStateOf(EntryPrefs.newTaskList(context)) }
     var parse by remember { mutableStateOf(EntryPrefs.parse(context)) }
+    var clipboard by remember { mutableStateOf(EntryPrefs.clipboard(context)) }
     var allDay by remember { mutableStateOf(NotifyPrefs.allDay(context)) }
     var summary by remember { mutableStateOf(NotifyPrefs.summary(context)) }
     var choosing by remember { mutableStateOf<String?>(null) }
@@ -780,6 +781,7 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
                     },
                 ) { choosing = "newTaskList" }
                 SwitchRow(str(R.string.parse_title), parse) { parse = it; EntryPrefs.setParse(context, it) }
+                SwitchRow(str(R.string.clipboard_note), clipboard) { clipboard = it; EntryPrefs.setClipboard(context, it) }
                 HorizontalDivider(Modifier.padding(vertical = 8.dp))
                 Text(str(R.string.sync), style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(bottom = 4.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {

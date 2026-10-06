@@ -19,7 +19,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -41,9 +44,15 @@ private data class Shared(val title: String = "", val notes: String = "", val fi
  * tile; the main screen is never started.
  */
 class QuickAddActivity : ComponentActivity() {
+    /** R58: the note a window opened empty takes from the clipboard. */
+    private var pasted by mutableStateOf<String?>(null)
+    private var readsClipboard = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val shared = read(intent)
+        // What was shared or selected carries its own text.
+        readsClipboard = shared == Shared() && EntryPrefs.clipboard(this)
         val lists = runCatching { Repo.store.lists().filter { !it.archived } }.getOrDefault(emptyList())
 
         setContent {
@@ -71,11 +80,20 @@ class QuickAddActivity : ComponentActivity() {
                             title = shared.title,
                             notes = shared.notes,
                             files = shared.files,
+                            pastedNotes = pasted,
                         )
                     }
                 }
             }
         }
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        // Not in onCreate: the system hands the clipboard only to the window that has the focus.
+        if (!hasFocus || !readsClipboard) return
+        readsClipboard = false
+        pasted = EntryPrefs.clipboardNote(this)
     }
 
     private fun read(intent: Intent): Shared = when (intent.action) {
