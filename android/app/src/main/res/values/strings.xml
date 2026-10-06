@@ -211,4 +211,6 @@
     <string name="default_list">Default list</string>
     <string name="last_used_list">Last used list</string>
     <string name="parse_title">Recognize dates, priority, tags and lists in the title</string>
+    <string name="clipboard_note">Start the note with the clipboard in quick entry</string>
+    <string name="remove_clipboard_note">Remove the text taken from the clipboard</string>
 </resources>

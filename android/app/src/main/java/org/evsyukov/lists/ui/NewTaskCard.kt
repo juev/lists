@@ -14,9 +14,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -105,9 +109,12 @@ fun NewTaskCard(
     notes: String = "",
     files: List<Uri> = emptyList(),
     keepOpen: Boolean = false,
+    /** The note taken from the clipboard (R58); it may arrive after the card is shown. */
+    pastedNotes: String? = null,
 ) {
     var text by remember { mutableStateOf(title) }
     var note by remember { mutableStateOf(notes) }
+    LaunchedEffect(pastedNotes) { if (pastedNotes != null && note.isEmpty()) note = pastedNotes }
     var start by remember { mutableStateOf<String?>(null) }
     var due by remember { mutableStateOf<String?>(null) }
     var repeat by remember { mutableStateOf<Repeat?>(null) }
@@ -154,6 +161,10 @@ fun NewTaskCard(
             value = note,
             onValueChange = { note = it },
             placeholder = { Text(str(R.string.notes)) },
+            // The text taken from the clipboard goes in one tap while it is untouched.
+            trailingIcon = if (pastedNotes != null && note == pastedNotes) {
+                { IconButton(onClick = { note = "" }) { Icon(Icons.Outlined.Close, str(R.string.remove_clipboard_note)) } }
+            } else null,
             maxLines = 4,
             textStyle = MaterialTheme.typography.bodyMedium,
             colors = transparentField(),

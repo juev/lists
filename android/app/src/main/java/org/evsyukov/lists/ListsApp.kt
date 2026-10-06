@@ -188,6 +188,34 @@ object EntryPrefs {
     fun parse(context: Context) = prefs(context).getBoolean("parse", true)
     fun setParse(context: Context, value: Boolean) = prefs(context).edit().putBoolean("parse", value).apply()
 
+    /** Whether quick entry starts the note with what is on the clipboard (R58). */
+    fun clipboard(context: Context) = prefs(context).getBoolean("clipboard", true)
+    fun setClipboard(context: Context, value: Boolean) = prefs(context).edit().putBoolean("clipboard", value).apply()
+
+    /**
+     * The text on the clipboard as the note of a new task, or null when there
+     * is none or it was offered before. Call it while the window has the
+     * focus: the system hands the clipboard to nobody else. What the clip is
+     * and when it was copied is told by its description, which the system
+     * gives without its notice of a paste; the text itself is read only for a
+     * clip not seen before.
+     */
+    fun clipboardNote(context: Context): String? {
+        val clipboard = context.getSystemService(android.content.ClipboardManager::class.java) ?: return null
+        val description = runCatching { clipboard.primaryClipDescription }.getOrNull() ?: return null
+        if (description.extras?.getBoolean("android.content.extra.IS_SENSITIVE") == true) return null
+        if (listOf("text/plain", "text/html", "text/uri-list").none(description::hasMimeType)) return null
+        if (description.timestamp == prefs(context).getLong("clipboardUsed", 0)) return null
+        val item = runCatching { clipboard.primaryClip?.getItemAt(0) }.getOrNull()
+        // A copied link may come as an address without text; an address of a file is not a note.
+        val text = (item?.text?.toString() ?: item?.uri?.takeIf { it.scheme == "http" || it.scheme == "https" }?.toString())?.trim()
+        prefs(context).edit().putLong("clipboardUsed", description.timestamp).apply()
+        return text?.takeIf { it.isNotEmpty() && it.length <= CLIPBOARD_NOTE_LIMIT }
+    }
+
+    /** A longer text is left alone: it is not cut to fit. */
+    private const val CLIPBOARD_NOTE_LIMIT = 2000
+
     /** The list for a task entered where no list is implied. */
     fun defaultListId(context: Context, lists: List<uniffi.lists_core.TaskList>): String {
         val choice = newTaskList(context)
