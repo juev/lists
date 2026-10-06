@@ -177,6 +177,8 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     add_column(conn, "caldav_calendars", "tag", "TEXT")?;
     // The sync token that describes the calendar as it was last read (C20).
     add_column(conn, "caldav_calendars", "token", "TEXT")?;
+    // The change tag of a deleted list's calendar when it was last found to hold objects (C15).
+    add_column(conn, "caldav_calendars", "kept", "TEXT")?;
     if meta_get(conn, "derived_version")?.as_deref() != Some(DERIVED_VERSION) {
         conn.execute_batch("DROP TABLE IF EXISTS lists; DROP TABLE IF EXISTS tasks; DROP TABLE IF EXISTS task_tags; DROP TABLE IF EXISTS attachments; DROP TABLE IF EXISTS filters;")?;
     }

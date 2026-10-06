@@ -1033,6 +1033,73 @@ fn c19_sync_token_stands_in_for_a_missing_change_tag() {
     assert_eq!(b.task(home.id).unwrap().title, "home elsewhere");
 }
 
+const FOREIGN_EVENT: &str = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Other//Client//EN\r\nBEGIN:VEVENT\r\nUID:meeting\r\nSUMMARY:meeting\r\nDTSTART:20261007T100000Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+
+/// A list deleted on the device whose calendar keeps an event of another client.
+fn deleted_list_with_an_event(dav: &Dav) -> (Device, TaskList, PathBuf) {
+    let (a, _b, _home, _office, work) = two_calendars(dav);
+    let event = dav.home().join(&work.id).join("meeting.ics");
+    std::fs::write(&event, FOREIGN_EVENT).unwrap();
+    a.delete_list(work.id.clone()).unwrap();
+    a.sync_now().unwrap();
+    // A run after one's own writes reads the calendars once more.
+    a.sync_now().unwrap();
+    assert!(event.exists(), "C15: a calendar that is not empty stays");
+    (a, work, event)
+}
+
+#[test]
+fn c19_calendar_kept_for_a_deleted_list_is_not_read_again() {
+    let dav = start();
+    let (a, work, event) = deleted_list_with_an_event(&dav);
+    let idle = dav.requests(|| {
+        assert_eq!(a.sync_now().unwrap(), SyncReport::default());
+    });
+    assert_eq!(idle, ["PROPFIND /cal/ depth=1"]);
+
+    // The other client removes its event: the calendar is empty and goes (C15).
+    std::fs::remove_file(&event).unwrap();
+    a.sync_now().unwrap();
+    assert!(!dav.home().join(&work.id).exists());
+    assert!(a.list(work.id).is_err());
+}
+
+#[test]
+fn c19_calendar_kept_for_a_deleted_list_is_remembered_after_reconnecting() {
+    let dav = start();
+    let (a, work, event) = deleted_list_with_an_event(&dav);
+    // Sync turned off and on again: the device remembers nothing of the server.
+    a.set_sync_config(SyncConfig::Off).unwrap();
+    connect(&a, &dav);
+    a.sync_now().unwrap();
+    a.sync_now().unwrap();
+    let idle = dav.requests(|| {
+        assert_eq!(a.sync_now().unwrap(), SyncReport::default());
+    });
+    assert_eq!(idle, ["PROPFIND /cal/ depth=1"]);
+    assert!(event.exists() && a.list(work.id).is_err());
+}
+
+#[test]
+fn c19_calendar_kept_for_a_deleted_list_on_a_server_without_change_tags() {
+    let dav = start();
+    std::fs::write(dav.root.path().join(".no-ctag"), "").unwrap();
+    std::fs::write(dav.root.path().join(".no-sync"), "").unwrap();
+    let (a, work, event) = deleted_list_with_an_event(&dav);
+    let idle = dav.requests(|| {
+        assert_eq!(a.sync_now().unwrap(), SyncReport::default());
+    });
+    let listings = idle
+        .iter()
+        .filter(|r| r.contains(&format!("PROPFIND /cal/{}/", work.id)))
+        .count();
+    assert_eq!(listings, 1, "{idle:?}");
+
+    std::fs::remove_file(&event).unwrap();
+    a.sync_now().unwrap();
+    assert!(!dav.home().join(&work.id).exists());
+}
+
 #[test]
 fn c20_changes_are_read_from_the_sync_report() {
     let dav = start();
