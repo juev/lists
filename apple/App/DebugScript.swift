@@ -21,6 +21,8 @@ import AppKit
 /// `completedview:on` and `completedview:off` (flip the setting that offers the Completed view), `scope` (prints the current view),
 /// `menu:Title` (prints whether the menu bar item with that title is enabled),
 /// `sidebar` (prints how many rows each list of the main window has, the sidebar among them),
+/// `copytext:text`, `copysecret:text` and `copyfile:path` (fill the pasteboard quick entry reads; with `LISTS_DEBUG_PASTEBOARD=name` that is a pasteboard of its own, not the general one),
+/// `clipnotes:on` and `clipnotes:off` (flip the setting of R58), `quicknote` (shows quick entry transparent and without the keyboard, and prints the note it starts with; `quicknote:/path.png` also draws the card into a file),
 /// `quicktrace` (shows quick entry transparent and without the keyboard, and prints its geometry frame by frame:
 /// a line that differs from the next one is a card that moved after it was shown).
 /// With `LISTS_DEBUG_QUIET` set the script leaves the app in the background instead of bringing its window forward;
@@ -127,6 +129,32 @@ enum DebugScript {
                 case "panel":
                     print("debug: quick entry \(QuickEntryPanel.shared.isVisible ? "shown" : "hidden"), modal \(NSApp.modalWindow.map { String(describing: type(of: $0)) } ?? "none")")
                 case "quick": QuickEntryPanel.shared.present()
+                case "copytext", "copysecret", "copyfile":
+                    let pasteboard = ClipboardNote.pasteboard
+                    pasteboard.clearContents()
+                    if name == "copyfile" {
+                        pasteboard.writeObjects([NSURL(fileURLWithPath: argument)])
+                    } else {
+                        pasteboard.setString(argument, forType: .string)
+                    }
+                    if name == "copysecret" { pasteboard.setString("", forType: .init("org.nspasteboard.ConcealedType")) }
+                case "clipnotes": AppModel.shared.clipboardNotes = argument != "off"
+                case "quicknote":
+                    // Shown transparent and without the keyboard, as in `quicktrace`.
+                    QuickEntryPanel.debugSilent = true
+                    let panel = QuickEntryPanel.shared
+                    panel.alphaValue = 0
+                    panel.present()
+                    try? await _Concurrency.Task.sleep(for: .milliseconds(200))
+                    if argument.hasPrefix("/"), let view = panel.contentView, let image = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
+                        view.cacheDisplay(in: view.bounds, to: image)
+                        try? image.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: argument))
+                    }
+                    print("debug: quick note \"\(notesView(in: panel.contentView)?.string ?? "none")\", height \(Int(panel.frame.height))")
+                    panel.close()
+                    panel.alphaValue = 1
+                    QuickEntryPanel.debugSilent = false
+                    try? await _Concurrency.Task.sleep(for: .milliseconds(300))
                 case "quicktrace":
                     QuickEntryPanel.debugSilent = true
                     let started = ProcessInfo.processInfo.systemUptime

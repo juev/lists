@@ -286,6 +286,9 @@
 "New Filter…" = "Новый фильтр…";
 "Press ⌘N to add a task." = "Нажмите ⌘N, чтобы добавить задачу.";
 "Recognize dates, priority, tags and lists in the title" = "Распознавать в названии даты, приоритет, теги и список";
+"Start the note with the clipboard in quick entry" = "Заметка из буфера обмена в быстром вводе";
+"Text or a link copied just before the quick-entry window is opened becomes the note. Each copy is used once." = "Текст или ссылка, скопированные перед открытием окна быстрого ввода, становятся заметкой. Скопированное подставляется один раз.";
+"Remove the text taken from the clipboard" = "Убрать текст из буфера обмена";
 "“report friday 10:00 !! #work @Projects” sets the due date, the priority, a tag and the list. Off: the title is kept as typed." = "«отчёт в пятницу 10:00 !! #работа @Проекты» задаёт срок, приоритет, тег и список. Выключено — название сохраняется как введено.";
 "Start date (⌘S)" = "Дата начала (⌘S)";
 "Due date (⌘D)" = "Срок (⌘D)";

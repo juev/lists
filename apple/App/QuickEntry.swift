@@ -11,8 +11,15 @@ extension KeyboardShortcuts.Name {
 struct QuickEntryField: View {
     @Environment(AppModel.self) private var model
     var onDone: () -> Void
-    var onResize: () -> Void = {}
-    @State private var draft = TaskDraft()
+    var onResize: () -> Void
+    @State private var draft: TaskDraft
+
+    /// `notes` is what the card starts with when it was taken from the clipboard (R58).
+    init(notes: String? = nil, onDone: @escaping () -> Void, onResize: @escaping () -> Void = {}) {
+        self.onDone = onDone
+        self.onResize = onResize
+        _draft = State(initialValue: TaskDraft(notes: notes ?? "", pastedNotes: notes))
+    }
 
     var body: some View {
         DraftEditor(draft: $draft, onClose: {
@@ -59,7 +66,9 @@ final class QuickEntryPanel: NSPanel {
 
     func present() {
         // A fresh view each time: the field starts empty and focused.
-        let view = QuickEntryField(onDone: { [weak self] in self?.close() }, onResize: { [weak self] in self?.refit() })
+        // R58: what was copied since the panel was last shown becomes the note.
+        let notes = AppModel.shared.clipboardNotes ? ClipboardNote.take() : nil
+        let view = QuickEntryField(notes: notes, onDone: { [weak self] in self?.close() }, onResize: { [weak self] in self?.refit() })
             .environment(AppModel.shared)
             .font(AppFont.style(.body))
             .padding(.horizontal, 14)
