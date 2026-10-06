@@ -1,4 +1,5 @@
 import AppKit
+import QuickLook
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -18,6 +19,9 @@ struct TaskEditor: View {
     @State private var importing = false
     @State private var attachments: [Attachment] = []
     @State private var notesFocused = false
+    @State private var previewed: URL?
+    @State private var previewable: [URL] = []
+    @FocusState private var focusedFile: String?
 
     private var locked: Bool { task.deleted || task.isLog }
 
@@ -198,13 +202,10 @@ struct TaskEditor: View {
         VStack(alignment: .leading, spacing: 4) {
             ForEach(attachments, id: \.id) { file in
                 HStack(spacing: 6) {
-                    Image(systemName: file.mime.hasPrefix("image/") ? "photo" : "doc")
-                        .foregroundStyle(.secondary)
-                    Button(file.name) {
-                        if let path = file.localPath { NSWorkspace.shared.open(URL(fileURLWithPath: path)) }
-                    }
-                    .buttonStyle(.link)
-                    .disabled(file.localPath == nil)
+                    AttachmentIcon(file: file)
+                    Button(file.name) { show(file) }
+                        .buttonStyle(.link)
+                        .disabled(file.localPath == nil)
                     Text(file.localPath == nil ? L("downloads on the next sync") : ByteCountFormatter.string(fromByteCount: Int64(file.size), countStyle: .file))
                         .font(AppFont.style(.caption))
                         .foregroundStyle(.tertiary)
@@ -218,8 +219,33 @@ struct TaskEditor: View {
                     .help(L("Remove attachment"))
                 }
                 .font(AppFont.style(.callout))
+                // The row takes the keyboard after a click, so Space shows the file the way it does in Finder.
+                .focusable(file.localPath != nil)
+                .focused($focusedFile, equals: file.id)
+                .onKeyPress(.space) {
+                    show(file)
+                    return .handled
+                }
+                .contextMenu {
+                    if file.localPath != nil {
+                        Button(L("Quick Look")) { show(file) }
+                        Button(L("Open in Default App")) {
+                            if let url = AttachmentFiles.named(file) { NSWorkspace.shared.open(url) }
+                        }
+                    }
+                }
             }
         }
+        .quickLookPreview($previewed, in: previewable)
+    }
+
+    /// Shows the file inside the app (R54); the system decides how from its name.
+    /// The panel pages through the files of the task that are on this device.
+    private func show(_ file: Attachment) {
+        guard let url = AttachmentFiles.named(file) else { return }
+        focusedFile = file.id
+        previewable = attachments.compactMap(AttachmentFiles.named)
+        previewed = url
     }
 }
 

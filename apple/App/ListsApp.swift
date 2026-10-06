@@ -34,6 +34,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         KeyboardShortcuts.onKeyUp(for: .quickEntry) { QuickEntryPanel.shared.toggle() }
         NSApp.servicesProvider = self
+        AttachmentFiles.clear()
         #if DEBUG
         MainActor.assumeIsolated { DebugScript.runIfAsked() }
         #endif
