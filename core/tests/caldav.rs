@@ -50,6 +50,16 @@ impl Dav {
                 .count()
         })
     }
+
+    /// Requests the server received while `run` was going.
+    fn requests(&self, run: impl FnOnce()) -> Vec<String> {
+        let log = self.root.path().join(".requests");
+        std::fs::write(&log, "").unwrap();
+        run();
+        let seen = std::fs::read_to_string(&log).unwrap();
+        std::fs::remove_file(&log).unwrap();
+        seen.lines().map(str::to_string).collect()
+    }
 }
 
 fn start() -> Dav {
@@ -648,4 +658,368 @@ fn projects_and_saved_filters_travel_through_caldav() {
     assert!(a.filters().unwrap().is_empty());
     a.sync_now().unwrap();
     assert_eq!(b.sync_now().unwrap(), SyncReport::default());
+}
+
+#[test]
+fn c17_tasks_without_changes_are_not_rendered_again() {
+    let dav = start();
+    let (a, b) = pair(&dav);
+    let one = add(&a, "one");
+    let two = add(&a, "two");
+    settle(&a, &b);
+    // How many objects one run builds.
+    let renders = || {
+        let before = a.caldav_renders_for_tests();
+        a.sync_now().unwrap();
+        a.caldav_renders_for_tests() - before
+    };
+
+    assert_eq!(renders(), 0, "nothing changed");
+
+    a.set_title(one.id.clone(), "one, edited".into()).unwrap();
+    assert_eq!(renders(), 1, "only the edited task");
+    assert!(dav.read(&one.id).contains("SUMMARY:one\\, edited"));
+    assert_eq!(renders(), 0);
+
+    // Another client's edit is merged and compared once, then left alone.
+    dav.edit(&two.id, |lines| {
+        lines
+            .into_iter()
+            .map(|l| {
+                if l.starts_with("SUMMARY:") {
+                    "SUMMARY:two elsewhere".into()
+                } else {
+                    l
+                }
+            })
+            .collect()
+    });
+    assert_eq!(renders(), 1);
+    assert_eq!(a.task(two.id.clone()).unwrap().title, "two elsewhere");
+    assert_eq!(renders(), 0);
+    let seen = dav.requests(|| {
+        a.sync_now().unwrap();
+    });
+    assert!(seen.iter().all(|r| r.starts_with("PROPFIND ")), "{seen:?}");
+}
+
+#[test]
+fn c17_subtask_follows_its_parent_to_another_calendar() {
+    let dav = start();
+    let (a, b) = pair(&dav);
+    let top = add(&a, "parent");
+    let sub = add_sub(&a, &top, "child");
+    let work = a.create_list("Работа".into()).unwrap();
+    settle(&a, &b);
+    assert!(dav.object(&sub.id).exists());
+
+    // The child's own registers do not change when its parent moves.
+    a.move_to_list(top.id.clone(), work.id.clone()).unwrap();
+    a.sync_now().unwrap();
+    assert!(!dav.object(&sub.id).exists());
+    assert!(dav.home().join(&work.id).join(format!("{}.ics", sub.id)).exists());
+    b.sync_now().unwrap();
+    assert_eq!(view(&b, Scope::List { id: work.id }), ["parent"]);
+}
+
+#[test]
+fn c18_the_calendar_home_is_looked_up_once() {
+    let dav = start();
+    std::fs::write(dav.root.path().join(".home"), "/cal/").unwrap();
+    let a = device();
+    a.set_sync_config(SyncConfig::CalDav {
+        url: dav.url.trim_end_matches("/cal").to_string(),
+        user: "user".into(),
+    })
+    .unwrap();
+    a.set_sync_password(Some("secret".into()));
+    let t = add(&a, "задача");
+
+    let first = dav.requests(|| {
+        a.sync_now().unwrap();
+    });
+    assert_eq!(first[0], "PROPFIND / depth=0", "the home is asked for");
+    assert!(dav.object(&t.id).exists());
+    let second = dav.requests(|| {
+        a.sync_now().unwrap();
+    });
+    assert!(!second.iter().any(|r| r.ends_with("depth=0")), "{second:?}");
+
+    // The collection moved: the remembered address fails and is found again.
+    std::fs::rename(dav.home(), dav.root.path().join("moved")).unwrap();
+    std::fs::write(dav.root.path().join(".home"), "/moved/").unwrap();
+    let third = dav.requests(|| {
+        a.sync_now().unwrap();
+    });
+    assert_eq!(third[..2], ["PROPFIND /cal/ depth=1", "PROPFIND / depth=0"]);
+    assert_eq!(view(&a, Scope::Inbox), ["задача"]);
+    a.set_title(t.id.clone(), "переименована".into()).unwrap();
+    a.sync_now().unwrap();
+    let moved = dav.root.path().join("moved/lists-inbox").join(format!("{}.ics", t.id));
+    assert!(std::fs::read_to_string(moved)
+        .unwrap()
+        .contains("SUMMARY:переименована"));
+}
+
+/// Two calendars with one task each, both devices in step.
+fn two_calendars(dav: &Dav) -> (Device, Device, TaskItem, TaskItem, TaskList) {
+    let (a, b) = pair(dav);
+    let home = add(&a, "home");
+    let work = a.create_list("Работа".into()).unwrap();
+    let office = a
+        .create_task(NewTask {
+            title: "office".into(),
+            list_id: Some(work.id.clone()),
+            ..NewTask::default()
+        })
+        .unwrap();
+    settle(&a, &b);
+    // A run after one's own writes reads the calendars once more.
+    a.sync_now().unwrap();
+    b.sync_now().unwrap();
+    (a, b, home, office, work)
+}
+
+fn rename_elsewhere(dav: &Dav, task_id: &str, title: &str) {
+    dav.edit(task_id, |lines| {
+        lines
+            .into_iter()
+            .map(|l| {
+                if l.starts_with("SUMMARY:") {
+                    format!("SUMMARY:{title}")
+                } else {
+                    l
+                }
+            })
+            .collect()
+    });
+}
+
+#[test]
+fn c19_only_calendars_that_changed_are_read() {
+    let dav = start();
+    let (a, _b, home, office, work) = two_calendars(&dav);
+    let idle = dav.requests(|| {
+        assert_eq!(a.sync_now().unwrap(), SyncReport::default());
+    });
+    assert_eq!(idle, ["PROPFIND /cal/ depth=1"]);
+
+    rename_elsewhere(&dav, &home.id, "home elsewhere");
+    let seen = dav.requests(|| {
+        a.sync_now().unwrap();
+    });
+    assert!(seen.iter().any(|r| r.contains(" /cal/lists-inbox/ ")), "{seen:?}");
+    assert!(
+        seen.contains(&format!("GET /cal/lists-inbox/{}.ics", home.id)),
+        "{seen:?}"
+    );
+    assert!(!seen.iter().any(|r| r.contains(&work.id)), "{seen:?}");
+    assert_eq!(a.task(home.id.clone()).unwrap().title, "home elsewhere");
+
+    // An object that vanished from one calendar does not take the others' tasks with it.
+    a.sync_now().unwrap();
+    std::fs::remove_file(dav.object(&home.id)).unwrap();
+    a.sync_now().unwrap();
+    assert!(view(&a, Scope::Inbox).is_empty());
+    assert_eq!(view(&a, Scope::Trash), ["home elsewhere"]);
+    assert_eq!(view(&a, Scope::List { id: work.id }), ["office"]);
+    assert!(!a.task(office.id).unwrap().deleted);
+}
+
+#[test]
+fn c19_server_without_change_tags_is_listed_on_every_run() {
+    let dav = start();
+    std::fs::write(dav.root.path().join(".no-ctag"), "").unwrap();
+    std::fs::write(dav.root.path().join(".no-sync"), "").unwrap();
+    let (a, b, home, _office, work) = two_calendars(&dav);
+    let mut idle = dav.requests(|| {
+        assert_eq!(a.sync_now().unwrap(), SyncReport::default());
+    });
+    idle.sort();
+    assert_eq!(
+        idle,
+        [
+            "PROPFIND /cal/ depth=1".to_string(),
+            format!("PROPFIND /cal/{}/ depth=1", work.id),
+            "PROPFIND /cal/lists-inbox/ depth=1".to_string(),
+        ]
+    );
+    rename_elsewhere(&dav, &home.id, "home elsewhere");
+    a.sync_now().unwrap();
+    b.sync_now().unwrap();
+    assert_eq!(b.task(home.id).unwrap().title, "home elsewhere");
+}
+
+#[test]
+fn c19_sync_token_stands_in_for_a_missing_change_tag() {
+    let dav = start();
+    std::fs::write(dav.root.path().join(".no-ctag"), "").unwrap();
+    let (a, b, home, _office, _work) = two_calendars(&dav);
+    let idle = dav.requests(|| {
+        assert_eq!(a.sync_now().unwrap(), SyncReport::default());
+    });
+    assert_eq!(idle, ["PROPFIND /cal/ depth=1"]);
+    rename_elsewhere(&dav, &home.id, "home elsewhere");
+    a.sync_now().unwrap();
+    b.sync_now().unwrap();
+    assert_eq!(b.task(home.id).unwrap().title, "home elsewhere");
+}
+
+#[test]
+fn c20_changes_are_read_from_the_sync_report() {
+    let dav = start();
+    let (a, b, home, _office, _work) = two_calendars(&dav);
+    let extra = add(&a, "extra");
+    settle(&a, &b);
+    a.sync_now().unwrap();
+
+    rename_elsewhere(&dav, &home.id, "home elsewhere");
+    std::fs::remove_file(dav.object(&extra.id)).unwrap();
+    let seen = dav.requests(|| {
+        a.sync_now().unwrap();
+    });
+    assert!(
+        seen.contains(&"REPORT /cal/lists-inbox/ sync-collection".to_string()),
+        "{seen:?}"
+    );
+    assert!(
+        !seen.iter().any(|r| r.starts_with("PROPFIND /cal/lists-inbox/")),
+        "{seen:?}"
+    );
+    assert_eq!(view(&a, Scope::Inbox), ["home elsewhere"]);
+    assert_eq!(view(&a, Scope::Trash), ["extra"]);
+}
+
+#[test]
+fn c20_token_the_server_forgot_falls_back_to_the_listing() {
+    let dav = start();
+    let (a, _b, home, _office, _work) = two_calendars(&dav);
+    let inbox = dav.home().join("lists-inbox");
+    for entry in std::fs::read_dir(&inbox).unwrap().flatten() {
+        if entry.file_name().to_string_lossy().starts_with(".sync-") {
+            std::fs::remove_file(entry.path()).unwrap();
+        }
+    }
+    rename_elsewhere(&dav, &home.id, "home elsewhere");
+    let seen = dav.requests(|| {
+        a.sync_now().unwrap();
+    });
+    let at = |what: &str| seen.iter().position(|r| r == what);
+    let refused = at("REPORT /cal/lists-inbox/ sync-collection").expect("the report is tried");
+    let listed = at("PROPFIND /cal/lists-inbox/ depth=1").expect("then the listing");
+    assert!(refused < listed, "{seen:?}");
+    assert_eq!(a.task(home.id).unwrap().title, "home elsewhere");
+}
+
+/// A device that reads a calendar holding 25 tasks for the first time.
+fn first_read(dav: &Dav) -> (Device, Vec<String>) {
+    let a = device();
+    connect(&a, dav);
+    for n in 0..25 {
+        add(&a, &format!("task {n}"));
+    }
+    a.sync_now().unwrap();
+    let b = device();
+    connect(&b, dav);
+    let seen = dav.requests(|| {
+        b.sync_now().unwrap();
+    });
+    (b, seen)
+}
+
+#[test]
+fn c21_several_objects_are_read_in_one_request() {
+    let dav = start();
+    let (b, seen) = first_read(&dav);
+    assert_eq!(
+        seen.iter().filter(|r| r.ends_with(" calendar-multiget")).count(),
+        2,
+        "batches of 20: {seen:?}"
+    );
+    assert!(!seen.iter().any(|r| r.starts_with("GET ")), "{seen:?}");
+    assert_eq!(view(&b, Scope::Inbox).len(), 25);
+}
+
+#[test]
+fn c21_server_without_reports_is_read_object_by_object() {
+    let dav = start();
+    std::fs::write(dav.root.path().join(".no-report"), "").unwrap();
+    let (b, seen) = first_read(&dav);
+    assert_eq!(seen.iter().filter(|r| r.starts_with("GET ")).count(), 25, "{seen:?}");
+    assert_eq!(
+        seen.iter().filter(|r| r.starts_with("REPORT ")).count(),
+        1,
+        "asked once, not for every batch: {seen:?}"
+    );
+    assert_eq!(view(&b, Scope::Inbox).len(), 25);
+}
+
+/// The same exchange against a real server, which the test server only imitates:
+/// `LISTS_CALDAV_URL=… LISTS_CALDAV_USER=… LISTS_CALDAV_PASSWORD=… cargo test --test caldav real_server -- --ignored`.
+/// It leaves the calendars it made empty; the inbox calendar stays.
+#[test]
+#[ignore = "needs a CalDAV server"]
+fn real_server_round_trip() {
+    let url = std::env::var("LISTS_CALDAV_URL").expect("LISTS_CALDAV_URL");
+    let user = std::env::var("LISTS_CALDAV_USER").unwrap_or_default();
+    let password = std::env::var("LISTS_CALDAV_PASSWORD").unwrap_or_default();
+    let join = || {
+        let d = device();
+        d.set_sync_config(SyncConfig::CalDav {
+            url: url.clone(),
+            user: user.clone(),
+        })
+        .unwrap();
+        d.set_sync_password(Some(password.clone()));
+        d
+    };
+    let (a, b) = (join(), join());
+    let work = a.create_list("Lists test".into()).unwrap();
+    let mut tasks: Vec<TaskItem> = (0..25).map(|n| add(&a, &format!("lists test {n}"))).collect();
+    tasks.push(
+        a.create_task(NewTask {
+            title: "lists test in a list".into(),
+            list_id: Some(work.id.clone()),
+            due: Some("2026-10-09T18:30".into()),
+            ..NewTask::default()
+        })
+        .unwrap(),
+    );
+    settle(&a, &b);
+    let ours = |d: &Device, scope: Scope| -> Vec<String> {
+        let mut titles: Vec<String> = view(d, scope)
+            .into_iter()
+            .filter(|t| t.starts_with("lists test"))
+            .collect();
+        titles.sort();
+        titles
+    };
+    assert_eq!(ours(&b, Scope::Inbox).len(), 25, "first read");
+    assert_eq!(ours(&b, Scope::List { id: work.id.clone() }), ["lists test in a list"]);
+    assert_eq!(
+        b.task(tasks[25].id.clone()).unwrap().due.as_deref(),
+        Some("2026-10-09T18:30")
+    );
+
+    // An edit and a removal travel to the other device; an idle run changes nothing.
+    b.sync_now().unwrap();
+    a.set_title(tasks[0].id.clone(), "lists test renamed".into()).unwrap();
+    a.delete_task(tasks[1].id.clone()).unwrap();
+    a.sync_now().unwrap();
+    b.sync_now().unwrap();
+    assert_eq!(b.task(tasks[0].id.clone()).unwrap().title, "lists test renamed");
+    assert_eq!(ours(&b, Scope::Inbox).len(), 24);
+    a.sync_now().unwrap();
+    b.sync_now().unwrap();
+    assert_eq!(a.sync_now().unwrap(), SyncReport::default());
+    assert_eq!(b.sync_now().unwrap(), SyncReport::default());
+
+    for task in &tasks {
+        if task.id != tasks[1].id {
+            a.delete_task(task.id.clone()).unwrap();
+        }
+    }
+    a.delete_list(work.id).unwrap();
+    settle(&a, &b);
+    assert!(ours(&b, Scope::Inbox).is_empty());
 }

@@ -13,6 +13,7 @@ pub const NS: &str = "https://evsyukov.org/ns/lists";
 const DAV: &str = "DAV:";
 const CALDAV: &str = "urn:ietf:params:xml:ns:caldav";
 const APPLE: &str = "http://apple.com/ns/ical/";
+const CALSERVER: &str = "http://calendarserver.org/ns/";
 /// One object with an inline attachment stays far below this.
 const MAX_BODY: u64 = 32 * 1024 * 1024;
 
@@ -26,6 +27,33 @@ pub struct Calendar {
     pub state: Option<String>,
     /// Saved filters, kept on the inbox calendar the same way.
     pub filters: Option<String>,
+    /// Changes whenever an object in the calendar does; empty when the server has no such mark.
+    pub tag: String,
+    /// Where a `sync-collection` report can start from; empty when the server offers none.
+    pub sync_token: String,
+}
+
+/// What changed in a calendar since a sync token was issued.
+pub struct Delta {
+    /// Objects that are new or changed, with their ETags.
+    pub changed: Vec<(String, String)>,
+    pub removed: Vec<String>,
+    /// The token that describes the calendar after these changes.
+    pub token: String,
+}
+
+/// One object as a report returns it.
+pub struct Fetched {
+    pub href: String,
+    pub etag: String,
+    pub body: String,
+}
+
+enum Answer {
+    /// The server answered with an HTTP error: it does not offer the report, or not for this request.
+    Refused,
+    TooLarge,
+    Body(String),
 }
 
 pub enum Condition<'a> {
@@ -62,6 +90,12 @@ struct Response {
     state: Option<String>,
     filters: Option<String>,
     etag: String,
+    ctag: String,
+    sync_token: String,
+    /// `calendar-data` of a multiget answer.
+    data: Option<String>,
+    /// Status of the response as a whole, as a sync report gives it for a removed object.
+    status: Option<u16>,
     home: Option<String>,
     principal: Option<String>,
 }
@@ -103,25 +137,36 @@ impl Client {
         split_url(url).map(|_| ())
     }
 
-    /// Connects and finds the collection of calendars: the address itself, or
-    /// the calendar home the server names for it or for its principal.
-    pub fn connect(url: &str, user: &str, password: &str) -> Result<Client> {
-        let (origin, path) = split_url(url)?;
+    /// A client for a collection of calendars found earlier; no request is made.
+    pub fn at(url: &str, user: &str, password: &str, home: &str) -> Result<Client> {
+        let (origin, _) = split_url(url)?;
         let auth = (!user.is_empty()).then(|| {
             format!(
                 "Basic {}",
                 base64::engine::general_purpose::STANDARD.encode(format!("{user}:{password}"))
             )
         });
-        let mut client = Client {
+        Ok(Client {
             agent: ureq::AgentBuilder::new()
                 .timeout_connect(Duration::from_secs(15))
                 .timeout(Duration::from_secs(120))
                 .build(),
             origin,
-            home: path.clone(),
+            home: home.to_string(),
             auth,
-        };
+        })
+    }
+
+    /// Path of the collection that holds the calendars.
+    pub fn home(&self) -> &str {
+        &self.home
+    }
+
+    /// Connects and finds the collection of calendars: the address itself, or
+    /// the calendar home the server names for it or for its principal.
+    pub fn connect(url: &str, user: &str, password: &str) -> Result<Client> {
+        let (_, path) = split_url(url)?;
+        let mut client = Client::at(url, user, password, &path)?;
         let body = format!(
             r#"<?xml version="1.0" encoding="utf-8"?><d:propfind xmlns:d="{DAV}" xmlns:c="{CALDAV}"><d:prop><d:current-user-principal/><c:calendar-home-set/></d:prop></d:propfind>"#
         );
@@ -175,28 +220,124 @@ impl Client {
         let text = response
             .into_string()
             .map_err(|e| AppError::sync(format!("PROPFIND: {e}")))?;
-        Ok(Some(parse_multistatus(&text)?))
+        Ok(Some(parse_multistatus(&text)?.0))
     }
 
-    /// Calendars that accept tasks.
-    pub fn calendars(&self) -> Result<Vec<Calendar>> {
+    fn report(&self, path: &str, depth: Option<&str>, body: &str) -> Result<Answer> {
+        let request = self
+            .request("REPORT", path)
+            .set("Content-Type", "application/xml; charset=utf-8");
+        let request = match depth {
+            Some(depth) => request.set("Depth", depth),
+            None => request,
+        };
+        let response = match request.send_string(body) {
+            Ok(r) => r,
+            Err(e @ ureq::Error::Status(401, _)) => return Err(self.failure("REPORT", path, e)),
+            Err(ureq::Error::Status(..)) => return Ok(Answer::Refused),
+            Err(e) => return Err(self.failure("REPORT", path, e)),
+        };
+        // Bytes first: a cut at the limit may fall inside a character.
+        let mut bytes = Vec::new();
+        response
+            .into_reader()
+            .take(MAX_BODY + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|e| AppError::sync(format!("REPORT {path}: {e}")))?;
+        if bytes.len() as u64 > MAX_BODY {
+            return Ok(Answer::TooLarge);
+        }
+        String::from_utf8(bytes)
+            .map(Answer::Body)
+            .map_err(|_| AppError::sync(format!("REPORT {path}: the answer is not UTF-8")))
+    }
+
+    /// What changed in a calendar since `token` (RFC 6578). `None` when the
+    /// server does not offer the report, no longer knows the token or did not
+    /// send everything: the caller lists the calendar instead.
+    pub fn changes_since(&self, calendar: &str, token: &str) -> Result<Option<Delta>> {
         let body = format!(
-            r#"<?xml version="1.0" encoding="utf-8"?><d:propfind xmlns:d="{DAV}" xmlns:c="{CALDAV}" xmlns:a="{APPLE}" xmlns:l="{NS}"><d:prop><d:resourcetype/><d:displayname/><a:calendar-color/><c:supported-calendar-component-set/><l:state/><l:filters/></d:prop></d:propfind>"#
+            r#"<?xml version="1.0" encoding="utf-8"?><d:sync-collection xmlns:d="{DAV}"><d:sync-token>{}</d:sync-token><d:sync-level>1</d:sync-level><d:prop><d:getetag/></d:prop></d:sync-collection>"#,
+            xml_escape(token)
         );
-        let responses = self
-            .propfind(&self.home, "1", &body)?
-            .ok_or_else(|| AppError::sync(format!("{} does not exist on the server", self.home)))?;
-        Ok(responses
-            .into_iter()
-            .filter(|r| r.calendar && r.todo && dir(&r.href) != self.home)
-            .map(|r| Calendar {
-                href: dir(&r.href),
-                name: r.name,
-                color: r.color,
-                state: r.state,
-                filters: r.filters,
-            })
-            .collect())
+        let Answer::Body(text) = self.report(calendar, Some("0"), &body)? else {
+            return Ok(None);
+        };
+        let (responses, token) = parse_multistatus(&text)?;
+        let mut delta = Delta {
+            changed: Vec::new(),
+            removed: Vec::new(),
+            token,
+        };
+        for r in responses {
+            match r.status {
+                Some(404) => delta.removed.push(r.href),
+                // 507 on the collection: the answer was cut short.
+                Some(_) => return Ok(None),
+                None if r.collection || r.href.ends_with('/') => {}
+                None => delta.changed.push((r.href, r.etag)),
+            }
+        }
+        Ok((!delta.token.is_empty()).then_some(delta))
+    }
+
+    /// Several objects of a calendar in one request (RFC 4791, 7.9). `None`
+    /// when the server does not offer the report. Objects missing from the
+    /// answer are for the caller to read one by one.
+    pub fn multiget(&self, calendar: &str, hrefs: &[&str]) -> Result<Option<Vec<Fetched>>> {
+        let hrefs: String = hrefs
+            .iter()
+            .map(|h| format!("<d:href>{}</d:href>", xml_escape(h)))
+            .collect();
+        let body = format!(
+            r#"<?xml version="1.0" encoding="utf-8"?><c:calendar-multiget xmlns:d="{DAV}" xmlns:c="{CALDAV}"><d:prop><d:getetag/><c:calendar-data/></d:prop>{hrefs}</c:calendar-multiget>"#
+        );
+        Ok(match self.report(calendar, None, &body)? {
+            Answer::Refused => None,
+            Answer::TooLarge => Some(Vec::new()),
+            Answer::Body(text) => Some(
+                parse_multistatus(&text)?
+                    .0
+                    .into_iter()
+                    .filter_map(|r| {
+                        Some(Fetched {
+                            href: r.href,
+                            etag: r.etag,
+                            body: r.data?,
+                        })
+                    })
+                    .collect(),
+            ),
+        })
+    }
+
+    /// Calendars that accept tasks; `None` when the home collection does not exist.
+    pub fn calendars(&self) -> Result<Option<Vec<Calendar>>> {
+        let body = format!(
+            r#"<?xml version="1.0" encoding="utf-8"?><d:propfind xmlns:d="{DAV}" xmlns:c="{CALDAV}" xmlns:a="{APPLE}" xmlns:cs="{CALSERVER}" xmlns:l="{NS}"><d:prop><d:resourcetype/><d:displayname/><a:calendar-color/><c:supported-calendar-component-set/><cs:getctag/><d:sync-token/><l:state/><l:filters/></d:prop></d:propfind>"#
+        );
+        let Some(responses) = self.propfind(&self.home, "1", &body)? else {
+            return Ok(None);
+        };
+        Ok(Some(
+            responses
+                .into_iter()
+                .filter(|r| r.calendar && r.todo && dir(&r.href) != self.home)
+                .map(|r| Calendar {
+                    href: dir(&r.href),
+                    name: r.name,
+                    color: r.color,
+                    state: r.state,
+                    filters: r.filters,
+                    tag: if r.ctag.is_empty() {
+                        r.sync_token.clone()
+                    } else {
+                        r.ctag
+                    },
+                    sync_token: r.sync_token,
+                })
+                .collect(),
+        ))
     }
 
     /// Creates a calendar for tasks under the home collection and returns its path.
@@ -334,7 +475,8 @@ fn path_of(href: &str) -> String {
     }
 }
 
-fn parse_multistatus(text: &str) -> Result<Vec<Response>> {
+/// The responses, and the sync token a sync report closes with.
+fn parse_multistatus(text: &str) -> Result<(Vec<Response>, String)> {
     let doc =
         roxmltree::Document::parse(text).map_err(|e| AppError::sync(format!("the server's answer is not XML: {e}")))?;
     let is =
@@ -358,6 +500,14 @@ fn parse_multistatus(text: &str) -> Result<Vec<Response>> {
             state: None,
             filters: None,
             etag: String::new(),
+            ctag: String::new(),
+            sync_token: String::new(),
+            data: None,
+            status: response
+                .children()
+                .find(|n| is(n, DAV, "status"))
+                .and_then(|n| n.text())
+                .and_then(|s| s.split_whitespace().nth(1)?.parse().ok()),
             home: None,
             principal: None,
         };
@@ -400,6 +550,12 @@ fn parse_multistatus(text: &str) -> Result<Vec<Response>> {
                     r.filters = Some(text()).filter(|s| !s.is_empty());
                 } else if is(&prop, DAV, "getetag") {
                     r.etag = text();
+                } else if is(&prop, CALSERVER, "getctag") {
+                    r.ctag = text();
+                } else if is(&prop, DAV, "sync-token") {
+                    r.sync_token = text();
+                } else if is(&prop, CALDAV, "calendar-data") {
+                    r.data = prop.text().map(str::to_string);
                 } else if is(&prop, CALDAV, "calendar-home-set") {
                     r.home = inner_href();
                 } else if is(&prop, DAV, "current-user-principal") {
@@ -409,7 +565,15 @@ fn parse_multistatus(text: &str) -> Result<Vec<Response>> {
         }
         out.push(r);
     }
-    Ok(out)
+    let token = doc
+        .root_element()
+        .children()
+        .find(|n| is(n, DAV, "sync-token"))
+        .and_then(|n| n.text())
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    Ok((out, token))
 }
 
 #[cfg(test)]
@@ -449,7 +613,7 @@ mod tests {
   <d:propstat><d:prop><d:resourcetype><d:collection/><cal:calendar/></d:resourcetype>
    <cal:supported-calendar-component-set><cal:comp name="VEVENT"/></cal:supported-calendar-component-set></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>
 </d:multistatus>"##;
-        let parsed = parse_multistatus(xml).unwrap();
+        let (parsed, _) = parse_multistatus(xml).unwrap();
         assert_eq!(parsed.len(), 3);
         assert!(!parsed[0].calendar && parsed[0].name.is_empty());
         let tasks = &parsed[1];
