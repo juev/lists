@@ -1023,3 +1023,30 @@ fn real_server_round_trip() {
     settle(&a, &b);
     assert!(ours(&b, Scope::Inbox).is_empty());
 }
+
+#[test]
+fn c14_removal_seen_in_a_run_that_failed_later_is_not_forgotten() {
+    // Calendars are read in no particular order; several rounds cover both.
+    for _ in 0..8 {
+        let dav = start();
+        let (a, _b, home, office, work) = two_calendars(&dav);
+        std::fs::remove_file(dav.object(&home.id)).unwrap();
+        let other = dav.home().join(&work.id).join(format!("{}.ics", office.id));
+        let text = std::fs::read_to_string(&other).unwrap();
+        std::fs::write(&other, text.replace("SUMMARY:office", "SUMMARY:office elsewhere")).unwrap();
+
+        // The run reads one calendar and breaks on the other.
+        std::fs::write(dav.root.path().join(".fail"), format!("/cal/{}/", work.id)).unwrap();
+        assert!(a.sync_now().is_err());
+        std::fs::remove_file(dav.root.path().join(".fail")).unwrap();
+
+        a.sync_now().unwrap();
+        a.sync_now().unwrap();
+        assert_eq!(
+            view(&a, Scope::Trash),
+            ["home"],
+            "the removal is acted on once the server answers"
+        );
+        assert_eq!(a.task(office.id).unwrap().title, "office elsewhere");
+    }
+}
