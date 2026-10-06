@@ -39,7 +39,12 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.TransformedText
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.em
+import uniffi.lists_core.MarkdownAlign
 import uniffi.lists_core.MarkdownKind
 import uniffi.lists_core.MarkdownLayout
 import uniffi.lists_core.markdownLayout
@@ -49,11 +54,18 @@ import uniffi.lists_core.markdownNewline
 data class MarkdownColors(val dim: Color, val link: Color, val code: Color, val heading: Color)
 
 /**
+ * What laying a table out as a grid needs (R60): the width in pixels a piece of
+ * the note takes in the field, the width there is, zero while unknown, and the
+ * way from pixels to the unit of letter spacing.
+ */
+class GridMetrics(val width: (AnnotatedString) -> Float, val available: Float, val spacing: (Float) -> TextUnit)
+
+/**
  * A note as it is shown (R48–R51): the text with the markup taken out, bullets,
  * quote bars and checkboxes put in, and the way back from every shown character
  * to the typed one. The typed text itself is never changed here.
  */
-class MarkdownView(text: String, layout: MarkdownLayout, selection: TextRange?, colors: MarkdownColors) {
+class MarkdownView(text: String, layout: MarkdownLayout, selection: TextRange?, colors: MarkdownColors, grid: GridMetrics? = null) {
     /** Shown offsets of the checkboxes with the typed offset of the character between their brackets. */
     val boxes: List<Pair<Int, Int>>
     /** Shown ranges of the links with their addresses. */
@@ -73,6 +85,23 @@ class MarkdownView(text: String, layout: MarkdownLayout, selection: TextRange?, 
             selection != null && block.start.toInt() <= selection.max && selection.min <= block.end.toInt()
         }
         val dim = SpanStyle(color = colors.dim)
+        // R60: the tables to show as a grid, each with the lines of its rows and the line of
+        // dashes. A table stays as typed while the cursor is in it, and where it does not
+        // start its line: in a list item or a quote.
+        val grids = if (grid == null) emptyList() else layout.tables.mapNotNull { table ->
+            val start = table.start.toInt()
+            val end = table.end.toInt()
+            if (end > n || active.getOrElse(table.block.toInt()) { true } || (start > 0 && text[start - 1] != '\n')) return@mapNotNull null
+            val lines = ArrayList<IntRange>()
+            var at = start
+            while (at <= end) {
+                val stop = text.indexOf('\n', at).let { if (it < 0 || it > end) end else it }
+                lines += at until stop
+                at = stop + 1
+            }
+            if (lines.size != table.rows.size + 1) null else Triple(table, listOf(lines[0]) + lines.drop(2), lines[1])
+        }
+        fun inGrid(at: Int) = grids.any { (_, lines, rule) -> at in rule || lines.any { at in it } }
         for (span in layout.spans) {
             val start = span.start.toInt()
             val end = span.end.toInt()
@@ -88,7 +117,7 @@ class MarkdownView(text: String, layout: MarkdownLayout, selection: TextRange?, 
                 MarkdownKind.Strikethrough -> styles += Triple(SpanStyle(textDecoration = TextDecoration.LineThrough), start, end)
                 MarkdownKind.Code, MarkdownKind.CodeBlock ->
                     styles += Triple(SpanStyle(fontFamily = FontFamily.Monospace, background = colors.code), start, end)
-                MarkdownKind.TableRow -> styles += Triple(SpanStyle(fontFamily = FontFamily.Monospace), start, end)
+                MarkdownKind.TableRow -> if (!inGrid(start)) styles += Triple(SpanStyle(fontFamily = FontFamily.Monospace), start, end)
                 MarkdownKind.Quote -> styles += Triple(SpanStyle(fontStyle = FontStyle.Italic), start, end)
                 is MarkdownKind.Link -> {
                     styles += Triple(SpanStyle(color = colors.link, textDecoration = TextDecoration.Underline), start, end)
@@ -130,6 +159,73 @@ class MarkdownView(text: String, layout: MarkdownLayout, selection: TextRange?, 
                         if (wholeLine && end < n) drop[end] = true else if (wholeLine && start > 0) drop[start - 1] = true
                     }
             }
+        }
+
+        /** A piece of the note as it is shown, for measuring a cell. */
+        fun piece(from: Int, to: Int) = AnnotatedString.Builder().apply {
+            val at = IntArray(to - from + 1)
+            for (i in from until to) {
+                at[i - from] = length
+                if (!drop[i]) append(swap[i] ?: text[i].toString())
+            }
+            at[to - from] = length
+            for ((style, start, end) in styles) {
+                val a = at[start.coerceIn(from, to) - from]
+                val b = at[end.coerceIn(from, to) - from]
+                if (a < b) addStyle(style, a, b)
+            }
+        }.toAnnotatedString()
+
+        for ((table, lines, rule) in grids) {
+            val metrics = grid ?: break
+            val mono = { for (line in lines + listOf(rule)) styles += Triple(SpanStyle(fontFamily = FontFamily.Monospace), line.first, line.last + 1) }
+            val columns = table.columns.size
+            val cells = table.rows.map { row -> row.cells.map { it.start.toInt() to it.end.toInt() } }
+            // What the parser made of a row has to lie in its line, in order; otherwise the table stays as typed.
+            val sound = columns > 0 && cells.zip(lines).all { (row, line) ->
+                row.size == columns && row.first().first >= line.first && row.last().second <= line.last + 1 &&
+                    row.zipWithNext().all { (a, b) -> a.second <= b.first }
+            }
+            if (!sound) { mono(); continue }
+            val bold = SpanStyle(fontWeight = FontWeight.Bold, color = colors.heading)
+            for ((row, cellsOf) in table.rows.zip(cells)) if (row.header) for ((from, to) in cellsOf) if (from < to) styles += Triple(bold, from, to)
+            val widths = cells.map { row -> row.map { (from, to) -> if (from < to) metrics.width(piece(from, to)) else 0f } }
+            val column = (0 until columns).map { index -> widths.maxOf { it[index] } }
+            val space = metrics.width(AnnotatedString(" "))
+            val gap = space * 4
+            // A grid is not wrapped: a table wider than the note stays as typed.
+            if (metrics.available > 0 && column.sum() + gap * (columns - 1) > metrics.available) { mono(); continue }
+            /** Room on the left of a cell in its column: all of the spare for a right column, half for a centred one. */
+            fun before(row: Int, index: Int): Float {
+                val spare = column[index] - widths[row][index]
+                return when (table.columns[index]) {
+                    MarkdownAlign.RIGHT -> spare
+                    MarkdownAlign.CENTER -> spare / 2
+                    else -> 0f
+                }
+            }
+            /** Turns one character of `range` into a space of this width and drops the rest. */
+            fun spacer(range: IntRange, keep: Int?, width: Float) {
+                for (i in range) drop[i] = true
+                if (keep == null || width < 0.5f) return
+                drop[keep] = false
+                swap[keep] = " "
+                styles += Triple(SpanStyle(letterSpacing = metrics.spacing(width - space)), keep, keep + 1)
+            }
+            for ((number, pair) in cells.zip(lines).withIndex()) {
+                val (row, line) = pair
+                val lead = line.first until row[0].first
+                spacer(lead, lead.firstOrNull(), before(number, 0))
+                for (index in 0 until columns - 1) {
+                    val between = row[index].second until row[index + 1].first
+                    val after = column[index] - widths[number][index] - before(number, index)
+                    spacer(between, between.firstOrNull { text[it] == '|' }, after + gap + before(number, index + 1))
+                }
+                spacer(row.last().second..line.last, null, 0f)
+            }
+            // The line of dashes takes no room.
+            for (i in rule) drop[i] = true
+            if (rule.last + 1 < n) drop[rule.last + 1] = true
         }
 
         val out = StringBuilder(n)
@@ -210,8 +306,18 @@ fun MarkdownField(
     val colors = MarkdownColors(dim = scheme.outline, link = scheme.primary, code = scheme.surfaceVariant, heading = scheme.onSurface)
     val layout = remember(field.text) { markdownLayout(field.text) }
     // Keyed by the text as well: two texts can have the same ranges, a word replaced by one of its length.
-    val view = remember(field.text, layout, field.selection, focused, colors) {
-        MarkdownView(field.text, layout, field.selection.takeIf { focused }, colors)
+    val measurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+    val shownStyle = textStyle.copy(color = LocalContentColor.current)
+    // The width the field may take; known after the first layout.
+    val available = textLayout?.layoutInput?.constraints?.maxWidth?.takeIf { it != Constraints.Infinity } ?: 0
+    val view = remember(field.text, layout, field.selection, focused, colors, available, shownStyle) {
+        val metrics = GridMetrics(
+            width = { piece -> measurer.measure(piece, shownStyle, softWrap = false, maxLines = 1).size.width.toFloat() },
+            available = available.toFloat(),
+            spacing = { with(density) { it.toSp() } },
+        )
+        MarkdownView(field.text, layout, field.selection.takeIf { focused }, colors, metrics)
     }
     val current by rememberUpdatedState(view)
     val transformation = remember(view) { VisualTransformation { TransformedText(view.shown, view.mapping) } }
@@ -220,7 +326,7 @@ fun MarkdownField(
         value = field,
         onValueChange = { next -> field = continued(field, next) ?: next },
         enabled = enabled,
-        textStyle = textStyle.copy(color = LocalContentColor.current),
+        textStyle = shownStyle,
         cursorBrush = SolidColor(scheme.primary),
         visualTransformation = transformation,
         interactionSource = interaction,
