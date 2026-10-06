@@ -165,6 +165,10 @@ A reminder set on a task itself replaces the one derived from its due date. The 
 
 Text size (five steps) and typeface (system, rounded, serif, monospaced) are chosen in Settings.
 
+## Light and dark
+
+By default the apps look the way the system does, and follow it when it switches between light and dark on a schedule. Appearance chooses otherwise: Same as the system, Light or Dark. It is in Settings on macOS, in Settings in the drawer on Android, and at the bottom of the sidebar in the web interface. The choice applies at once and to every window, is kept by the device (by the browser in the web interface) and does not sync. List colours and the red of an overdue date are the same in both looks.
+
 ## Gestures on Android
 
 Swipe right to complete, swipe left to set the due date, long-press for the menu: due date, priority, move to list, add subtask, duplicate, delete.
