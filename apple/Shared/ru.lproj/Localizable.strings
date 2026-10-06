@@ -38,6 +38,8 @@
 "Today" = "Сегодня";
 "Tomorrow" = "Завтра";
 "In a week" = "Через неделю";
+"1–9  in that many days" = "1–9  через столько дней";
+"+ −  a day later, earlier" = "+ −  на день позже, раньше";
 "Choose…" = "Выбрать…";
 "Clear due date" = "Убрать срок";
 "Priority" = "Приоритет";
