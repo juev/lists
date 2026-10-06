@@ -45,7 +45,13 @@ final class QuickEntryPanel: NSPanel {
         standardWindowButton(.zoomButton)?.isHidden = true
     }
 
+    #if DEBUG
+    /// Set by the debug script to measure the panel without taking the keyboard from the person at the machine.
+    static var debugSilent = false
+    override var canBecomeKey: Bool { !Self.debugSilent }
+    #else
     override var canBecomeKey: Bool { true }
+    #endif
 
     func toggle() {
         isVisible ? close() : present()
@@ -65,6 +71,11 @@ final class QuickEntryPanel: NSPanel {
         hosting.safeAreaRegions = []
         contentView = hosting
         setContentSize(hosting.fittingSize)
+        // The card was placed for the size the panel had before, which on the
+        // first show is not the size of a card at all. Lay it out again before
+        // the panel is shown, or the first frame is drawn with the card off
+        // its place.
+        hosting.layoutSubtreeIfNeeded()
         if let screen = NSScreen.main {
             let frame = screen.visibleFrame
             setFrameTopLeftPoint(NSPoint(x: frame.midX - self.frame.width / 2, y: frame.minY + frame.height * 0.78))

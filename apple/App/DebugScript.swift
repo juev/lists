@@ -7,7 +7,10 @@ import AppKit
 /// `type:text`, `key:return`, `key:n+cmd`, `sleep:0.5`, `click:x,y`, `quick`, `settings`,
 /// `state` (prints who has the keyboard), `copyfiles:path,path` and `copyimage`
 /// (fill the pasteboard), `draft` (prints the files of the open new-task card),
-/// `open` (expands the selected task), `panel` (prints whether quick entry is on screen and what runs modally).
+/// `open` (expands the selected task), `panel` (prints whether quick entry is on screen and what runs modally),
+/// `quicktrace` (shows quick entry transparent and without the keyboard, and prints its geometry frame by frame:
+/// a line that differs from the next one is a card that moved after it was shown).
+/// With `LISTS_DEBUG_QUIET` set the script leaves the app in the background instead of bringing its window forward.
 @MainActor
 enum DebugScript {
     private static let codes: [String: (UInt16, String)] = [
@@ -21,7 +24,8 @@ enum DebugScript {
         let steps = script.split(separator: ";").map { String($0).trimmingCharacters(in: .whitespaces) }
         _Concurrency.Task { @MainActor in
             try? await _Concurrency.Task.sleep(for: .seconds(1.5))
-            for _ in 0..<30 where NSApp.keyWindow == nil {
+            let quiet = ProcessInfo.processInfo.environment["LISTS_DEBUG_QUIET"] != nil
+            for _ in 0..<30 where !quiet && NSApp.keyWindow == nil {
                 NSApp.activate(ignoringOtherApps: true)
                 NSApp.windows.first { $0.canBecomeMain }?.makeKeyAndOrderFront(nil)
                 try? await _Concurrency.Task.sleep(for: .milliseconds(150))
@@ -72,6 +76,22 @@ enum DebugScript {
                 case "panel":
                     print("debug: quick entry \(QuickEntryPanel.shared.isVisible ? "shown" : "hidden"), modal \(NSApp.modalWindow.map { String(describing: type(of: $0)) } ?? "none")")
                 case "quick": QuickEntryPanel.shared.present()
+                case "quicktrace":
+                    QuickEntryPanel.debugSilent = true
+                    let started = ProcessInfo.processInfo.systemUptime
+                    let panel = QuickEntryPanel.shared
+                    panel.alphaValue = 0
+                    panel.present()
+                    let ms = { Int((ProcessInfo.processInfo.systemUptime - started) * 1000) }
+                    print("debug: trace +\(ms())ms returned  \(geometry(panel))")
+                    for _ in 0..<12 {
+                        try? await _Concurrency.Task.sleep(for: .milliseconds(16))
+                        print("debug: trace +\(ms())ms           \(geometry(panel))")
+                    }
+                    panel.close()
+                    panel.alphaValue = 1
+                    QuickEntryPanel.debugSilent = false
+                    try? await _Concurrency.Task.sleep(for: .milliseconds(300))
                 case "settings": NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
                 case "state":
                     let window = NSApp.keyWindow
@@ -83,6 +103,18 @@ enum DebugScript {
             print("debug: script finished")
             fflush(stdout)
         }
+    }
+
+    private static func geometry(_ panel: NSPanel) -> String {
+        func field(in view: NSView) -> NSTextField? {
+            if let found = view as? NSTextField, found.isEditable { return found }
+            return view.subviews.lazy.compactMap(field(in:)).first
+        }
+        let content = panel.contentView
+        let title = content.flatMap(field(in:)).map { NSStringFromRect($0.convert($0.bounds, to: nil)) } ?? "none"
+        return "frame \(NSStringFromRect(panel.frame)) content \(content.map { NSStringFromRect($0.frame) } ?? "none")"
+            + " fitting \(content.map { NSStringFromSize($0.fittingSize) } ?? "none") title \(title)"
+            + " visible \(panel.isVisible) onscreen \(panel.occlusionState.contains(.visible)) key \(panel.isKeyWindow)"
     }
 
     private static func press(_ characters: String, code: UInt16, flags: NSEvent.ModifierFlags) {
