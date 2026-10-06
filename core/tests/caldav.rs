@@ -1171,6 +1171,52 @@ fn c15_list_deleted_on_one_device_is_deleted_on_the_other_while_the_calendar_sta
 }
 
 #[test]
+fn c19_object_that_is_not_a_task_is_not_fetched_on_every_run() {
+    let dav = start();
+    std::fs::write(dav.root.path().join(".no-ctag"), "").unwrap();
+    std::fs::write(dav.root.path().join(".no-sync"), "").unwrap();
+    let (a, _b, _home, office, work) = two_calendars(&dav);
+    let event = dav.home().join(&work.id).join("meeting.ics");
+    std::fs::write(&event, FOREIGN_EVENT).unwrap();
+    let other = dav.home().join(&work.id).join("lunch.ics");
+    std::fs::write(&other, FOREIGN_EVENT.replace("meeting", "lunch")).unwrap();
+    a.sync_now().unwrap();
+    let idle = dav.requests(|| {
+        assert_eq!(a.sync_now().unwrap(), SyncReport::default());
+    });
+    assert!(!idle.iter().any(|r| r.starts_with("GET ")), "{idle:?}");
+
+    // The other client edits its event: it is read once more, and then left alone.
+    std::fs::write(&event, FOREIGN_EVENT.replace("SUMMARY:meeting", "SUMMARY:moved")).unwrap();
+    let seen = dav.requests(|| {
+        a.sync_now().unwrap();
+    });
+    assert_eq!(seen.iter().filter(|r| r.starts_with("GET ")).count(), 1, "{seen:?}");
+    let idle = dav.requests(|| {
+        assert_eq!(a.sync_now().unwrap(), SyncReport::default());
+    });
+    assert!(!idle.iter().any(|r| r.starts_with("GET ")), "{idle:?}");
+    assert_eq!(
+        a.sync_status().unwrap().last_error,
+        None,
+        "an event is not a problem to report"
+    );
+
+    // An event that vanishes takes nothing with it.
+    std::fs::remove_file(&other).unwrap();
+    assert_eq!(a.sync_now().unwrap(), SyncReport::default());
+    assert!(!a.task(office.id).unwrap().deleted);
+
+    // A task written to the address of an event is taken as a task.
+    std::fs::write(&event, foreign_object("from-elsewhere", "from elsewhere", 1)).unwrap();
+    a.sync_now().unwrap();
+    assert_eq!(
+        view(&a, Scope::List { id: work.id.clone() }),
+        ["office", "from elsewhere"]
+    );
+}
+
+#[test]
 fn c19_calendar_kept_for_a_deleted_list_is_not_read_again() {
     let dav = start();
     let (a, work, event) = deleted_list_with_an_event(&dav);
@@ -1311,26 +1357,95 @@ fn c21_server_without_reports_is_read_object_by_object() {
     assert_eq!(view(&b, Scope::Inbox).len(), 25);
 }
 
+fn real_server() -> (String, String, String) {
+    (
+        std::env::var("LISTS_CALDAV_URL").expect("LISTS_CALDAV_URL"),
+        std::env::var("LISTS_CALDAV_USER").unwrap_or_default(),
+        std::env::var("LISTS_CALDAV_PASSWORD").unwrap_or_default(),
+    )
+}
+
+fn real_device() -> Device {
+    let (url, user, password) = real_server();
+    let d = device();
+    d.set_sync_config(SyncConfig::CalDav { url, user }).unwrap();
+    d.set_sync_password(Some(password));
+    d
+}
+
+/// A request of another client to the real server, made with `curl`; the answer is the status.
+/// The server's own log, split by requests for `mark-…`, shows what each run cost.
+fn elsewhere(method: &str, path: &str, body: Option<&str>) -> String {
+    let (url, user, password) = real_server();
+    let mut curl = std::process::Command::new("curl");
+    curl.args(["-s", "-o", "/dev/null", "-w", "%{http_code}", "-X", method])
+        .args(["-u", &format!("{user}:{password}")])
+        .args(["-H", "Content-Type: text/calendar; charset=utf-8"]);
+    if let Some(body) = body {
+        curl.args(["--data-binary", body]);
+    }
+    let out = curl
+        .arg(format!("{}/{path}", url.trim_end_matches('/')))
+        .output()
+        .unwrap();
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+/// C15, C19, C25 against a real server: a list with an event of another client
+/// in its calendar is deleted on one device.
+#[test]
+#[ignore = "needs a CalDAV server"]
+fn real_server_calendar_kept_for_a_deleted_list() {
+    let (a, b) = (real_device(), real_device());
+    let work = a.create_list("Lists test kept".into()).unwrap();
+    let task = a
+        .create_task(NewTask {
+            title: "lists test kept".into(),
+            list_id: Some(work.id.clone()),
+            ..NewTask::default()
+        })
+        .unwrap();
+    settle(&a, &b);
+    let event = format!("{}/meeting.ics", work.id);
+    let put = elsewhere("PUT", &event, Some(FOREIGN_EVENT));
+    assert!(put.starts_with('2'), "the server took the event: {put}");
+    a.sync_now().unwrap();
+    a.sync_now().unwrap();
+    elsewhere("GET", "mark-idle-with-event", None);
+    assert_eq!(a.sync_now().unwrap(), SyncReport::default());
+    elsewhere("GET", "mark-end", None);
+
+    a.delete_list(work.id.clone()).unwrap();
+    settle(&a, &b);
+    b.sync_now().unwrap();
+    a.sync_now().unwrap();
+    assert!(a.list(work.id.clone()).is_err() && b.list(work.id.clone()).is_err());
+    assert!(b.task(task.id).unwrap().deleted);
+    assert_eq!(elsewhere("GET", &event, None), "200", "the calendar and the event stay");
+    elsewhere("GET", "mark-idle-deleted-a", None);
+    assert_eq!(a.sync_now().unwrap(), SyncReport::default());
+    elsewhere("GET", "mark-idle-deleted-b", None);
+    assert_eq!(b.sync_now().unwrap(), SyncReport::default());
+    elsewhere("GET", "mark-end", None);
+
+    assert!(elsewhere("DELETE", &event, None).starts_with('2'));
+    a.sync_now().unwrap();
+    assert_eq!(
+        elsewhere("PROPFIND", &format!("{}/", work.id), None),
+        "404",
+        "the calendar is gone"
+    );
+    b.sync_now().unwrap();
+    assert!(b.list(work.id).is_err());
+}
+
 /// The same exchange against a real server, which the test server only imitates:
 /// `LISTS_CALDAV_URL=… LISTS_CALDAV_USER=… LISTS_CALDAV_PASSWORD=… cargo test --test caldav real_server -- --ignored`.
 /// It leaves the calendars it made empty; the inbox calendar stays.
 #[test]
 #[ignore = "needs a CalDAV server"]
 fn real_server_round_trip() {
-    let url = std::env::var("LISTS_CALDAV_URL").expect("LISTS_CALDAV_URL");
-    let user = std::env::var("LISTS_CALDAV_USER").unwrap_or_default();
-    let password = std::env::var("LISTS_CALDAV_PASSWORD").unwrap_or_default();
-    let join = || {
-        let d = device();
-        d.set_sync_config(SyncConfig::CalDav {
-            url: url.clone(),
-            user: user.clone(),
-        })
-        .unwrap();
-        d.set_sync_password(Some(password.clone()));
-        d
-    };
-    let (a, b) = (join(), join());
+    let (a, b) = (real_device(), real_device());
     let work = a.create_list("Lists test".into()).unwrap();
     let mut tasks: Vec<TaskItem> = (0..25).map(|n| add(&a, &format!("lists test {n}"))).collect();
     tasks.push(
