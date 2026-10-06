@@ -109,8 +109,8 @@ struct TaskListView: View {
         }
     }
 
-    /// True while a text view, the field editor of a text field or a chip of a card has the keyboard.
-    private var typing: Bool { Keyboard.text != nil || Keyboard.onChip }
+    /// True while a text view, the field editor of a text field, a chip of a card or the row of a file in it has the keyboard.
+    private var typing: Bool { Keyboard.text != nil || Keyboard.inCard }
 
     @State private var confirmEmptyTrash = false
     @State private var clearCompleted: ClearCompleted?
@@ -425,10 +425,10 @@ enum Keyboard {
         return window?.firstResponder as? NSText
     }
 
-    /// The cards one of whose chips has the keyboard (R62): the keyboard moving from a card
-    /// to another is reported by both, in no set order.
-    static var chipCards: Set<String> = []
-    static var onChip: Bool { !chipCards.isEmpty }
+    /// The cards one of whose chips (R62) or files (R54) has the keyboard: the keyboard moving
+    /// from a card to another is reported by both, in no set order.
+    static var cards: Set<String> = []
+    static var inCard: Bool { !cards.isEmpty }
 }
 
 extension View {

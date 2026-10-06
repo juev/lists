@@ -55,7 +55,7 @@ struct TaskEditor: View {
             guard let chip, !now.contains(chip), let index = before.firstIndex(of: chip) else { return }
             self.chip = now[min(index, now.count - 1)]
         }
-        .reportsCard(task.id, chip: chip, popover: popover.map { "\($0)" })
+        .reportsCard(task.id, chip: chip, file: attachments.first { $0.id == focusedFile }?.name, popover: popover.map { "\($0)" })
         .onDisappear(perform: commitNotes)
         .fileImporter(isPresented: $importing, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
             if case .success(let urls) = result { attach(urls) }
@@ -274,6 +274,11 @@ struct TaskEditor: View {
                     show(file)
                     return .handled
                 }
+                // The list leaves its keys alone while the row has the keyboard, Esc among them.
+                .onKeyPress(.escape) {
+                    finish()
+                    return .handled
+                }
                 .contextMenu {
                     if file.localPath != nil {
                         Button(L("Quick Look")) { show(file) }
@@ -285,12 +290,21 @@ struct TaskEditor: View {
             }
         }
         .quickLookPreview($previewed, in: previewable)
+        #if DEBUG
+        .onReceive(NotificationCenter.default.publisher(for: DebugScript.showFile)) { note in
+            guard model.selection == task.id, let index = note.object as? Int, attachments.indices.contains(index) else { return }
+            show(attachments[index])
+        }
+        #endif
     }
 
     /// Shows the file inside the app (R54); the system decides how from its name.
     /// The panel pages through the files of the task that are on this device.
     private func show(_ file: Attachment) {
         guard let url = AttachmentFiles.named(file) else { return }
+        #if DEBUG
+        DebugScript.shows += 1
+        #endif
         focusedFile = file.id
         previewable = attachments.compactMap(AttachmentFiles.named)
         previewed = url

@@ -128,22 +128,28 @@ extension View {
         background(MenuAnchorView(anchor: anchors.anchor(chip)))
     }
 
-    /// Tells the list around the card that a chip has the keyboard, so that Space and
-    /// Return there are the chip's. A debug build also shows the debug script which chip
-    /// it is and which popover of the card is open.
+    /// Tells the list around the card that a chip or the row of a file has the keyboard, so that
+    /// Space and Return there are theirs. A debug build also shows the debug script which chip
+    /// or file it is and which popover of the card is open.
     @MainActor
-    func reportsCard(_ card: String, chip: CardChip?, popover: String?) -> some View {
-        onChange(of: chip) { _, new in
-            if new == nil { Keyboard.chipCards.remove(card) } else { Keyboard.chipCards.insert(card) }
-            #if DEBUG
-            DebugScript.chip = new.map { "\($0)" }
-            #endif
+    func reportsCard(_ card: String, chip: CardChip?, file: String? = nil, popover: String?) -> some View {
+        onChange(of: chip != nil || file != nil) { _, held in
+            if held { Keyboard.cards.insert(card) } else { Keyboard.cards.remove(card) }
         }
+        #if DEBUG
+        .onChange(of: chip) { _, new in DebugScript.chip = new.map { "\($0)" } }
+        .onChange(of: file) { _, new in DebugScript.file = new }
+        #endif
         .onChange(of: popover) { _, new in
             #if DEBUG
             DebugScript.popover = new
             #endif
         }
-        .onDisappear { Keyboard.chipCards.remove(card) }
+        .onDisappear {
+            Keyboard.cards.remove(card)
+            #if DEBUG
+            if file != nil { DebugScript.file = nil }
+            #endif
+        }
     }
 }
