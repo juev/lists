@@ -80,6 +80,15 @@ header input { border: 1px solid var(--line); border-radius: 8px; padding: 6px 1
 #login button { background: var(--accent); color: #fff; border-color: var(--accent); }
 #toast { position: fixed; left: 50%; bottom: 84px; transform: translateX(-50%); background: var(--text); color: var(--bg); padding: 8px 14px; border-radius: 10px; font-size: 14px; display: none; max-width: 90vw; }
 #shade { display: none; }
+.file { align-items: center; }
+.thumb { width: 40px; height: 40px; object-fit: cover; border-radius: 6px; cursor: zoom-in; background: var(--line); }
+#viewer { position: fixed; inset: 0; z-index: 5; background: rgba(0,0,0,.92); display: flex; flex-direction: column; }
+#viewer .bar { display: flex; align-items: center; gap: 16px; padding: calc(10px + env(safe-area-inset-top)) 16px 10px; color: #fff; }
+#viewer .bar .name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#viewer .bar a, #viewer .bar button { color: #fff; font-size: 14px; }
+#viewer .body { flex: 1; min-height: 0; display: grid; place-items: center; padding: 0 12px calc(12px + env(safe-area-inset-bottom)); }
+#viewer img { max-width: 100%; max-height: 100%; object-fit: contain; }
+#viewer iframe { width: 100%; height: 100%; border: 0; background: #fff; }
 @media (max-width: 720px) {
   #side { position: fixed; z-index: 3; top: 0; bottom: 0; left: 0; transform: translateX(-102%); transition: transform .18s; width: 82vw; max-width: 320px; padding-top: calc(12px + env(safe-area-inset-top)); }
   #app.drawer #side { transform: none; }
@@ -111,7 +120,7 @@ const RU = {
   "Password": "Пароль", "Sign in": "Войти", "Wrong password": "Неверный пароль", "Sign out": "Выйти", "All done for today": "На сегодня всё",
   "No tasks": "Задач нет", "Nothing found": "Ничего не найдено", "Synced": "Синхронизировано", "Sync failed": "Синхронизация не удалась",
   "waiting": "ожидает отправки", "Deleted": "Удалено", "Undo": "Отменить", "Task completed": "Выполнено", "Moved to the next occurrence": "Перенесено на следующий повтор",
-  "downloads on the next sync": "загрузится при синхронизации", "from": "с", "Delete list": "Удалить список", "Delete this list and move its tasks to the trash?": "Удалить список и отправить его задачи в корзину?",
+  "downloads on the next sync": "загрузится при синхронизации", "Download": "Скачать", "Close": "Закрыть", "from": "с", "Delete list": "Удалить список", "Delete this list and move its tasks to the trash?": "Удалить список и отправить его задачи в корзину?",
   "Sort": "Сортировка", "Manually": "Вручную", "By due date": "По сроку", "By priority": "По приоритету", "By title": "По названию", "Rename": "Переименовать", "time": "время",
   "Sign in with single sign-on": "Войти через единый вход", "Import…": "Импорт…", "tasks": "задач", "attachments": "вложений",
   "Projects": "Проекты", "Filters": "Фильтры", "New filter": "Новый фильтр", "Make it a project": "Сделать проектом", "Turn back into a task": "Сделать обычной задачей",
@@ -131,6 +140,19 @@ const $ = (tag, props = {}, ...kids) => {
   for (const kid of kids.flat(Infinity)) if (kid != null && kid !== false) el.append(kid);
   return el;
 };
+
+// An image or a PDF over the page (R56). The file comes from `/api/file` with `view`,
+// which answers in place only for the types the server allows.
+function preview(a, href) {
+  const close = () => { box.remove(); document.removeEventListener("keydown", key); };
+  const key = e => { if (e.key === "Escape") close(); };
+  const body = a.preview === "image" ? $("img", { src: href + "&view=1", alt: a.name }) : $("iframe", { src: href + "&view=1", title: a.name });
+  const box = $("div", { id: "viewer", role: "dialog", "aria-label": a.name, onclick: e => { if (e.target === box || e.target.className === "body") close(); } },
+    $("div", { class: "bar" }, $("span", { class: "name" }, a.name), $("a", { href }, t("Download")), $("button", { onclick: close }, t("Close"))),
+    $("div", { class: "body" }, body));
+  document.addEventListener("keydown", key);
+  document.body.append(box);
+}
 const state = { filterEdit: null, scope: "today", search: "", overview: null, tasks: [], open: new Set(), details: {}, drawer: false, typing: false };
 const root = document.getElementById("root");
 
@@ -341,9 +363,15 @@ function editor(d) {
         $("span", { class: "chip" }, prio), $("span", { class: "chip" }, repeat),
         x.tags.map(g => $("button", { class: "chip", title: t("Delete"), onclick: () => act("removeTag", { id, value: g }) }, `#${g} ×`)),
         $("span", { class: "chip" }, tag)),
-      d.attachments.map(a => $("div", { class: "meta" },
-        a.present ? $("a", { class: "link", href: `/api/file?task=${encodeURIComponent(id)}&id=${encodeURIComponent(a.id)}` }, a.name) : $("span", {}, `${a.name} — ${t("downloads on the next sync")}`),
-        $("button", { class: "link danger", onclick: () => act("removeAttachment", { id: a.id }) }, "×"))),
+      d.attachments.map(a => {
+        const href = `/api/file?task=${encodeURIComponent(id)}&id=${encodeURIComponent(a.id)}`;
+        // The server names what may be shown in place (R56); the rest is a plain download.
+        const show = a.present && a.preview ? e => { e.preventDefault(); preview(a, href); } : null;
+        return $("div", { class: "meta file" },
+          show && a.preview === "image" ? $("img", { class: "thumb", src: href + "&view=1", alt: "", loading: "lazy", onclick: show }) : null,
+          a.present ? $("a", { class: "link", href, onclick: show }, a.name) : $("span", {}, `${a.name} — ${t("downloads on the next sync")}`),
+          $("button", { class: "link danger", onclick: () => act("removeAttachment", { id: a.id }) }, "×"));
+      }),
       $("div", { class: "chips" },
         $("button", { class: "link", onclick: () => file.click() }, t("Attach file")), file, $("span", { class: "chip" }, move),
         $("button", { class: "link", onclick: () => act("duplicate", { id }) }, t("Duplicate")),

@@ -289,6 +289,85 @@ fn attachments_upload_and_download_as_files() {
     assert_eq!(file.into_string().unwrap(), "<script>alert(1)</script>");
 }
 
+fn upload(web: &Web, task: &str, name: &str, data: &[u8]) -> Value {
+    ureq::post(&format!("{}/api/upload?task={task}&name={name}", web.base))
+        .set("X-Lists", "1")
+        .send_bytes(data)
+        .unwrap()
+        .into_json()
+        .unwrap()
+}
+
+#[test]
+fn r56_only_listed_types_are_shown_in_place() {
+    let web = web(None);
+    let task = call(&web, "", json!({ "op": "quickAdd", "text": "с картинкой" }));
+    let id = task["id"].as_str().unwrap();
+    let file = |a: &Value, view: bool| {
+        ureq::get(&format!(
+            "{}/api/file?task={id}&id={}{}",
+            web.base,
+            a["id"].as_str().unwrap(),
+            if view { "&view=1" } else { "" }
+        ))
+        .call()
+        .unwrap()
+    };
+
+    for (name, mime, kind) in [
+        ("photo.png", "image/png", "image"),
+        ("photo.JPG", "image/jpeg", "image"),
+        ("anim.gif", "image/gif", "image"),
+        ("pic.webp", "image/webp", "image"),
+        ("paper.pdf", "application/pdf", "pdf"),
+    ] {
+        let a = upload(&web, id, name, b"content");
+        assert_eq!(a["preview"], kind, "{name}");
+        let shown = file(&a, true);
+        assert_eq!(shown.header("Content-Type"), Some(mime), "{name}");
+        assert!(
+            shown.header("Content-Disposition").unwrap().starts_with("inline"),
+            "{name}"
+        );
+        assert_eq!(shown.header("X-Content-Type-Options"), Some("nosniff"), "{name}");
+        let policy = shown.header("Content-Security-Policy").unwrap();
+        assert!(policy.contains("default-src 'none'"), "{name}: {policy}");
+        // Without the request to show it, the same file is a download.
+        let saved = file(&a, false);
+        assert_eq!(saved.header("Content-Type"), Some("application/octet-stream"), "{name}");
+        assert!(
+            saved.header("Content-Disposition").unwrap().starts_with("attachment"),
+            "{name}"
+        );
+    }
+    let image = upload(&web, id, "safe.png", b"content");
+    assert!(file(&image, true)
+        .header("Content-Security-Policy")
+        .unwrap()
+        .contains("sandbox"));
+
+    // What can carry a script is downloaded even when the page asks to show it.
+    for name in [
+        "page.html",
+        "page.htm",
+        "drawing.svg",
+        "notes.txt",
+        "photo.heic",
+        "archive.zip",
+        "noext",
+    ] {
+        let a = upload(&web, id, name, b"<script>alert(1)</script>");
+        assert_eq!(a["preview"], Value::Null, "{name}");
+        let got = file(&a, true);
+        assert_eq!(got.header("Content-Type"), Some("application/octet-stream"), "{name}");
+        assert!(
+            got.header("Content-Disposition").unwrap().starts_with("attachment"),
+            "{name}"
+        );
+        assert_eq!(got.header("Content-Security-Policy"), None, "{name}");
+    }
+}
+
 #[test]
 fn projects_and_saved_filters_over_the_api() {
     let web = web(None);
