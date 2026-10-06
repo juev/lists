@@ -929,6 +929,96 @@ fn c18_the_calendar_home_is_looked_up_once() {
         .contains("SUMMARY:переименована"));
 }
 
+/// A device that finds the calendar home through `.home`, so that it can move.
+fn device_at_root(dav: &Dav) -> Device {
+    let d = device();
+    d.set_sync_config(SyncConfig::CalDav {
+        url: dav.url.trim_end_matches("/cal").to_string(),
+        user: "user".into(),
+    })
+    .unwrap();
+    d.set_sync_password(Some("secret".into()));
+    d
+}
+
+fn move_home(dav: &Dav) -> PathBuf {
+    let moved = dav.root.path().join("moved");
+    std::fs::rename(dav.home(), &moved).unwrap();
+    std::fs::write(dav.root.path().join(".home"), "/moved/").unwrap();
+    moved
+}
+
+#[test]
+fn c24_calendar_that_moved_to_another_address_is_the_same_list() {
+    let dav = start();
+    std::fs::write(dav.root.path().join(".home"), "/cal/").unwrap();
+    let (a, b) = (device_at_root(&dav), device_at_root(&dav));
+    let work = a.create_list("Работа".into()).unwrap();
+    a.set_list_sort(work.id.clone(), SortMode::Due).unwrap();
+    let t = a
+        .create_task(NewTask {
+            title: "отчёт".into(),
+            list_id: Some(work.id.clone()),
+            ..NewTask::default()
+        })
+        .unwrap();
+    settle(&a, &b);
+    b.sync_now().unwrap();
+
+    let moved = move_home(&dav);
+    settle(&a, &b);
+    b.sync_now().unwrap();
+
+    for d in [&a, &b] {
+        let got = d.list(work.id.clone()).expect("the list is still there");
+        assert_eq!((got.name.as_str(), got.sort), ("Работа", SortMode::Due));
+        assert_eq!(view(d, Scope::List { id: work.id.clone() }), ["отчёт"]);
+        assert!(view(d, Scope::Inbox).is_empty());
+    }
+    assert!(moved.join(&work.id).join(format!("{}.ics", t.id)).exists());
+    assert_eq!(a.sync_now().unwrap(), SyncReport::default(), "C16 holds after the move");
+}
+
+#[test]
+fn c24_moved_calendar_of_another_client_keeps_its_tasks() {
+    let dav = start();
+    std::fs::write(dav.root.path().join(".home"), "/cal/").unwrap();
+    let a = device_at_root(&dav);
+    let dir = dav.home().join("personal");
+    std::fs::create_dir(&dir).unwrap();
+    std::fs::write(dir.join(".props"), "calendar=1\nname=Personal\n").unwrap();
+    std::fs::write(
+        dir.join("x.ics"),
+        "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VTODO\r\nUID:x-1\r\nSUMMARY:Existing task\r\nEND:VTODO\r\nEND:VCALENDAR\r\n",
+    )
+    .unwrap();
+    a.sync_now().unwrap();
+    a.sync_now().unwrap();
+
+    let moved = move_home(&dav);
+    a.sync_now().unwrap();
+    a.sync_now().unwrap();
+
+    let personal: Vec<TaskList> = a
+        .lists()
+        .unwrap()
+        .into_iter()
+        .filter(|l| l.name == "Personal")
+        .collect();
+    assert_eq!(personal.len(), 1, "{personal:?}");
+    assert_eq!(
+        view(
+            &a,
+            Scope::List {
+                id: personal[0].id.clone()
+            }
+        ),
+        ["Existing task"]
+    );
+    assert!(view(&a, Scope::Inbox).is_empty());
+    assert!(moved.join("personal/x.ics").exists());
+}
+
 /// Two calendars with one task each, both devices in step.
 fn two_calendars(dav: &Dav) -> (Device, Device, TaskItem, TaskItem, TaskList) {
     let (a, b) = pair(dav);

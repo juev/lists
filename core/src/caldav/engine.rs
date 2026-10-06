@@ -504,7 +504,9 @@ fn sync(store: &Store, client: &Client, calendars: Vec<Calendar>) -> Result<Sync
     for (href, list_id, _) in &known_calendars {
         if !seen_calendars.contains(href) {
             // The calendar was removed on the server: the list goes with it.
-            if list_id != INBOX_ID {
+            // C24: unless the list has a calendar under another address, which
+            // is the same calendar moved.
+            if list_id != INBOX_ID && !calendar_of.contains_key(list_id) {
                 store.write(|w| w.list(list_id, "deleted", json!(true)))?;
                 report.pulled += 1;
             }
