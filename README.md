@@ -5,7 +5,7 @@
 
 A local-first to-do list with native apps for macOS and Android, a self-hosted web interface, and sync through storage you already own: a WebDAV folder, a CalDAV server or a plain directory. No account, no service to subscribe to.
 
-Lists covers the part of 2Do that a single person uses every day: lists, dates, priorities, tags, repeats, attachments and subtasks that are full tasks. Everything works offline; edits made on two devices to different fields of the same task are both kept.
+Lists covers the part of 2Do that a single person uses every day: lists, dates, priorities, tags, repeats, attachments, notes in Markdown and subtasks that are full tasks. Everything works offline; edits made on two devices to different fields of the same task are both kept.
 
 The interface is in English with a Russian localization and follows the system language.
 
