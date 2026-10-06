@@ -61,6 +61,12 @@ header input { border: 1px solid var(--line); border-radius: 8px; padding: 6px 1
 .edit > * { min-width: 0; }
 .edit input[type=text], .edit textarea { width: 100%; border: 0; outline: 0; background: transparent; resize: vertical; }
 .edit .name { font-weight: 600; }
+.md { white-space: pre-wrap; overflow-wrap: anywhere; cursor: text; min-height: 1.4em; }
+.md .h1 { font-size: 1.5em; font-weight: 700; } .md .h2 { font-size: 1.3em; font-weight: 700; } .md .h3 { font-size: 1.15em; font-weight: 700; } .md .h4 { font-weight: 700; }
+.md .b { font-weight: 700; } .md .i { font-style: italic; } .md .s { text-decoration: line-through; }
+.md .code, .md .pre, .md .row { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .95em; }
+.md .code, .md .pre { background: var(--line); border-radius: 3px; }
+.md .dim { opacity: .5; font-style: normal; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-width: 0; }
 .chip { border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; font-size: 14px; background: var(--bg); display: inline-flex; gap: 6px; align-items: center; }
 .chip input, .chip select { border: 0; background: transparent; outline: 0; max-width: 46vw; }
@@ -251,13 +257,68 @@ function moment(label, value, op, id, withTime) {
   return $("label", { class: "chip" + (op === "setDue" && value && overdue(value) ? " bad" : "") }, label, date, (withTime || value) ? time : null);
 }
 
+// A note shown as Markdown (R53) from the ranges the server sends with it: what
+// is styled, what is left out and what is replaced. Every piece of the note goes
+// into a text node; the only attribute taken from it is the address of a link,
+// and that only with a web or a mail scheme.
+function markdown(text, spans) {
+  const n = text.length, drop = new Array(n).fill(false), swap = new Array(n).fill(null);
+  const marks = Array.from({ length: n }, () => []), href = new Array(n).fill(null);
+  const mark = (from, to, name) => { for (let i = from; i < to; i++) marks[i].push(name); };
+  for (const [start, end, kind, detail] of spans || []) {
+    if (!(start >= 0 && start < end && end <= n)) continue;
+    if (kind === "heading") mark(start, end, "h" + Math.min(4, detail));
+    else if (kind === "strong") mark(start, end, "b");
+    else if (kind === "emphasis" || kind === "quote") mark(start, end, "i");
+    else if (kind === "strike") mark(start, end, "s");
+    else if (kind === "code") mark(start, end, "code");
+    else if (kind === "codeBlock") mark(start, end, "pre");
+    else if (kind === "tableRow") mark(start, end, "row");
+    else if (kind === "link") { if (/^(https?:\/\/|mailto:)/i.test(detail)) for (let i = start; i < end; i++) href[i] = detail; }
+    else if (kind === "marker") { if (!detail && end - start === 1) swap[start] = "•"; }
+    else if (kind === "quoteMarker") { swap[start] = "▎"; mark(start, start + 1, "dim"); }
+    else if (kind === "checkbox" && end - start === 3) { swap[start] = detail ? "☑" : "☐"; drop[start + 1] = drop[start + 2] = true; }
+    else if (kind === "rule") { for (let i = start; i < end; i++) swap[i] = "─"; mark(start, end, "dim"); }
+    else if (kind === "markup") {
+      for (let i = start; i < end; i++) drop[i] = true;
+      // Markup that is a whole line, a code fence, leaves no empty line behind.
+      const whole = (start === 0 || text[start - 1] === "\n") && (end === n || text[end] === "\n");
+      if (whole && end < n) drop[end] = true; else if (whole && start > 0) drop[start - 1] = true;
+    }
+  }
+  const out = [];
+  let run = "", key = null, cls = "", url = null;
+  const flush = () => {
+    if (run) out.push(url ? $("a", { href: url, target: "_blank", rel: "noopener noreferrer", class: cls }, run) : cls ? $("span", { class: cls }, run) : run);
+    run = "";
+  };
+  for (let i = 0; i < n; i++) {
+    if (drop[i]) continue;
+    const c = marks[i].join(" "), k = c + "\u0000" + (href[i] || "");
+    if (k !== key) { flush(); key = k; cls = c; url = href[i]; }
+    run += swap[i] ?? text[i];
+  }
+  flush();
+  return out;
+}
+
 function editor(d) {
   const x = d.task, id = x.id, locked = x.deleted || x.log;
-  if (locked) return $("div", { class: "edit" }, x.notes ? $("div", {}, x.notes) : null,
+  if (locked) return $("div", { class: "edit" }, x.notes ? $("div", { class: "md" }, markdown(x.notes, d.markdown)) : null,
     x.deleted ? $("button", { class: "link", onclick: () => act("restore", { id }) }, t("Restore")) : null);
   const title = commit($("input", { type: "text", class: "name", value: x.title, placeholder: t("Title") }), "setTitle", id, x.title);
   const notes = commit($("textarea", { rows: Math.min(8, Math.max(1, x.notes.split("\n").length)), placeholder: t("Notes") }), "setNotes", id, x.notes);
   notes.value = x.notes;
+  // A note that is not being edited is shown as Markdown; a click on it opens the text.
+  let note = notes;
+  if (x.notes) {
+    const view = $("div", { class: "md", tabindex: 0, role: "textbox", "aria-label": t("Notes") }, markdown(x.notes, d.markdown));
+    const edit = e => { if (e.target.closest("a")) return; e.preventDefault(); view.replaceWith(notes); notes.focus(); };
+    view.addEventListener("click", edit);
+    view.addEventListener("keydown", e => { if (e.key === "Enter") edit(e); });
+    notes.addEventListener("blur", () => { if (notes.value.trim() === x.notes) notes.replaceWith(view); });
+    note = view;
+  }
   const prio = $("select", { "aria-label": t("Priority"), onchange: e => act("setPriority", { id, value: Number(e.target.value) }) },
     ["No priority", "Low", "Medium", "High"].map((name, i) => $("option", { value: i, selected: x.priority === i }, t(name))));
   const pi = presetIndex(x.repeat);
@@ -274,7 +335,7 @@ function editor(d) {
   } });
   const sub = $("input", { type: "text", placeholder: t("Subtask"), onkeydown: e => { if (e.key === "Enter" && e.target.value.trim()) act("addSubtask", { parent: id, title: e.target.value.trim() }); } });
   return $("div", {},
-    $("div", { class: "edit" }, title, notes,
+    $("div", { class: "edit" }, title, note,
       $("div", { class: "chips" },
         moment(t("Due"), x.due, "setDue", id), moment(t("Start"), x.start, "setStart", id), moment(t("Reminder"), x.remind, "setRemind", id, true),
         $("span", { class: "chip" }, prio), $("span", { class: "chip" }, repeat),

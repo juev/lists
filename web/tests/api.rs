@@ -238,6 +238,31 @@ fn a_task_from_quick_entry_to_the_trash() {
 }
 
 #[test]
+fn r53_a_note_comes_with_the_ranges_to_show_it_as_markdown() {
+    let web = web(Some("secret"));
+    let cookie = login(&web, "secret").unwrap();
+    let task = call(
+        &web,
+        &cookie,
+        json!({ "op": "quickAdd", "text": "заметка", "scope": "inbox" }),
+    );
+    let id = task["id"].as_str().unwrap().to_string();
+    let notes = "😀 **да** [x](javascript:alert(1)) [сайт](https://example.org)\n- [x] хлеб";
+    call(&web, &cookie, json!({ "op": "setNotes", "id": id, "value": notes }));
+
+    let detail = get(&web, &cookie, &format!("/api/task?id={id}"));
+    // The note itself is served as it was typed.
+    assert_eq!(detail["task"]["notes"], notes);
+    let spans = detail["markdown"].as_array().unwrap();
+    let of = |kind: &str| spans.iter().filter(|s| s[2] == kind).cloned().collect::<Vec<_>>();
+    // Offsets count UTF-16 units, the way the page indexes the text.
+    assert_eq!(of("strong"), [json!([5, 7, "strong", null])]);
+    assert_eq!(of("checkbox"), [json!([65, 68, "checkbox", true])]);
+    // Only a web or a mail address is ever a link.
+    assert_eq!(of("link"), [json!([36, 40, "link", "https://example.org"])]);
+}
+
+#[test]
 fn attachments_upload_and_download_as_files() {
     let web = web(None);
     let task = call(&web, "", json!({ "op": "quickAdd", "text": "с файлом" }));
