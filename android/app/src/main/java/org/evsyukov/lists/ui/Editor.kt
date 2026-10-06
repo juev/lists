@@ -1,6 +1,8 @@
 package org.evsyukov.lists.ui
 
+import android.app.Activity
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
@@ -83,6 +85,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import org.evsyukov.lists.Push
 import org.evsyukov.lists.R
 import org.evsyukov.lists.str
 import org.evsyukov.lists.ordinal
@@ -693,6 +696,13 @@ fun ListDialog(list: TaskList?, model: MainViewModel, onDismiss: () -> Unit) {
     )
 }
 
+/** The activity a composable is shown in, when there is one. */
+private tailrec fun Context.activity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.activity()
+    else -> null
+}
+
 @Composable
 fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss: () -> Unit) {
     val state by model.state.collectAsStateWithLifecycle()
@@ -706,6 +716,7 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
     val context = LocalContext.current
     var password by remember { mutableStateOf(if (enabled) Secrets.load(context).orEmpty() else "") }
     var error by remember { mutableStateOf<String?>(null) }
+    var push by remember { mutableStateOf(Push.enabled(context)) }
     var notifyOn by remember { mutableStateOf(NotifyPrefs.enabled(context)) }
     var leads by remember { mutableStateOf(NotifyPrefs.leads(context)) }
     var newTaskList by remember { mutableStateOf(EntryPrefs.newTaskList(context)) }
@@ -776,6 +787,20 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 8.dp),
                     )
+                    val noDistributor = str(R.string.push_no_distributor)
+                    SwitchRow(str(R.string.push_switch), push) { on ->
+                        val activity = context.activity()
+                        if (!on) {
+                            Push.disable(context)
+                            push = false
+                        } else if (activity != null) {
+                            Push.enable(activity) { found ->
+                                push = found
+                                error = if (found) null else noDistributor
+                            }
+                        }
+                    }
+                    Text(str(R.string.push_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 } else {
                     Text(str(R.string.local_only), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }

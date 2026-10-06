@@ -99,13 +99,16 @@ Open Settings → Sync and choose the kind:
 - **CalDAV**: address, user name and password. Lists become calendars, and tasks stay visible to other CalDAV apps.
 - **Folder** (macOS and the web server): a directory, for example one that another tool keeps in sync. Android does not offer it. Changes that the other tool brings into the folder are picked up within a few seconds.
 
-Use the same kind and the same address on every device. After that sync needs no attention: a small icon shows the state, and an error does not block work. On Android sync also runs in the background every 15 minutes.
+Use the same kind and the same address on every device. After that sync needs no attention: a small icon shows the state, and an error does not block work. On Android sync also runs in the background every 15 minutes, and a change made on the phone is sent even if the app is closed right after.
 
 ### Faster delivery
 
-Storage cannot tell a device that something changed, so an edit made elsewhere waits for the next run: up to a minute in an open app. To shorten the wait, give the Mac app (Settings → Sync → Push server) and the web server (`LISTS_PUSH_SERVER`) the address of an [ntfy](https://ntfy.sh) server, the public `https://ntfy.sh` or your own. A device that uploads a change then asks the others to sync, and they do so within seconds.
+Storage cannot tell a device that something changed, so an edit made elsewhere waits for the next run: up to a minute in an open app. To shorten the wait, a device that uploads a change can ask the others to sync, and they do so within seconds.
 
-The request carries no data, only "sync now"; tasks still travel through your storage. Each device listens on a random topic name, which is the only protection: the ntfy server can see when you edit, not what. Devices may use different servers, as long as each can reach the others'. Android does not listen yet; it sends requests like the rest.
+- **Mac app and web server**: give them the address of an [ntfy](https://ntfy.sh) server, the public `https://ntfy.sh` or your own, in Settings → Sync → Push server and in `LISTS_PUSH_SERVER`.
+- **Android**: install a [UnifiedPush](https://unifiedpush.org) app such as ntfy, open it once, then turn on Settings → Sync → "Sync at once after a change elsewhere". This works with the app closed too.
+
+The request carries no data, only "sync now"; tasks still travel through your storage. Each device listens on a random topic name, which is the only protection: the ntfy server can see when you edit, not what. Devices may use different servers, as long as each can reach the others'.
 
 Edits are saved locally at once. Two devices that change different fields of one task both keep their change; when they change the same field, the later edit wins. How the two kinds compare is in the [README](../README.md#sync).
 
