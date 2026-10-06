@@ -337,10 +337,21 @@ final class AppModel {
             return try store.task(id: created.id)
         }
         if let task {
+            attach(draft.files, to: task.id)
             noteUsedList(task.listId)
             if allTasks.contains(where: { $0.id == task.id }) { selection = task.id }
         }
         return task
+    }
+
+    /// Copies the files into the task; one that cannot be read is reported and the rest go on.
+    func attach(_ urls: [URL], to taskId: String) {
+        for url in urls {
+            let scoped = url.startAccessingSecurityScopedResource()
+            perform { _ = try $0.addAttachment(taskId: taskId, path: url.path, name: nil) }
+            if scoped { url.stopAccessingSecurityScopedResource() }
+            IncomingFiles.discard(url)
+        }
     }
 
     func showSubtasks(_ id: String) {

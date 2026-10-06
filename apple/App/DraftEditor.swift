@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// A task that is being typed and does not exist yet.
@@ -14,6 +15,8 @@ struct TaskDraft: Equatable {
     var listId = "inbox"
     /// Set when the task is typed inside a project: it becomes a subtask of it.
     var parentId: String?
+    /// Attached once the task exists.
+    var files: [URL] = []
 
     var isBlank: Bool { title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 }
@@ -62,6 +65,7 @@ struct DraftEditor: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .font(AppFont.style(.body))
                 chips
+                if !draft.files.isEmpty { files }
             }
             .padding(.leading, 30)
         }
@@ -70,6 +74,7 @@ struct DraftEditor: View {
             Group {
                 Button("") { popover = .start }.keyboardShortcut("s", modifiers: .command)
                 Button("") { popover = .due }.keyboardShortcut("d", modifiers: .command)
+                Button("", action: paste).keyboardShortcut("v", modifiers: .command)
             }
             .opacity(0)
             .accessibilityHidden(true)
@@ -78,11 +83,54 @@ struct DraftEditor: View {
         .onExitCommand(perform: close)
         .onChange(of: draft.notes) { _, _ in onResize() }
         .onChange(of: draft.tags) { _, _ in onResize() }
+        .onChange(of: draft.files) { _, _ in onResize() }
+        .dropDestination(for: URL.self) { urls, _ in
+            add(urls.filter(\.isFileURL))
+            return true
+        }
     }
 
     private func close() {
-        if !draft.isBlank { model.save(draft) }
+        if draft.isBlank {
+            draft.files.forEach(IncomingFiles.discard)
+        } else {
+            model.save(draft)
+        }
         onClose()
+    }
+
+    /// ⌘V with files or an image attaches them; with text it pastes as usual.
+    private func paste() {
+        let pasted = IncomingFiles.pasted()
+        if pasted.isEmpty {
+            NSApp.sendAction(#selector(NSText.paste(_:)), to: nil, from: nil)
+        } else {
+            add(pasted)
+        }
+    }
+
+    private func add(_ urls: [URL]) {
+        draft.files.append(contentsOf: urls.filter { !draft.files.contains($0) })
+    }
+
+    private var files: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(draft.files, id: \.self) { url in
+                HStack(spacing: 6) {
+                    Image(systemName: "paperclip").foregroundStyle(.secondary)
+                    Text(url.lastPathComponent).lineLimit(1).truncationMode(.middle)
+                    Button {
+                        draft.files.removeAll { $0 == url }
+                        IncomingFiles.discard(url)
+                    } label: {
+                        Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary)
+                    }
+                    .buttonStyle(.plain)
+                    .help(L("Remove attachment"))
+                }
+                .font(AppFont.style(.callout))
+            }
+        }
     }
 
     private var chips: some View {
@@ -148,6 +196,10 @@ struct DraftEditor: View {
                 .fixedSize()
                 .help(L("List"))
             }
+
+            Button { add(IncomingFiles.pick()) } label: { Chip(symbol: "paperclip", text: "") }
+                .buttonStyle(.plain)
+                .help(L("File or image"))
         }
     }
 

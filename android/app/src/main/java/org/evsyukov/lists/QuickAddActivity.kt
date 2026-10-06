@@ -8,7 +8,9 @@ import android.os.Bundle
 import android.service.quicksettings.TileService
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -93,11 +95,17 @@ class QuickAddActivity : ComponentActivity() {
                 var listId by remember { mutableStateOf(EntryPrefs.defaultListId(this, lists)) }
                 var listMenu by remember { mutableStateOf(false) }
                 var dialog by remember { mutableStateOf<String?>(null) }
+                // Files picked here join the ones that came through Share.
+                var picked by remember { mutableStateOf(emptyList<Uri>()) }
+                val pickFiles = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
+                    picked = (picked + uris).distinct()
+                }
+                val files = shared.files + picked
                 // Typed text is parsed for dates and tags, unless that is turned off; shared text is taken as is.
                 val parse = shared.title.isEmpty() && EntryPrefs.parse(this)
                 val focus = remember { FocusRequester() }
                 LaunchedEffect(Unit) { focus.requestFocus() }
-                fun submit() = save(Entry(text, notes, start, due, priority, listId, parse), shared)
+                fun submit() = save(Entry(text, notes, start, due, priority, listId, parse), files)
 
                 // Tapping outside the card closes the window, as with any dialog.
                 Box(
@@ -140,9 +148,10 @@ class QuickAddActivity : ComponentActivity() {
                                 AssistChip(onClick = { dialog = "start" }, label = { Text(start?.let { str(R.string.start_at, dateLabel(it).lowercase()) } ?: str(R.string.start)) })
                                 AssistChip(onClick = { dialog = "due" }, label = { Text(due?.let { str(R.string.due_at, dateLabel(it).lowercase()) } ?: str(R.string.due)) })
                                 AssistChip(onClick = { dialog = "priority" }, label = { Text(if (priority == Priority.NONE) str(R.string.priority) else priority.title()) })
+                                AssistChip(onClick = { pickFiles.launch("*/*") }, label = { Text(str(R.string.file_or_image)) })
                             }
                             val extra = listOfNotNull(
-                                shared.files.size.takeIf { it > 0 }?.let { str(R.string.files_count, it) },
+                                files.size.takeIf { it > 0 }?.let { str(R.string.files_count, it) },
                             ).joinToString(" · ")
                             if (extra.isNotEmpty()) {
                                 Text(
@@ -211,7 +220,7 @@ class QuickAddActivity : ComponentActivity() {
         (if (Build.VERSION.SDK_INT >= 33) intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM, Uri::class.java)
         else intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM)).orEmpty()
 
-    private fun save(entry: Entry, shared: Shared) {
+    private fun save(entry: Entry, files: List<Uri>) {
         val line = entry.title.trim()
         if (line.isEmpty()) return
         lifecycleScope.launch {
@@ -230,7 +239,7 @@ class QuickAddActivity : ComponentActivity() {
                     entry.due?.let { store.setDue(task.id, it) }
                     if (entry.priority != Priority.NONE) store.setPriority(task.id, entry.priority)
                     EntryPrefs.noteUsedList(applicationContext, store.task(task.id).listId)
-                    attach(applicationContext, store, task.id, shared.files)
+                    attach(applicationContext, store, task.id, files)
                 }
             }
             Repo.changed()

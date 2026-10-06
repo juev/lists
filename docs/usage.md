@@ -32,7 +32,9 @@ Only the title is required. A task can also have notes, a start date, a due date
 
 On macOS a task opens in place in the list as an outlined card; on Android it opens as a bottom sheet over the list. The card always shows the start date and the due date. Other empty fields take no room: they are added from the "+" button.
 
-On macOS ⌘N, or the "+" button in the toolbar, opens the card of a new task right in the list with every field at hand: title, notes, start date, due date, priority, tags and list. Return in the title creates the task. Esc creates it when it has a title and drops an empty card.
+On macOS ⌘N, or the "+" button in the toolbar, opens the card of a new task right in the list with every field at hand: title, notes, start date, due date, priority, tags, list and files. Return in the title creates the task. Esc creates it when it has a title and drops an empty card.
+
+Files get into a card on macOS in three ways: the paperclip button, dropping them on the card, and ⌘V with files or an image on the clipboard. This works in the card of a new task, in the quick-entry window and in an open task. ⌘V with text on the clipboard pastes the text as usual.
 
 Return in the notes starts a new line and Esc finishes editing. Settings → New tasks can turn that around: Return finishes, ⌥Return starts a new line. ⌘S and ⌘D open the start date and the due date from anywhere in the card; the calendar takes the arrow keys, and Return confirms.
 
@@ -58,7 +60,7 @@ On Android the end date of a repeat cannot be set; the web interface offers the 
 
 ## Quick entry
 
-One line becomes a task. Recognized parts are removed from the title and shown as chips before saving. Nothing has to be typed as text, though: the quick-entry window carries the same fields as the task card, and a value set in a field wins over one read from the title. Recognition can be turned off in Settings; the title is then kept as typed.
+One line becomes a task. Recognized parts are removed from the title and shown as chips before saving. Nothing has to be typed as text, though: the quick-entry window carries the same fields as the task card, and a value set in a field wins over one read from the title. Recognition can be turned off in Settings; the title is then kept as typed. Files can be added there too: on Android the "File or image" chip picks any number of them.
 
 | Typed | Meaning |
 |---|---|
@@ -115,6 +117,7 @@ A reminder set on a task itself replaces the one derived from its due date. The 
 |---|---|
 | ⌘N | new task, as a card in the list |
 | ⌘S and ⌘D | start date and due date of the open card |
+| ⌘V | attach the files or the image on the clipboard to the open card |
 | ↑ ↓ | select |
 | Enter | open the selected task |
 | Space or ⌘Enter | complete |

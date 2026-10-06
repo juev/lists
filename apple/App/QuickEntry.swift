@@ -101,6 +101,8 @@ final class QuickEntryPanel: NSPanel {
         // moment; the panel goes away only when something else does.
         DispatchQueue.main.async { [weak self] in
             guard let self, self.isVisible, !self.isKeyWindow else { return }
+            // The open panel of "File or image" is not the user leaving either.
+            if NSApp.modalWindow != nil { return }
             if let key = NSApp.keyWindow, key.parent === self || self.childWindows?.contains(key) == true { return }
             self.close()
         }
