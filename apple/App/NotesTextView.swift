@@ -18,7 +18,7 @@ struct NotesTextView: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     func makeNSView(context: Context) -> NSTextView {
-        let view = NSTextView()
+        let view = PlainTextView()
         view.delegate = context.coordinator
         view.isRichText = false
         view.allowsUndo = true
@@ -57,6 +57,14 @@ struct NotesTextView: NSViewRepresentable {
         layout.ensureLayout(for: container)
         let line = layout.defaultLineHeight(for: view.font ?? font)
         return CGSize(width: width, height: max(ceil(layout.usedRect(for: container).height), ceil(line)))
+    }
+
+    /// Takes text only: a dropped file belongs to the card around the notes,
+    /// which attaches it, and not in the text as a path.
+    private final class PlainTextView: NSTextView {
+        override var acceptableDragTypes: [NSPasteboard.PasteboardType] {
+            super.acceptableDragTypes.filter { $0 != .fileURL && $0.rawValue != "NSFilenamesPboardType" }
+        }
     }
 
     final class Coordinator: NSObject, NSTextViewDelegate {

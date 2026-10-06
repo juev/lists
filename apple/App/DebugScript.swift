@@ -5,7 +5,9 @@ import AppKit
 /// outside process send them without the Accessibility permission. Debug
 /// builds only. `LISTS_DEBUG_SCRIPT` holds steps separated by `;`:
 /// `type:text`, `key:return`, `key:n+cmd`, `sleep:0.5`, `click:x,y`, `quick`, `settings`,
-/// `state` (prints who has the keyboard).
+/// `state` (prints who has the keyboard), `copyfiles:path,path` and `copyimage`
+/// (fill the pasteboard), `draft` (prints the files of the open new-task card),
+/// `open` (expands the selected task), `panel` (prints whether quick entry is on screen and what runs modally).
 @MainActor
 enum DebugScript {
     private static let codes: [String: (UInt16, String)] = [
@@ -52,6 +54,23 @@ enum DebugScript {
                             }
                         }
                     }
+                case "copyfiles":
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.writeObjects(argument.split(separator: ",").map { NSURL(fileURLWithPath: String($0)) })
+                case "copyimage":
+                    let image = NSImage(size: NSSize(width: 8, height: 8), flipped: false) { rect in
+                        NSColor.red.setFill()
+                        rect.fill()
+                        return true
+                    }
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setData(image.tiffRepresentation, forType: .tiff)
+                case "draft":
+                    print("debug: draft files \(AppModel.shared.draft?.files.map(\.lastPathComponent) ?? [])")
+                case "open":
+                    if let id = AppModel.shared.selection { AppModel.shared.toggleExpanded(id) }
+                case "panel":
+                    print("debug: quick entry \(QuickEntryPanel.shared.isVisible ? "shown" : "hidden"), modal \(NSApp.modalWindow.map { String(describing: type(of: $0)) } ?? "none")")
                 case "quick": QuickEntryPanel.shared.present()
                 case "settings": NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
                 case "state":

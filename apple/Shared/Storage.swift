@@ -18,6 +18,10 @@ enum Storage {
 
     static func directory() -> URL {
         let fm = FileManager.default
+        #if DEBUG
+        // Checks run against a throwaway directory, not the user's tasks.
+        if let dir = ProcessInfo.processInfo.environment["LISTS_DEBUG_DIR"] { return URL(fileURLWithPath: dir, isDirectory: true) }
+        #endif
         if let group = groupIdentifier,
            let container = fm.containerURL(forSecurityApplicationGroupIdentifier: group) {
             return container.appendingPathComponent("Lists", isDirectory: true)

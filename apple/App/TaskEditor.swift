@@ -34,6 +34,7 @@ struct TaskEditor: View {
             Group {
                 Button("") { popover = .start }.keyboardShortcut("s", modifiers: .command)
                 Button("") { popover = .due }.keyboardShortcut("d", modifiers: .command)
+                Button("", action: paste).keyboardShortcut("v", modifiers: .command)
             }
             .opacity(0)
             .accessibilityHidden(true)
@@ -86,12 +87,18 @@ struct TaskEditor: View {
     }
 
     private func attach(_ urls: [URL]) {
-        for url in urls {
-            let scoped = url.startAccessingSecurityScopedResource()
-            model.perform { _ = try $0.addAttachment(taskId: task.id, path: url.path, name: nil) }
-            if scoped { url.stopAccessingSecurityScopedResource() }
-        }
+        model.attach(urls, to: task.id)
         load()
+    }
+
+    /// ⌘V with files or an image attaches them; with text it pastes as usual.
+    private func paste() {
+        let pasted = IncomingFiles.pasted()
+        if pasted.isEmpty {
+            NSApp.sendAction(#selector(NSText.paste(_:)), to: nil, from: nil)
+        } else {
+            attach(pasted)
+        }
     }
 
     // MARK: Chips
