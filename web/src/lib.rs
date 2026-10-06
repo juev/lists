@@ -182,9 +182,25 @@ fn list_json(l: &TaskList) -> Value {
     })
 }
 
-fn attachment_json(a: &Attachment) -> Value {
-    json!({ "id": a.id, "name": a.name, "mime": a.mime, "size": a.size, "present": a.local_path.is_some() })
+/// What the page may show in place (R56): `image` or `pdf`, decided from a fixed list of types.
+/// SVG and HTML are not on it, so they can never run on this origin; everything else downloads.
+fn preview_kind(mime: &str) -> Option<&'static str> {
+    match mime {
+        "image/png" | "image/jpeg" | "image/gif" | "image/webp" => Some("image"),
+        "application/pdf" => Some("pdf"),
+        _ => None,
+    }
 }
+
+fn attachment_json(a: &Attachment) -> Value {
+    json!({
+        "id": a.id, "name": a.name, "mime": a.mime, "size": a.size, "present": a.local_path.is_some(),
+        "preview": preview_kind(&a.mime),
+    })
+}
+
+/// A file shown in place loads nothing and runs nothing, whatever it turns out to hold.
+const PREVIEW_POLICY: &str = "default-src 'none'; sandbox";
 
 /// `inbox`, `today`, `list:<id>`, `tag:<name>`, `search:<text>` …
 fn scope_from(text: &str) -> Option<Scope> {
@@ -559,12 +575,24 @@ impl App {
                     match found.as_ref().and_then(|a| a.local_path.as_ref().map(|p| (a, p))) {
                         Some((a, path)) => {
                             let data = std::fs::read(path).map_err(|e| AppError::Storage { msg: e.to_string() })?;
-                            // Never rendered in place: an uploaded HTML file must not run on this origin.
                             let name: String = a.name.chars().filter(|c| !c.is_control() && *c != '"').collect();
-                            reply(200, "application/octet-stream", data).with_header(header(
-                                "Content-Disposition",
-                                &format!("attachment; filename*=UTF-8''{}", encode_name(&name)),
-                            ))
+                            let name = encode_name(&name);
+                            let shown = query(&url, "view").and(preview_kind(&a.mime));
+                            match shown {
+                                // Shown in place only for the types of `preview_kind`, under the declared
+                                // type and nothing else: the browser may not guess another one.
+                                Some(_) => reply(200, &a.mime, data)
+                                    .with_header(header(
+                                        "Content-Disposition",
+                                        &format!("inline; filename*=UTF-8''{name}"),
+                                    ))
+                                    .with_header(header("Content-Security-Policy", PREVIEW_POLICY)),
+                                // Never rendered in place: an uploaded HTML file must not run on this origin.
+                                None => reply(200, "application/octet-stream", data).with_header(header(
+                                    "Content-Disposition",
+                                    &format!("attachment; filename*=UTF-8''{name}"),
+                                )),
+                            }
                         }
                         None => fail(404, "the file is not on the server yet"),
                     }
