@@ -209,7 +209,8 @@ fun MarkdownField(
     val scheme = MaterialTheme.colorScheme
     val colors = MarkdownColors(dim = scheme.outline, link = scheme.primary, code = scheme.surfaceVariant, heading = scheme.onSurface)
     val layout = remember(field.text) { markdownLayout(field.text) }
-    val view = remember(layout, field.selection, focused, colors) {
+    // Keyed by the text as well: two texts can have the same ranges, a word replaced by one of its length.
+    val view = remember(field.text, layout, field.selection, focused, colors) {
         MarkdownView(field.text, layout, field.selection.takeIf { focused }, colors)
     }
     val current by rememberUpdatedState(view)
