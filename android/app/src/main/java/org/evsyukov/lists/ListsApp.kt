@@ -176,7 +176,7 @@ object NotifyPrefs {
     )
 }
 
-/** The look of the app on this device (R59); not synced. */
+/** The look of the app on this device (R61); not synced. */
 object LookPrefs {
     val choices = listOf("system", "light", "dark")
 

@@ -58,7 +58,7 @@ final class AppModel {
     var fontDesign: String = UserDefaults.standard.string(forKey: AppFont.designKey) ?? "default" {
         didSet { UserDefaults.standard.set(fontDesign, forKey: AppFont.designKey) }
     }
-    /// "system", "light" or "dark" (R59); belongs to this Mac.
+    /// "system", "light" or "dark" (R61); belongs to this Mac.
     var appearance: String = UserDefaults.standard.string(forKey: "appearance") ?? "system" {
         didSet {
             UserDefaults.standard.set(appearance, forKey: "appearance")
