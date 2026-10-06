@@ -214,7 +214,7 @@
 "5th" = "5-й";
 "Enter the password in the sync settings." = "Введите пароль в настройках синхронизации.";
 "The password could not be saved in the system keychain: %@" = "Не удалось сохранить пароль в системной связке ключей: %@";
-"Lists become calendars and tasks stay visible to other CalDAV apps. Attachments up to 5 MB are synced." = "Списки станут календарями, а задачи будут видны другим CalDAV-приложениям. Вложения синхронизируются до 5 МБ.";
+"Lists become calendars and tasks stay visible to other CalDAV apps. Attachments up to 5 MB are synced, up to 20 MB per task." = "Списки станут календарями, а задачи будут видны другим CalDAV-приложениям. Вложения синхронизируются до 5 МБ, не больше 20 МБ на задачу.";
 "Project" = "Проект";
 "Filter" = "Фильтр";
 "Projects" = "Проекты";

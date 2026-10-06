@@ -628,7 +628,11 @@ impl Store {
                     "sync_ok",
                     &inner.now().format("%Y-%m-%dT%H:%M").to_string(),
                 )?;
-                db::meta_del(&inner.conn, "sync_error")?;
+                // A run that got through may still have left something unread (C23).
+                match crate::caldav::engine::unreadable(&inner.conn)? {
+                    Some(problem) => db::meta_set(&inner.conn, "sync_error", &problem)?,
+                    None => db::meta_del(&inner.conn, "sync_error")?,
+                }
             }
             Err(e) => db::meta_set(&inner.conn, "sync_error", &e.to_string())?,
         }

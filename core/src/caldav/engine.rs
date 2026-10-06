@@ -12,7 +12,7 @@ use rusqlite::{params, OptionalExtension};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
-use super::client::{Calendar, Client, Condition, Written};
+use super::client::{Calendar, Client, Condition, Object, Written};
 use super::ical;
 use super::map::{self, Registers, Remote, Standard, TaskState};
 use crate::db::{self, Change, Touched, KIND_ATTACHMENT, KIND_FILTER, KIND_LIST, KIND_TASK};
@@ -26,6 +26,7 @@ const MAX_ID: usize = 200;
 const HOME_KEY: &str = "caldav_home";
 /// Objects asked for in one `calendar-multiget`.
 const MULTIGET: usize = 20;
+const TOO_LARGE: &str = "is larger than 32 MB";
 
 struct Item {
     href: String,
@@ -34,6 +35,8 @@ struct Item {
     raw: String,
     /// `task_version` at the last reconciliation with this object.
     synced: Option<String>,
+    /// The version on the server could not be read (C23); `raw` is an older one.
+    unreadable: bool,
 }
 
 fn registers(conn: &rusqlite::Connection, kind: &str, id: &str) -> Result<Registers> {
@@ -157,7 +160,7 @@ impl Store {
             .lock()
             .conn
             .query_row(
-                "SELECT href, calendar, etag, raw, synced FROM caldav_items WHERE uid = ?1",
+                "SELECT href, calendar, etag, raw, synced, problem IS NOT NULL FROM caldav_items WHERE uid = ?1",
                 [uid],
                 |r| {
                     Ok(Item {
@@ -166,6 +169,7 @@ impl Store {
                         etag: r.get(2)?,
                         raw: r.get(3)?,
                         synced: r.get(4)?,
+                        unreadable: r.get(5)?,
                     })
                 },
             )
@@ -192,8 +196,19 @@ impl Store {
         inner.conn.execute(
             "INSERT INTO caldav_items (href, calendar, uid, etag, raw, synced) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
              ON CONFLICT (href) DO UPDATE SET calendar = excluded.calendar, uid = excluded.uid, etag = excluded.etag,
-                raw = excluded.raw, synced = excluded.synced",
+                raw = excluded.raw, synced = excluded.synced, problem = NULL",
             params![href, calendar, uid, etag, raw, synced],
+        )?;
+        Ok(())
+    }
+
+    /// C23: remembers the version of an object that could not be read, so that
+    /// it is not fetched again. An object read before keeps its task.
+    fn save_unreadable(&self, href: &str, calendar: &str, etag: &str, problem: &str) -> Result<()> {
+        self.lock().conn.execute(
+            "INSERT INTO caldav_items (href, calendar, uid, etag, raw, problem) VALUES (?1, ?2, '', ?3, '', ?4)
+             ON CONFLICT (href) DO UPDATE SET etag = excluded.etag, problem = excluded.problem",
+            params![href, calendar, etag, problem],
         )?;
         Ok(())
     }
@@ -699,14 +714,21 @@ fn sync(store: &Store, client: &Client, calendars: Vec<Calendar>) -> Result<Sync
                 let (body, fresh_etag) = match fetched.remove(href) {
                     Some(object) => object,
                     None => match client.get(href)? {
-                        Some(object) => object,
-                        None => {
+                        Object::Found(body, etag) => (body, etag),
+                        Object::Missing => {
                             listed.remove(href);
+                            continue;
+                        }
+                        Object::TooLarge(fresh_etag) => {
+                            let etag = if fresh_etag.is_empty() { etag } else { &fresh_etag };
+                            store.save_unreadable(href, calendar, etag, TOO_LARGE)?;
                             continue;
                         }
                     },
                 };
                 let Some(parsed) = ical::parse(&body) else {
+                    let etag = if fresh_etag.is_empty() { etag } else { &fresh_etag };
+                    store.save_unreadable(href, calendar, etag, "is not iCalendar")?;
                     continue;
                 };
                 let Some(remote) = map::read(&parsed).filter(|r| usable_id(&r.uid)) else {
@@ -794,6 +816,9 @@ fn sync(store: &Store, client: &Client, calendars: Vec<Calendar>) -> Result<Sync
         let Some(calendar) = calendar_of.get(&list_id) else {
             continue;
         };
+        if item.as_ref().is_some_and(|i| i.unreadable) {
+            continue; // C23: not written over what could not be read
+        }
         let mut item = item;
         if let Some(old) = item.as_ref().filter(|i| i.calendar != *calendar) {
             // The task moved to another list: its object moves to that calendar.
@@ -857,10 +882,14 @@ fn sync(store: &Store, client: &Client, calendars: Vec<Calendar>) -> Result<Sync
                     break;
                 }
                 Written::Conflict if attempt == 0 => {
-                    let Some((fresh, fresh_etag)) = client.get(&href)? else {
-                        base = None;
-                        etag = None;
-                        continue;
+                    let (fresh, fresh_etag) = match client.get(&href)? {
+                        Object::Found(fresh, fresh_etag) => (fresh, fresh_etag),
+                        Object::Missing => {
+                            base = None;
+                            etag = None;
+                            continue;
+                        }
+                        Object::TooLarge(_) => return Err(AppError::sync(format!("{href} {TOO_LARGE}"))),
                     };
                     let parsed = ical::parse(&fresh);
                     if let Some(remote) = parsed.as_ref().and_then(map::read).filter(|r| r.uid == id) {
@@ -894,4 +923,12 @@ fn sync(store: &Store, client: &Client, calendars: Vec<Calendar>) -> Result<Sync
         crate::push::poke(nudged.values().map(String::as_str));
     }
     Ok(report)
+}
+
+/// C23: what the last run left unread on the server, as the sync status words it.
+pub fn unreadable(conn: &rusqlite::Connection) -> Result<Option<String>> {
+    let mut stmt =
+        conn.prepare("SELECT href || ' ' || problem FROM caldav_items WHERE problem IS NOT NULL ORDER BY href")?;
+    let found: Vec<String> = stmt.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
+    Ok((!found.is_empty()).then(|| format!("not read, the rest is in sync: {}", found.join("; "))))
 }

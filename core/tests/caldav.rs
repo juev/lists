@@ -619,6 +619,146 @@ fn c5_attachment_reaches_the_other_device() {
     assert!(a.attachments(t.id).unwrap().is_empty());
 }
 
+/// A task with `count` attachments of `size` bytes each, synced from A.
+fn with_attachments(a: &Device, count: u8, size: usize) -> TaskItem {
+    let t = add(a, "с файлами");
+    let src = tempfile::tempdir().unwrap();
+    for i in 0..count {
+        let file = src.path().join(format!("f{i}.bin"));
+        std::fs::write(&file, vec![b'a' + i; size]).unwrap();
+        a.add_attachment(t.id.clone(), file.to_string_lossy().into_owned(), None)
+            .unwrap();
+    }
+    t
+}
+
+#[test]
+fn c5_attachments_that_fill_the_object_all_reach_the_other_device() {
+    let dav = start();
+    let (a, b) = pair(&dav);
+    let t = with_attachments(&a, 4, 5 * 1024 * 1024);
+
+    assert_eq!(a.sync_now().unwrap().blobs_uploaded, 4);
+    assert_eq!(b.sync_now().unwrap().blobs_downloaded, 4);
+    let got = b.attachments(t.id).unwrap();
+    assert_eq!(got.iter().filter(|a| a.local_path.is_some()).count(), 4);
+}
+
+#[test]
+fn c5_attachments_beyond_the_object_stay_on_the_device() {
+    let dav = start();
+    let (a, b) = pair(&dav);
+    let t = with_attachments(&a, 7, 4_900_000);
+
+    assert_eq!(a.sync_now().unwrap().blobs_uploaded, 4);
+    assert!(dav.read(&t.id).len() < 32 * 1024 * 1024);
+    assert_eq!(b.sync_now().unwrap().blobs_downloaded, 4);
+    assert_eq!(view(&b, Scope::Inbox), ["с файлами"], "the task itself arrives");
+    let got = b.attachments(t.id.clone()).unwrap();
+    assert_eq!(got.len(), 7, "every record arrives");
+    assert_eq!(got.iter().filter(|a| a.local_path.is_some()).count(), 4);
+    assert!(a
+        .attachments(t.id.clone())
+        .unwrap()
+        .iter()
+        .all(|a| a.local_path.is_some()));
+
+    // Both devices agree on what the object holds: neither rewrites it.
+    let seen = dav.requests(|| {
+        a.sync_now().unwrap();
+        b.sync_now().unwrap();
+    });
+    assert!(!seen.iter().any(|r| r.starts_with("PUT ")), "{seen:?}");
+
+    // An edit on the device without the rest keeps what the object has.
+    b.set_title(t.id.clone(), "переименована".into()).unwrap();
+    b.sync_now().unwrap();
+    assert_eq!(dav.read(&t.id).matches("ATTACH;").count(), 4);
+    a.sync_now().unwrap();
+    assert_eq!(a.task(t.id.clone()).unwrap().title, "переименована");
+    assert_eq!(a.attachments(t.id).unwrap().len(), 7);
+}
+
+/// An object as another client would write it, `size` bytes of notes long.
+fn foreign_object(uid: &str, title: &str, size: usize) -> String {
+    format!(
+        "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Other//Client//EN\r\nBEGIN:VTODO\r\nUID:{uid}\r\nSUMMARY:{title}\r\nDESCRIPTION:{}\r\nEND:VTODO\r\nEND:VCALENDAR\r\n",
+        "x".repeat(size)
+    )
+}
+
+const TOO_LARGE: usize = 33 * 1024 * 1024;
+
+#[test]
+fn c23_object_too_large_to_read_is_reported_and_not_fetched_again() {
+    let dav = start();
+    let (a, b) = pair(&dav);
+    add(&a, "обычная");
+    a.sync_now().unwrap();
+    let big = dav.object("big");
+    std::fs::write(&big, foreign_object("big", "большая", TOO_LARGE)).unwrap();
+
+    let unread = |d: &Device| d.sync_status().unwrap().last_error.unwrap_or_default();
+    b.sync_now().unwrap();
+    assert_eq!(view(&b, Scope::Inbox), ["обычная"], "the rest of the calendar arrives");
+    assert!(
+        unread(&b).contains("/cal/lists-inbox/big.ics is larger than 32 MB"),
+        "{}",
+        unread(&b)
+    );
+
+    // The same version is not fetched again, and the status keeps saying so.
+    let seen = dav.requests(|| {
+        b.sync_now().unwrap();
+    });
+    assert!(
+        !seen.iter().any(|r| r.starts_with("GET ") || r.starts_with("REPORT ")),
+        "{seen:?}"
+    );
+    assert!(unread(&b).contains("big.ics"));
+
+    // Local changes still go up and come down.
+    add(&a, "новая");
+    a.sync_now().unwrap();
+    assert!(unread(&a).contains("big.ics"));
+    let seen = dav.requests(|| {
+        b.sync_now().unwrap();
+    });
+    assert!(!seen.iter().any(|r| r.contains("big.ics")), "{seen:?}");
+    assert_eq!(view(&b, Scope::Inbox), ["обычная", "новая"]);
+
+    // The other client makes the object readable: it becomes a task.
+    std::fs::write(&big, foreign_object("big", "большая", 10)).unwrap();
+    b.sync_now().unwrap();
+    assert_eq!(view(&b, Scope::Inbox), ["обычная", "новая", "большая"]);
+    assert_eq!(b.sync_status().unwrap().last_error, None);
+}
+
+#[test]
+fn c23_known_object_that_grew_too_large_is_not_written_over() {
+    let dav = start();
+    let (a, _b) = pair(&dav);
+    let t = add(&a, "задача");
+    a.sync_now().unwrap();
+    std::fs::write(dav.object(&t.id), foreign_object(&t.id, "чужая правка", TOO_LARGE)).unwrap();
+
+    a.set_due(t.id.clone(), Some("2026-10-09".into())).unwrap();
+    let seen = dav.requests(|| {
+        a.sync_now().unwrap();
+    });
+    assert!(!seen.iter().any(|r| r.starts_with("PUT ")), "{seen:?}");
+    assert!(a.sync_status().unwrap().last_error.is_some());
+    assert!(dav.read(&t.id).len() > TOO_LARGE);
+    assert_eq!(view(&a, Scope::Inbox), ["задача"], "the task stays where it was");
+
+    // Once the object can be read, the two edits meet.
+    std::fs::write(dav.object(&t.id), foreign_object(&t.id, "чужая правка", 10)).unwrap();
+    a.sync_now().unwrap();
+    assert_eq!(a.task(t.id.clone()).unwrap().title, "чужая правка");
+    assert!(dav.read(&t.id).contains("X-LISTS-STATE"), "and the task goes up again");
+    assert_eq!(a.sync_status().unwrap().last_error, None);
+}
+
 #[test]
 fn wrong_password_and_bad_address_are_reported() {
     let dav = start();
