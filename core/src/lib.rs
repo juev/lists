@@ -21,7 +21,8 @@ pub mod sync;
 pub use error::{AppError, Result};
 pub use import::ImportReport;
 pub use markdown::{
-    markdown_layout, markdown_newline, MarkdownBlock, MarkdownEdit, MarkdownKind, MarkdownLayout, MarkdownSpan,
+    markdown_layout, markdown_newline, MarkdownAlign, MarkdownBlock, MarkdownCell, MarkdownEdit, MarkdownKind,
+    MarkdownLayout, MarkdownSpan, MarkdownTable, MarkdownTableRow,
 };
 pub use model::*;
 pub use store::{days_between, shift_date, Store};
