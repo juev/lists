@@ -153,6 +153,25 @@ final class AppModel {
 
     var allTasks: [TaskItem] { sections.flatMap(\.tasks) }
 
+    /// The sections as they are drawn. Today, Upcoming and a search list a subtask as a
+    /// row of its own; while it is on show inside the open card of its parent that row is left out.
+    var visibleSections: [TaskSection] {
+        func inside(_ tasks: [TaskItem]) -> [String] {
+            tasks.flatMap { task -> [String] in
+                guard expanded.contains(task.id), showsSubtasks(task) else { return [] }
+                let subtasks = children[task.id] ?? []
+                return subtasks.map(\.id) + inside(subtasks)
+            }
+        }
+        let nested = Set(inside(allTasks))
+        guard !nested.isEmpty else { return sections }
+        return sections.compactMap { section in
+            var section = section
+            section.tasks.removeAll { nested.contains($0.id) }
+            return section.tasks.isEmpty ? nil : section
+        }
+    }
+
     func list(_ id: String) -> TaskList? { lists.first { $0.id == id } }
 
     func listName(_ list: TaskList) -> String { list.id == "inbox" ? L("Inbox") : list.name }
@@ -476,13 +495,13 @@ final class AppModel {
     }
 
     /// Rows in the order they are drawn: each task followed by its expanded subtree.
-    private var visibleIds: [String] {
+    var visibleIds: [String] {
         func walk(_ tasks: [TaskItem]) -> [String] {
             tasks.flatMap { task in
                 [task.id] + (expanded.contains(task.id) && showsSubtasks(task) ? walk(children[task.id] ?? []) : [])
             }
         }
-        return walk(allTasks)
+        return walk(visibleSections.flatMap(\.tasks))
     }
 
     func moveSelection(_ step: Int) {
@@ -501,7 +520,7 @@ final class AppModel {
 
     /// Reorders within the single section of a manually sorted list.
     func move(from source: IndexSet, to destination: Int) {
-        guard canReorder, let tasks = sections.first?.tasks, let from = source.first else { return }
+        guard canReorder, let tasks = visibleSections.first?.tasks, let from = source.first else { return }
         var order = tasks
         order.move(fromOffsets: source, toOffset: destination)
         let moved = tasks[from]

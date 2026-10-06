@@ -46,7 +46,7 @@ Deleting and completing can be undone: ⌘Z on macOS, the Undo bar on Android. O
 
 On macOS subtasks stay folded behind a "Subtasks 1/3" line in the open card, and a task without subtasks does not mention them: add the first one from the "+" button or the context menu.
 
-A subtask is a full task with its own dates, priority, repeat, attachments and subtasks. Completing a task completes its open subtasks; reopening it leaves them as they are. A subtask with its own due date shows up in Today and Upcoming with the name of its parent. A subtask can be moved to another parent or made a task of its own.
+A subtask is a full task with its own dates, priority, repeat, attachments and subtasks. Completing a task completes its open subtasks; reopening it leaves them as they are. A subtask with its own due date shows up in Today and Upcoming with the name of its parent. On macOS, while its parent is open with the subtasks unfolded, the subtask is shown only inside the parent. A subtask can be moved to another parent or made a task of its own.
 
 A project is a top-level task marked as a project. It appears in the sidebar with a "done/total" counter and opens as its own view. A task entered in that view becomes a subtask of the project. A project can be turned back into a plain task without losing its subtasks; a completed project leaves the sidebar.
 
