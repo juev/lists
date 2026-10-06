@@ -51,6 +51,7 @@ import androidx.compose.material3.AssistChip
 import org.evsyukov.lists.ui.ChoiceDialog
 import org.evsyukov.lists.ui.MomentDialog
 import org.evsyukov.lists.ui.QuickChips
+import org.evsyukov.lists.ui.RepeatDialog
 import uniffi.lists_core.Priority
 import org.evsyukov.lists.ui.attach
 import org.evsyukov.lists.ui.describe
@@ -59,6 +60,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import uniffi.lists_core.NewTask
+import uniffi.lists_core.Repeat
 
 /** What another app handed over, reduced to what a task can hold. */
 /** What the quick-entry window collected. */
@@ -67,6 +69,7 @@ private data class Entry(
     val notes: String,
     val start: String?,
     val due: String?,
+    val repeat: Repeat?,
     val priority: Priority,
     val listId: String,
     val parse: Boolean,
@@ -91,6 +94,7 @@ class QuickAddActivity : ComponentActivity() {
                 var notes by remember { mutableStateOf(shared.notes) }
                 var start by remember { mutableStateOf<String?>(null) }
                 var due by remember { mutableStateOf<String?>(null) }
+                var repeat by remember { mutableStateOf<Repeat?>(null) }
                 var priority by remember { mutableStateOf(Priority.NONE) }
                 var listId by remember { mutableStateOf(EntryPrefs.defaultListId(this, lists)) }
                 var listMenu by remember { mutableStateOf(false) }
@@ -105,7 +109,7 @@ class QuickAddActivity : ComponentActivity() {
                 val parse = shared.title.isEmpty() && EntryPrefs.parse(this)
                 val focus = remember { FocusRequester() }
                 LaunchedEffect(Unit) { focus.requestFocus() }
-                fun submit() = save(Entry(text, notes, start, due, priority, listId, parse), files)
+                fun submit() = save(Entry(text, notes, start, due, repeat, priority, listId, parse), files)
 
                 // Tapping outside the card closes the window, as with any dialog.
                 Box(
@@ -147,6 +151,7 @@ class QuickAddActivity : ComponentActivity() {
                             ) {
                                 AssistChip(onClick = { dialog = "start" }, label = { Text(start?.let { str(R.string.start_at, dateLabel(it).lowercase()) } ?: str(R.string.start)) })
                                 AssistChip(onClick = { dialog = "due" }, label = { Text(due?.let { str(R.string.due_at, dateLabel(it).lowercase()) } ?: str(R.string.due)) })
+                                AssistChip(onClick = { dialog = "repeat" }, label = { Text(repeat?.summary() ?: str(R.string.repeat)) })
                                 AssistChip(onClick = { dialog = "priority" }, label = { Text(if (priority == Priority.NONE) str(R.string.priority) else priority.title()) })
                                 AssistChip(onClick = { pickFiles.launch("*/*") }, label = { Text(str(R.string.file_or_image)) })
                             }
@@ -185,6 +190,7 @@ class QuickAddActivity : ComponentActivity() {
                 when (dialog) {
                     "start" -> MomentDialog(str(R.string.start_title), start, onPick = { start = it }) { dialog = null }
                     "due" -> MomentDialog(str(R.string.due), due, onPick = { due = it }) { dialog = null }
+                    "repeat" -> RepeatDialog(repeat, onPick = { repeat = it }) { dialog = null }
                     "priority" -> ChoiceDialog(str(R.string.priority), priorities.map { it.title() }, priorities.indexOf(priority), { dialog = null }) { priority = priorities[it] }
                 }
             }
@@ -237,6 +243,8 @@ class QuickAddActivity : ComponentActivity() {
                     if (notes.isNotEmpty()) store.setNotes(task.id, notes)
                     entry.start?.let { store.setStart(task.id, it) }
                     entry.due?.let { store.setDue(task.id, it) }
+                    // After the dates: the rule is counted from them.
+                    entry.repeat?.let { store.setRepeat(task.id, it) }
                     if (entry.priority != Priority.NONE) store.setPriority(task.id, entry.priority)
                     EntryPrefs.noteUsedList(applicationContext, store.task(task.id).listId)
                     attach(applicationContext, store, task.id, files)

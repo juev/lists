@@ -10,6 +10,8 @@ import AppKit
 /// `inbox` (switches to the Inbox view), `open` (expands the selected task), `select:1` and `select:-1` (move the selection the way the arrow keys do),
 /// `pick:title` (selects a row the way a click does), `indent` and `outdent` (move the selected task under the one above and back),
 /// `newtask` (opens the card of a new task), `title:text` (fills its title), `finish` (closes it the way Esc does),
+/// `due:2026-10-05` and `repeat:2` (give the new-task card a due date and the preset with that index, the way its popovers do),
+/// `task` (prints the due date and the repeat of the selected task), `done` (completes it),
 /// `cards` (prints the open cards and the selected row), `rows` (prints the rows in the order they are drawn), `panel` (prints whether quick entry is on screen and what runs modally),
 /// `windows` (prints the windows of the app),
 /// `quicktrace` (shows quick entry transparent and without the keyboard, and prints its geometry frame by frame:
@@ -85,6 +87,15 @@ enum DebugScript {
                 case "newtask": AppModel.shared.startDraft()
                 case "title": AppModel.shared.draft?.title = argument
                 case "finish": AppModel.shared.finishDraft()
+                case "due":
+                    AppModel.shared.draft?.due = argument
+                    AppModel.shared.draft?.dueIsDefault = false
+                case "repeat":
+                    if let index = Int(argument), Repeat.presets.indices.contains(index) { AppModel.shared.draft?.repeat = Repeat.presets[index].1 }
+                case "done": AppModel.shared.selectedTask.map(AppModel.shared.toggleDone)
+                case "task":
+                    let task = AppModel.shared.selectedTask
+                    print("debug: task \(task?.title ?? "none"), due \(task?.due ?? "none"), repeat \(task?.repeat?.summary ?? "none")")
                 case "inbox": AppModel.shared.scope = .inbox
                 case "cards":
                     let model = AppModel.shared
