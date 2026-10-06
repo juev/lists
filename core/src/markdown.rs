@@ -447,8 +447,12 @@ fn layout(text: &str) -> (Vec<Span>, Vec<Range<usize>>, Vec<Table>) {
                 let depth = stack.iter().filter(|f| matches!(f.tag, Tag::BlockQuote(_))).count();
                 match &frame.tag {
                     Tag::TableCell => cells.push(cell(text, &frame.range)),
-                    Tag::TableHead => rows.push((true, std::mem::take(&mut cells))),
-                    Tag::TableRow => rows.push((false, std::mem::take(&mut cells))),
+                    Tag::TableHead | Tag::TableRow => {
+                        // A cell the row is filled up with lies where the line ends, not after it.
+                        let end = trimmed(text, &frame.range).end;
+                        let row = cells.drain(..).map(|c| c.start.min(end)..c.end.min(end)).collect();
+                        rows.push((matches!(frame.tag, Tag::TableHead), row));
+                    }
                     Tag::Table(columns) => tables.push(Table {
                         range: trimmed(text, &frame.range),
                         columns: columns
