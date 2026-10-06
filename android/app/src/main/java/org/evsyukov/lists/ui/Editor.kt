@@ -30,11 +30,9 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
-import androidx.compose.material.icons.automirrored.outlined.InsertDriveFile
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Close
-import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.material3.AlertDialog
@@ -172,6 +170,8 @@ fun EditorSheet(editing: Editing, state: UiState, model: MainViewModel, onRemind
     var addMenu by remember { mutableStateOf(false) }
     // Subtasks are not mentioned until the task has one or the user asks for the field.
     var subtaskField by remember(task.id) { mutableStateOf(false) }
+    // The attachment shown over the screen; it closes by itself when the file is removed elsewhere.
+    var viewing by remember(task.id) { mutableStateOf<String?>(null) }
     val pickFiles = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
         if (uris.isNotEmpty()) model.act { store -> attach(context, store, task.id, uris) }
     }
@@ -274,10 +274,15 @@ fun EditorSheet(editing: Editing, state: UiState, model: MainViewModel, onRemind
 
             for (file in editing.attachments) {
                 Row(
-                    Modifier.fillMaxWidth().clickable(enabled = file.localPath != null) { openAttachment(context, file) }.padding(start = 16.dp, end = 4.dp),
+                    Modifier.fillMaxWidth()
+                        .clickable(enabled = file.localPath != null) {
+                            // An image or a PDF is shown here (R54); the rest is for another app.
+                            if (previewKind(file.mime) != null) viewing = file.id else openAttachment(context, file)
+                        }
+                        .padding(start = 16.dp, end = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Icon(if (file.mime.startsWith("image/")) Icons.Outlined.Image else Icons.AutoMirrored.Outlined.InsertDriveFile, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    AttachmentIcon(file)
                     Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
                         Text(file.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(
@@ -298,6 +303,12 @@ fun EditorSheet(editing: Editing, state: UiState, model: MainViewModel, onRemind
                 TaskRow(sub, state, onToggle = { model.toggleDone(sub) }, onOpen = { model.open(sub.id) }, model = model, showOrigin = false)
             }
             if (showSubtasks && !locked) SubtaskField { model.addSubtask(task.id, it) }
+        }
+    }
+
+    editing.attachments.firstOrNull { it.id == viewing }?.let { file ->
+        previewKind(file.mime)?.let { kind ->
+            AttachmentViewer(file, kind, onOpenOutside = { openAttachment(context, file) }) { viewing = null }
         }
     }
 
