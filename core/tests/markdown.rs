@@ -226,6 +226,12 @@ fn r60_table_reports_cells_and_alignment() {
             row(false, ["a", "b", "c"]),
         ]
     );
+    // A cell a short row is filled up with lies at the end of its line.
+    let line_end = table.rows[2].cells[0].end;
+    assert_eq!(cut(text, table.rows[2].cells[0].start, line_end), "одна");
+    assert!(table.rows[2].cells[1..]
+        .iter()
+        .all(|c| (c.start, c.end) == (line_end, line_end)));
     // What styles the text of a cell lies inside the cell.
     let cell = &table.rows[1].cells[0];
     let strong = layout.spans.iter().find(|s| s.kind == Strong).unwrap();
