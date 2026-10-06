@@ -89,6 +89,10 @@ fn fail(what: &str, path: &str, code: u16) -> AppError {
 }
 
 impl Remote for WebDavRemote {
+    fn id(&self) -> String {
+        self.base.clone()
+    }
+
     fn list(&self, dir: &str) -> Result<Vec<String>> {
         let url = self.url(&format!("{dir}/"));
         let result = self
