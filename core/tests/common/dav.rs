@@ -9,7 +9,8 @@
 //! `.race` stages a concurrent write (see `handle`). When a file named
 //! `.requests` exists in the served root, every authorised request is appended
 //! to it as `METHOD /path` (a PROPFIND also carries its depth, a REPORT its
-//! kind). `.home` holds the path the server names as the calendar home.
+//! kind). `.home` holds the path the server names as the calendar home; `.fail`
+//! holds a path, and every request under it is answered with 500.
 //!
 //! Calendars carry a change tag and a sync token, and answer the
 //! `sync-collection` and `calendar-multiget` reports. `.no-ctag`, `.no-sync`
@@ -193,6 +194,11 @@ fn handle(mut request: Request, root: &Path) {
     let relative = url.trim_start_matches('/').trim_end_matches('/');
     let path = root.join(relative);
     let method = request.method().clone();
+    if let Ok(broken) = std::fs::read_to_string(root.join(".fail")) {
+        if url.starts_with(broken.trim()) {
+            return request.respond(Response::empty(500)).unwrap();
+        }
+    }
     if root.join(".requests").exists() {
         let detail = match (method.as_str(), header(&request, "Depth")) {
             ("PROPFIND", Some(depth)) => format!(" depth={depth}"),

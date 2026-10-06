@@ -632,6 +632,8 @@ fn sync(store: &Store, client: &Client, calendars: Vec<Calendar>) -> Result<Sync
     let mut listed: BTreeSet<String> = BTreeSet::new();
     let mut seen_uids: BTreeSet<String> = BTreeSet::new();
     let mut multiget = true;
+    // Calendars read in this run, with the tag and token to remember for them.
+    let mut read_now: Vec<(&String, &str, String)> = Vec::new();
     for (list_id, calendar) in &calendar_of {
         let remote = calendars.iter().find(|c| c.href == *calendar);
         let tag = remote.map(|c| c.tag.as_str()).unwrap_or_default();
@@ -717,12 +719,7 @@ fn sync(store: &Store, client: &Client, calendars: Vec<Calendar>) -> Result<Sync
                 seen_uids.insert(remote.uid);
             }
         }
-        // The tag is the one read before the objects: a change that landed in
-        // between differs from it and is picked up by the next run.
-        store.lock().conn.execute(
-            "UPDATE caldav_calendars SET tag = ?2, token = ?3 WHERE href = ?1",
-            params![calendar, tag, token],
-        )?;
+        read_now.push((calendar, tag, token));
     }
 
     // ---- objects that disappeared (C14) ----
@@ -754,6 +751,18 @@ fn sync(store: &Store, client: &Client, calendars: Vec<Calendar>) -> Result<Sync
             store.write(|w| w.task(&uid, "deleted", json!(true)))?;
             report.pulled += 1;
         }
+    }
+
+    // Only now is a calendar remembered as read: had the run stopped before
+    // the objects that disappeared were dealt with, a tag saved earlier would
+    // hide them from every later run. The tag is the one read before the
+    // objects, so a change that landed in between differs from it and is
+    // picked up by the next run.
+    for (calendar, tag, token) in read_now {
+        store.lock().conn.execute(
+            "UPDATE caldav_calendars SET tag = ?2, token = ?3 WHERE href = ?1",
+            params![calendar, tag, token],
+        )?;
     }
 
     // ---- local changes go up ----
