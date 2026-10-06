@@ -10,6 +10,7 @@ struct TaskDraft: Equatable {
     /// The due date came from the view (Today), not from the user: a date
     /// typed in the title replaces it.
     var dueIsDefault = false
+    var `repeat`: Repeat?
     var priority = Priority.none
     var tags: [String] = []
     var listId = "inbox"
@@ -34,7 +35,7 @@ struct DraftEditor: View {
     var onResize: () -> Void = {}
 
     private enum Popover: Identifiable {
-        case due, start, tag
+        case due, start, `repeat`, tag
         var id: Self { self }
     }
 
@@ -70,10 +71,11 @@ struct DraftEditor: View {
             .padding(.leading, 30)
         }
         .background {
-            // The dates are one key away from wherever the cursor is.
+            // The dates and the repeat are one key away from wherever the cursor is.
             Group {
                 Button("") { popover = .start }.keyboardShortcut("s", modifiers: .command)
                 Button("") { popover = .due }.keyboardShortcut("d", modifiers: .command)
+                Button("") { popover = .repeat }.keyboardShortcut("r", modifiers: [.command, .shift])
                 Button("", action: paste).keyboardShortcut("v", modifiers: .command)
             }
             .opacity(0)
@@ -83,6 +85,7 @@ struct DraftEditor: View {
         .onExitCommand(perform: close)
         .onChange(of: draft.notes) { _, _ in onResize() }
         .onChange(of: draft.tags) { _, _ in onResize() }
+        .onChange(of: draft.repeat) { _, _ in onResize() }
         .onChange(of: draft.files) { _, _ in onResize() }
         .dropDestination(for: URL.self) { urls, _ in
             add(urls.filter(\.isFileURL))
@@ -152,6 +155,12 @@ struct DraftEditor: View {
                     }
                 }
                 .help(L("Due date (⌘D)"))
+            chipButton(.repeat, symbol: "repeat", text: draft.repeat?.summary ?? L("Repeat"),
+                       tint: draft.repeat == nil ? .secondary : .accentColor)
+                .popover(isPresented: isOpen(.repeat)) {
+                    RepeatEditor(value: draft.repeat) { draft.repeat = $0 }
+                }
+                .help(L("Repeat (⇧⌘R)"))
             Menu {
                 ForEach(Priority.all, id: \.self) { priority in
                     Toggle(priority.title, isOn: Binding(get: { draft.priority == priority }, set: { _ in draft.priority = priority }))

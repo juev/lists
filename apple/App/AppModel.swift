@@ -373,6 +373,8 @@ final class AppModel {
             if !draft.notes.isEmpty { try store.setNotes(id: created.id, notes: draft.notes) }
             if let start = draft.start { try store.setStart(id: created.id, start: start) }
             if let due = draft.due, !(draft.dueIsDefault && created.due != nil) { try store.setDue(id: created.id, due: due) }
+            // After the dates: the rule is counted from them.
+            if let rule = draft.repeat { try store.setRepeat(id: created.id, repeat: rule) }
             if draft.priority != .none { try store.setPriority(id: created.id, priority: draft.priority) }
             for tag in draft.tags where !created.tags.contains(tag) { try store.addTag(id: created.id, tag: tag) }
             return try store.task(id: created.id)

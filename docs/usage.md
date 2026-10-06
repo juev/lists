@@ -34,11 +34,11 @@ On macOS a task opens in place in the list as an outlined card; on Android it op
 
 On macOS Return on the selected row, or a double click, opens its card with the cursor at the end of the title, and Esc closes the card and hands the keyboard back to the list with the same row selected. The chevron at the end of a row only opens and closes the card. One card is open at a time. Opening another task, or moving to another row with a click or the arrow keys, closes the open card and keeps what was typed in it. A task stays open while one of its subtasks is selected or open. The card of a new task closes an open task, and opening a task closes the card of a new one the way Esc does.
 
-On macOS ⌘N, or the "+" button in the toolbar, opens the card of a new task right in the list with every field at hand: title, notes, start date, due date, priority, tags, list and files. Return in the title creates the task. Esc creates it when it has a title and drops an empty card.
+On macOS ⌘N, or the "+" button in the toolbar, opens the card of a new task right in the list with every field at hand: title, notes, start date, due date, repeat, priority, tags, list and files. Return in the title creates the task. Esc creates it when it has a title and drops an empty card.
 
 Files get into a card on macOS in three ways: the paperclip button, dropping them on the card, and ⌘V with files or an image on the clipboard. This works in the card of a new task, in the quick-entry window and in an open task. ⌘V with text on the clipboard pastes the text as usual.
 
-Return in the notes starts a new line and Esc finishes editing. Settings → New tasks can turn that around: Return finishes, ⌥Return starts a new line. ⌘S and ⌘D open the start date and the due date from anywhere in the card; the calendar takes the arrow keys, and Return confirms.
+Return in the notes starts a new line and Esc finishes editing. Settings → New tasks can turn that around: Return finishes, ⌥Return starts a new line. ⌘S and ⌘D open the start date and the due date from anywhere in the card; the calendar takes the arrow keys, and Return confirms. ⇧⌘R opens the repeat the same way.
 
 Deleting and completing can be undone: ⌘Z on macOS, the Undo bar on Android. Only emptying the trash asks for confirmation.
 
@@ -51,6 +51,8 @@ A subtask is a full task with its own dates, priority, repeat, attachments and s
 A project is a top-level task marked as a project. It appears in the sidebar with a "done/total" counter and opens as its own view. A task entered in that view becomes a subtask of the project. A project can be turned back into a plain task without losing its subtasks; a completed project leaves the sidebar.
 
 ## Repeats
+
+A repeat is set in the card of a task. On macOS the card of a new task, in the main window, in the quick-entry window and in the menu bar, always has a Repeat chip. In an open task the chip appears once a rule is set; until then Repeat is under the "+" button. ⇧⌘R opens it from anywhere in either card. On Android the quick-entry window has a Repeat chip, and in the editor Repeat is under the "+" button until a rule is set. The rule counts from the due date, or from the start date when there is no due date.
 
 Presets: every day, on weekdays, every week, every two weeks, every month, every quarter, every year.
 
@@ -119,6 +121,7 @@ A reminder set on a task itself replaces the one derived from its due date. The 
 |---|---|
 | ⌘N | new task, as a card in the list |
 | ⌘S and ⌘D | start date and due date of the open card |
+| ⇧⌘R | repeat of the open card |
 | ⌘V | attach the files or the image on the clipboard to the open card |
 | ↑ ↓ | select |
 | Enter | open the selected task with the cursor in its title; close it when it is open |

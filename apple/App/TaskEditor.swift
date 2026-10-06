@@ -29,11 +29,12 @@ struct TaskEditor: View {
         }
         .disabled(locked)
         .background {
-            // The dates of the selected open task are one key away; the card
+            // The dates and the repeat of the selected open task are one key away; the card
             // of a parent stays open around its subtask, and only the selected one answers.
             Group {
                 Button("") { popover = .start }.keyboardShortcut("s", modifiers: .command)
                 Button("") { popover = .due }.keyboardShortcut("d", modifiers: .command)
+                Button("") { popover = .repeat }.keyboardShortcut("r", modifiers: [.command, .shift])
                 Button("", action: paste).keyboardShortcut("v", modifiers: .command)
             }
             .opacity(0)
@@ -123,6 +124,7 @@ struct TaskEditor: View {
                     .popover(isPresented: isOpen(.repeat)) {
                         RepeatEditor(value: task.repeat) { rule in model.perform { try $0.setRepeat(id: task.id, repeat: rule) } }
                     }
+                    .help(L("Repeat (⇧⌘R)"))
             }
             if task.remind != nil || popover == .remind {
                 chipButton(.remind, symbol: "bell", text: task.remind.map(Moment.label) ?? L("Reminder"), tint: .accentColor)
