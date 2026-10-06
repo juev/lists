@@ -27,7 +27,7 @@ struct TaskListView: View {
             } else {
                 ScrollViewReader { proxy in
                     List {
-                        ForEach(model.sections) { section in
+                        ForEach(model.visibleSections) { section in
                             if let title = section.title {
                                 Section(title) { rows(section) }
                             } else {

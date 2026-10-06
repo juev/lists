@@ -10,7 +10,7 @@ import AppKit
 /// `inbox` (switches to the Inbox view), `open` (expands the selected task), `select:1` and `select:-1` (move the selection the way the arrow keys do),
 /// `pick:title` (selects a row the way a click does), `indent` and `outdent` (move the selected task under the one above and back),
 /// `newtask` (opens the card of a new task), `title:text` (fills its title), `finish` (closes it the way Esc does),
-/// `cards` (prints the open cards and the selected row), `panel` (prints whether quick entry is on screen and what runs modally),
+/// `cards` (prints the open cards and the selected row), `rows` (prints the rows in the order they are drawn), `panel` (prints whether quick entry is on screen and what runs modally),
 /// `quicktrace` (shows quick entry transparent and without the keyboard, and prints its geometry frame by frame:
 /// a line that differs from the next one is a card that moved after it was shown).
 /// With `LISTS_DEBUG_QUIET` set the script leaves the app in the background instead of bringing its window forward.
@@ -88,6 +88,7 @@ enum DebugScript {
                     let model = AppModel.shared
                     let open = model.expanded.map(taskTitle).sorted()
                     print("debug: open \(open), selected \(model.selection.map(taskTitle) ?? "none"), draft \(model.draft != nil)")
+                case "rows": print("debug: rows \(AppModel.shared.visibleIds.map(taskTitle))")
                 case "panel":
                     print("debug: quick entry \(QuickEntryPanel.shared.isVisible ? "shown" : "hidden"), modal \(NSApp.modalWindow.map { String(describing: type(of: $0)) } ?? "none")")
                 case "quick": QuickEntryPanel.shared.present()
