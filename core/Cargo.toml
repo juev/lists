@@ -20,6 +20,7 @@ cli = ["uniffi/cli"]
 [dependencies]
 base64 = "0.22"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+pulldown-cmark = { version = "0.13", default-features = false }
 roxmltree = "0.20"
 rusqlite = { version = "0.37", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }

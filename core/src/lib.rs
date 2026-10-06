@@ -9,6 +9,7 @@ mod db;
 mod error;
 mod hlc;
 mod import;
+mod markdown;
 mod model;
 mod order;
 mod push;
@@ -19,5 +20,8 @@ pub mod sync;
 
 pub use error::{AppError, Result};
 pub use import::ImportReport;
+pub use markdown::{
+    markdown_layout, markdown_newline, MarkdownBlock, MarkdownEdit, MarkdownKind, MarkdownLayout, MarkdownSpan,
+};
 pub use model::*;
 pub use store::{days_between, shift_date, Store};

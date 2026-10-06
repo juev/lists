@@ -501,6 +501,15 @@ fn sync(store: &Store, client: &Client, calendars: Vec<Calendar>) -> Result<Sync
         let rows = stmt.query_map([], |r| Ok((r.get(0)?, (r.get(1)?, r.get(2)?))))?;
         rows.collect::<rusqlite::Result<_>>()?
     };
+    // Change tag at which the calendar of a deleted list was last found to hold objects.
+    let kept_at: HashMap<String, String> = {
+        let inner = store.lock();
+        let mut stmt = inner
+            .conn
+            .prepare("SELECT href, kept FROM caldav_calendars WHERE kept IS NOT NULL")?;
+        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        rows.collect::<rusqlite::Result<_>>()?
+    };
     for (href, list_id, _) in &known_calendars {
         if !seen_calendars.contains(href) {
             // The calendar was removed on the server: the list goes with it.
@@ -545,6 +554,12 @@ fn sync(store: &Store, client: &Client, calendars: Vec<Calendar>) -> Result<Sync
             }
         };
         if *deleted {
+            // The calendar stays while it holds objects (C15), and is remembered
+            // like any other so that it is not read on every run (C19).
+            store.lock().conn.execute(
+                "INSERT INTO caldav_calendars (href, list_id) VALUES (?1, ?2) ON CONFLICT (href) DO NOTHING",
+                params![href, list_id],
+            )?;
             continue;
         }
         let remote = calendars.iter().find(|c| c.href == href);
@@ -651,6 +666,8 @@ fn sync(store: &Store, client: &Client, calendars: Vec<Calendar>) -> Result<Sync
     let mut multiget = true;
     // Calendars read in this run, with the tag and token to remember for them.
     let mut read_now: Vec<(&String, &str, String)> = Vec::new();
+    // Calendars a full listing of this run found to hold objects.
+    let mut occupied: BTreeSet<&String> = BTreeSet::new();
     for (list_id, calendar) in &calendar_of {
         let remote = calendars.iter().find(|c| c.href == *calendar);
         let tag = remote.map(|c| c.tag.as_str()).unwrap_or_default();
@@ -686,10 +703,13 @@ fn sync(store: &Store, client: &Client, calendars: Vec<Calendar>) -> Result<Sync
             }
             // The token was read before the listing: a change in between is
             // reported again next time and found to be known.
-            None => (
-                client.list(calendar)?,
-                remote.map(|c| c.sync_token.clone()).unwrap_or_default(),
-            ),
+            None => {
+                let all = client.list(calendar)?;
+                if !all.is_empty() {
+                    occupied.insert(calendar);
+                }
+                (all, remote.map(|c| c.sync_token.clone()).unwrap_or_default())
+            }
         };
 
         let mut changed: Vec<(String, String)> = Vec::new();
@@ -800,6 +820,8 @@ fn sync(store: &Store, client: &Client, calendars: Vec<Calendar>) -> Result<Sync
     };
     let now = chrono::Utc::now().naive_utc();
     let blob = |sha: &str| std::fs::read(store.blob_path(sha)).ok();
+    // Calendars this run removed objects from: what was known of them no longer holds.
+    let mut emptied: BTreeSet<String> = BTreeSet::new();
     for (id, list_id, gone) in tasks {
         let item = store.item_by_uid(&id)?;
         if gone {
@@ -807,6 +829,7 @@ fn sync(store: &Store, client: &Client, calendars: Vec<Calendar>) -> Result<Sync
             if let Some(item) = item {
                 if client.delete(&item.href, Some(&item.etag))? {
                     store.forget_item(&item.href)?;
+                    emptied.insert(item.calendar.clone());
                     report.pushed += 1;
                 } else {
                     // Changed on the server meanwhile: read it again on the next run.
@@ -826,6 +849,7 @@ fn sync(store: &Store, client: &Client, calendars: Vec<Calendar>) -> Result<Sync
             // The task moved to another list: its object moves to that calendar.
             client.delete(&old.href, Some(&old.etag))?;
             store.forget_item(&old.href)?;
+            emptied.insert(old.calendar.clone());
             item = None;
         }
         // C17: nothing changed on either side since the two were last compared.
@@ -911,14 +935,34 @@ fn sync(store: &Store, client: &Client, calendars: Vec<Calendar>) -> Result<Sync
         if !*deleted || list_id == INBOX_ID {
             continue;
         }
-        if let Some(href) = calendar_of.get(list_id) {
-            if client.list(href)?.is_empty() && client.delete(href, None)? {
-                store
-                    .lock()
-                    .conn
-                    .execute("DELETE FROM caldav_calendars WHERE href = ?1", [href])?;
-                report.pushed += 1;
-            }
+        let Some(href) = calendar_of.get(list_id) else {
+            continue;
+        };
+        let tag = calendars
+            .iter()
+            .find(|c| c.href == *href)
+            .map(|c| c.tag.as_str())
+            .unwrap_or_default();
+        // What is known of the calendar holds unless this run took objects out of it.
+        let settled = !emptied.contains(href);
+        if settled && !tag.is_empty() && kept_at.get(href).is_some_and(|kept| kept == tag) {
+            continue; // nothing changed since it was found to hold objects
+        }
+        // A listing this run has already made is not repeated; an empty
+        // calendar is listed right before it is removed.
+        if (settled && occupied.contains(href)) || !client.list(href)?.is_empty() {
+            // The tag was read before the listing: a change in between differs
+            // from it, and the calendar is listed again on the next run.
+            store.lock().conn.execute(
+                "UPDATE caldav_calendars SET kept = ?2 WHERE href = ?1",
+                params![href, tag],
+            )?;
+        } else if client.delete(href, None)? {
+            store
+                .lock()
+                .conn
+                .execute("DELETE FROM caldav_calendars WHERE href = ?1", [href])?;
+            report.pushed += 1;
         }
     }
     if report.pushed > 0 || report.blobs_uploaded > 0 {

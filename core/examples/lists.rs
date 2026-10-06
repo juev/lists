@@ -3,6 +3,8 @@
 //! ```text
 //! cargo run --example lists -- <data folder> list
 //! cargo run --example lists -- <data folder> add "call the bank tomorrow !!"
+//! cargo run --example lists -- <data folder> note <task id> "text of the note"
+//! cargo run --example lists -- <data folder> note <task id>
 //! cargo run --example lists -- <data folder> webdav <url> <user>
 //! LISTS_PASSWORD=… cargo run --example lists -- <data folder> sync
 //! cargo run --example lists -- <data folder> sync-off
@@ -15,7 +17,7 @@ use lists_core::{Scope, Store, SyncConfig};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let usage = "usage: lists <data folder> list | add <text> | webdav <url> <user> | sync | sync-off | import <file>";
+    let usage = "usage: lists <data folder> list | add <text> | note <task id> [text] | webdav <url> <user> | sync | sync-off | import <file>";
     let (dir, command) = match args.as_slice() {
         [dir, command, ..] => (dir.clone(), command.as_str()),
         _ => return Err(usage.into()),
@@ -28,6 +30,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         ("add", [text]) => println!("{}", store.quick_add(text.clone(), None)?.id),
+        ("note", [id, text]) => store.set_notes(id.clone(), text.clone())?,
+        // Debug form, so that every character of the note is told from its neighbours.
+        ("note", [id]) => println!("{:?}", store.task(id.clone())?.notes),
         ("webdav", [url, user]) => store.set_sync_config(SyncConfig::WebDav {
             url: url.clone(),
             user: user.clone(),

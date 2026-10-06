@@ -42,6 +42,17 @@ Files get into a card on macOS in three ways: the paperclip button, dropping the
 
 Return in the notes starts a new line and Esc finishes editing. Settings → New tasks can turn that around: Return finishes, ⌥Return starts a new line. ⌘S and ⌘D open the start date and the due date from anywhere in the card; the calendar takes the arrow keys, and Return confirms. ⇧⌘R opens the repeat the same way.
 
+### Notes in Markdown
+
+Notes are read as Markdown and styled while you type; there is no separate preview. Headings (`#`), bold (`**`), italic (`*`), strikethrough (`~~`), inline code and code blocks, bullet and numbered lists, block quotes (`>`), a horizontal rule and links are shown formatted. The markup characters are hidden everywhere except in the paragraph, heading or list item the cursor is in, where they are shown dimmed. The note is stored exactly as typed, so sync, CalDAV and search see the plain text.
+
+- `- [ ]` and `- [x]` are shown as a checkbox. A click on macOS or a tap on Android toggles it and saves the note. These checkboxes are part of the text; they are not subtasks.
+- Return at the end of a list item starts the next one, with the next number in a numbered list and an empty checkbox in a task list. Return on an empty item removes its marker. A block quote continues the same way.
+- A link opens with ⌘-click on macOS and with a tap on Android while the note is not being edited. Only `http`, `https` and `mailto` addresses are links.
+- Tables are shown in a monospaced font and are not laid out as a grid. An image is shown as a link with its text and is not loaded. HTML is shown as typed.
+
+In the web interface a note is shown formatted until you click it; the click opens the plain text for editing, and leaving the field saves it. Checkboxes are not toggled there. Quick entry on Android and the share sheets keep a plain text field.
+
 Deleting and completing can be undone: ⌘Z on macOS, the Undo bar on Android. Only emptying the trash and clearing Completed ask for confirmation: both remove tasks for good. Clearing takes finished tasks with their subtasks and the records of finished repeats; open tasks and the trash stay as they are. Over CalDAV the cleared tasks end up in the trash of the other devices instead of disappearing there.
 
 ## Subtasks and projects
