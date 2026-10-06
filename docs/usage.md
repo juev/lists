@@ -40,7 +40,7 @@ On macOS ⌘N, or the "+" button in the toolbar, opens the card of a new task ri
 
 Files get into a card on macOS in three ways: the paperclip button, dropping them on the card, and ⌘V with files or an image on the clipboard. This works in the card of a new task, in the quick-entry window and in an open task. ⌘V with text on the clipboard pastes the text as usual.
 
-Return in the notes starts a new line and Esc finishes editing. Settings → New tasks can turn that around: Return finishes, ⌥Return starts a new line. ⌘S and ⌘D open the start date and the due date from anywhere in the card; the calendar takes the arrow keys, and Return confirms. In the open date popover one key sets a common choice and closes it: T for today, M for tomorrow, W for a week from now, and a digit from 1 to 9 for that many days ahead. + and − move the day selected in the calendar forward and back and leave the popover open; ⌫ removes the date. The keys are the same in any keyboard layout, and each is shown next to its button. While the time field has the keyboard, they go to it. ⇧⌘R opens the repeat the same way.
+Return in the notes starts a new line and Esc finishes editing. Settings → New tasks can turn that around: Return finishes, ⌥Return starts a new line. ⌘S and ⌘D open the start date and the due date from anywhere in the card; the calendar takes the arrow keys, and Return confirms. In the open date popover one key sets a common choice and closes it: T for today, M for tomorrow, W for a week from now, and a digit from 1 to 9 for that many days ahead. + and − move the day selected in the calendar forward and back and leave the popover open; ⌫ removes the date. The keys are the same in any keyboard layout, and each is shown next to its button. While the time field has the keyboard, they go to it. ⇧⌘R opens the repeat the same way. Esc in an open popover closes the popover alone and puts the keyboard back where it was; the next Esc closes the card.
 
 ### Notes in Markdown
 
@@ -157,7 +157,7 @@ A reminder set on a task itself replaces the one derived from its due date. The 
 | ⇧Tab | back through the chips, from the first one to the notes |
 | ⌥Tab | a tab character in the notes |
 | Space or Return on a chip | what a click on it does: its date, repeat or tag popover, its menu, or the removal of a tag |
-| Esc | close the open card and go back to the list |
+| Esc | close the open popover of a chip; without one, close the open card and go back to the list |
 | Space or ⌘Enter | complete |
 | ⌘T | due today |
 | ⌘] and ⌘[ | make a subtask, move a level up |
