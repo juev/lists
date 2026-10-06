@@ -6,10 +6,19 @@
 //! conditional requests are honoured. A calendar is a folder with a `.props`
 //! file; a file named `.no-custom-props` in the served root makes the server
 //! drop properties it does not know, as some real servers do. A file named
-//! `.race` stages a concurrent write (see `handle`).
+//! `.race` stages a concurrent write (see `handle`). When a file named
+//! `.requests` exists in the served root, every authorised request is appended
+//! to it as `METHOD /path` (a PROPFIND also carries its depth, a REPORT its
+//! kind). `.home` holds the path the server names as the calendar home.
+//!
+//! Calendars carry a change tag and a sync token, and answer the
+//! `sync-collection` and `calendar-multiget` reports. `.no-ctag`, `.no-sync`
+//! and `.no-report` in the served root turn off the tag, the token with its
+//! report, and both reports.
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+use std::io::Write;
 use std::path::Path;
 
 use tiny_http::{Header, Method, Request, Response, Server};
@@ -90,6 +99,91 @@ fn hidden(name: &str) -> bool {
     name.starts_with('.')
 }
 
+/// Names and ETags of the files in a collection, in name order.
+fn members(dir: &Path) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|e| e.unwrap())
+        .filter(|e| e.path().is_file() && !hidden(&e.file_name().to_string_lossy()))
+        .map(|e| {
+            (
+                e.file_name().to_string_lossy().into_owned(),
+                etag(&std::fs::read(e.path()).unwrap()),
+            )
+        })
+        .collect();
+    out.sort();
+    out
+}
+
+/// Changes whenever a member is added, removed or rewritten.
+fn ctag(dir: &Path) -> String {
+    let mut hasher = DefaultHasher::new();
+    members(dir).hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
+}
+
+const TOKEN: &str = "http://test.invalid/sync/";
+
+/// The token for the calendar as it is now. What it stands for is kept in a
+/// hidden file, so that a later report can tell what changed since.
+fn sync_token(dir: &Path) -> String {
+    let tag = ctag(dir);
+    let listing: String = members(dir).iter().map(|(n, e)| format!("{n}\t{e}\n")).collect();
+    std::fs::write(dir.join(format!(".sync-{tag}")), listing).unwrap();
+    format!("{TOKEN}{tag}")
+}
+
+fn multistatus(inner: &str) -> String {
+    format!(
+        r#"<?xml version="1.0"?><d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">{inner}</d:multistatus>"#
+    )
+}
+
+/// Answer to a `sync-collection` report; `None` when the token is not known.
+fn sync_report(dir: &Path, base: &str, body: &str) -> Option<String> {
+    let token = element(body, "sync-token")?;
+    let then = std::fs::read_to_string(dir.join(format!(".sync-{}", token.strip_prefix(TOKEN)?))).ok()?;
+    let then: Vec<(String, String)> = then
+        .lines()
+        .filter_map(|l| l.split_once('\t').map(|(n, e)| (n.to_string(), e.to_string())))
+        .collect();
+    let now = members(dir);
+    let mut xml = String::new();
+    for (name, tag) in now.iter().filter(|m| !then.contains(m)) {
+        xml.push_str(&format!(
+            "<d:response><d:href>{base}/{name}</d:href><d:propstat><d:prop><d:getetag>{}</d:getetag></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>",
+            escape(tag)
+        ));
+    }
+    for (name, _) in then.iter().filter(|(n, _)| !now.iter().any(|(m, _)| m == n)) {
+        xml.push_str(&format!(
+            "<d:response><d:href>{base}/{name}</d:href><d:status>HTTP/1.1 404 Not Found</d:status></d:response>"
+        ));
+    }
+    xml.push_str(&format!("<d:sync-token>{}</d:sync-token>", sync_token(dir)));
+    Some(multistatus(&xml))
+}
+
+/// Answer to a `calendar-multiget` report: the objects named in the request.
+fn multiget_report(root: &Path, body: &str) -> String {
+    let mut xml = String::new();
+    for href in body.split("href>").skip(1).step_by(2) {
+        let href = href.split('<').next().unwrap_or_default();
+        match std::fs::read(root.join(href.trim_start_matches('/'))) {
+            Ok(data) => xml.push_str(&format!(
+                "<d:response><d:href>{href}</d:href><d:propstat><d:prop><d:getetag>{}</d:getetag><c:calendar-data>{}</c:calendar-data></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>",
+                escape(&etag(&data)),
+                escape(&String::from_utf8_lossy(&data))
+            )),
+            Err(_) => xml.push_str(&format!(
+                "<d:response><d:href>{href}</d:href><d:status>HTTP/1.1 404 Not Found</d:status></d:response>"
+            )),
+        }
+    }
+    multistatus(&xml)
+}
+
 fn handle(mut request: Request, root: &Path) {
     if header(&request, "Authorization").as_deref() != Some(AUTH) {
         return request.respond(Response::empty(401)).unwrap();
@@ -98,6 +192,20 @@ fn handle(mut request: Request, root: &Path) {
     let relative = url.trim_start_matches('/').trim_end_matches('/');
     let path = root.join(relative);
     let method = request.method().clone();
+    if root.join(".requests").exists() {
+        let detail = match (method.as_str(), header(&request, "Depth")) {
+            ("PROPFIND", Some(depth)) => format!(" depth={depth}"),
+            // The body is not read yet; the header tells the two reports apart.
+            ("REPORT", Some(_)) => " sync-collection".to_string(),
+            ("REPORT", None) => " calendar-multiget".to_string(),
+            _ => String::new(),
+        };
+        let mut log = std::fs::OpenOptions::new()
+            .append(true)
+            .open(root.join(".requests"))
+            .unwrap();
+        writeln!(log, "{method} {url}{detail}").unwrap();
+    }
     let if_match = header(&request, "If-Match");
     let if_none_match = header(&request, "If-None-Match");
     // Test hook for a concurrent writer: `.race` holds a path and new content.
@@ -190,7 +298,7 @@ fn handle(mut request: Request, root: &Path) {
                     format!("/{relative}")
                 };
                 let mut xml = String::from(
-                    r#"<?xml version="1.0"?><d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav" xmlns:a="http://apple.com/ns/ical/" xmlns:l="https://evsyukov.org/ns/lists">"#,
+                    r#"<?xml version="1.0"?><d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav" xmlns:a="http://apple.com/ns/ical/" xmlns:cs="http://calendarserver.org/ns/" xmlns:l="https://evsyukov.org/ns/lists">"#,
                 );
                 let collection = |href: &str, dir: &Path| {
                     let props = read_props(dir);
@@ -202,6 +310,18 @@ fn handle(mut request: Request, root: &Path) {
                     );
                     if calendar {
                         inner.push_str(r#"<c:supported-calendar-component-set><c:comp name="VTODO"/></c:supported-calendar-component-set>"#);
+                        if !root.join(".no-ctag").exists() {
+                            inner.push_str(&format!("<cs:getctag>{}</cs:getctag>", ctag(dir)));
+                        }
+                        if !root.join(".no-sync").exists() {
+                            inner.push_str(&format!("<d:sync-token>{}</d:sync-token>", sync_token(dir)));
+                        }
+                    }
+                    if let Ok(home) = std::fs::read_to_string(root.join(".home")) {
+                        inner.push_str(&format!(
+                            "<c:calendar-home-set><d:href>{}</d:href></c:calendar-home-set>",
+                            home.trim()
+                        ));
                     }
                     if let Some(name) = get("name") {
                         inner.push_str(&format!("<d:displayname>{name}</d:displayname>"));
@@ -241,6 +361,29 @@ fn handle(mut request: Request, root: &Path) {
                     .with_status_code(207)
                     .with_header(Header::from_bytes("Content-Type", "application/xml").unwrap());
                 return request.respond(response).unwrap();
+            }
+        }
+        Method::NonStandard(ref m) if m.as_str() == "REPORT" && !root.join(".no-report").exists() => {
+            let mut body = String::new();
+            request.as_reader().read_to_string(&mut body).unwrap();
+            let answer = if !path.is_dir() {
+                None
+            } else if body.contains("calendar-multiget") {
+                Some(multiget_report(root, &body))
+            } else if body.contains("sync-collection") && !root.join(".no-sync").exists() {
+                sync_report(&path, &format!("/{relative}"), &body)
+            } else {
+                None
+            };
+            match answer {
+                Some(xml) => {
+                    let response = Response::from_string(xml)
+                        .with_status_code(207)
+                        .with_header(Header::from_bytes("Content-Type", "application/xml").unwrap());
+                    return request.respond(response).unwrap();
+                }
+                // RFC 6578 asks for 403 with a precondition element on a token that is not valid.
+                None => 403,
             }
         }
         _ => 405,

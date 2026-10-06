@@ -139,6 +139,14 @@ cargo run --example webdav -- /tmp/lists-dav 8765
 
 This serves a folder over WebDAV and CalDAV with user `user` and password `secret`. Point the macOS app at `http://127.0.0.1:8765` and the Android emulator at `http://10.0.2.2:8765`. `cargo run --example lists` is a small command-line tool for looking into a data folder; it takes the password from `LISTS_PASSWORD`.
 
+To check CalDAV sync against a real server, point the ignored test at it. It creates and removes its own tasks and one calendar, and leaves the inbox calendar behind:
+
+```sh
+cd core
+LISTS_CALDAV_URL=https://example.org/dav/calendars/me/ LISTS_CALDAV_USER=me LISTS_CALDAV_PASSWORD=… \
+  cargo test --test caldav real_server -- --ignored
+```
+
 ## Status
 
 Version 0.1.0-rc.3, a release candidate. What is implemented and how each part was checked is listed at the end of [docs/specs/product.md](docs/specs/product.md).

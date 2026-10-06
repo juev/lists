@@ -379,8 +379,7 @@ impl Store {
             }
             SyncConfig::CalDav { url, user } => {
                 let _running = self.sync_lock.lock().unwrap_or_else(|p| p.into_inner());
-                let client = crate::caldav::client::Client::connect(&url, &user, &self.password(&user)?)?;
-                crate::caldav::engine::sync(self, &client)?
+                crate::caldav::engine::run(self, &url, &user, &self.password(&user)?)?
             }
         }))
     }
@@ -462,7 +461,7 @@ impl Store {
         tx.execute_batch(
             "DELETE FROM peers; DELETE FROM outbox; DELETE FROM blobs_uploaded;
              DELETE FROM caldav_calendars; DELETE FROM caldav_items;
-             DELETE FROM meta WHERE key IN ('sync_ok', 'sync_error', 'caldav_filters_sent');
+             DELETE FROM meta WHERE key IN ('sync_ok', 'sync_error', 'caldav_filters_sent', 'caldav_home');
              UPDATE fields SET dirty = 1;",
         )?;
         db::meta_set(&tx, "force_snapshot", "1")?;

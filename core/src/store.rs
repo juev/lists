@@ -2,6 +2,7 @@
 //! to call from any thread; apps call them off the main thread.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use chrono::{NaiveDate, NaiveDateTime};
@@ -34,6 +35,8 @@ pub struct Store {
     pub(crate) dir: PathBuf,
     pub(crate) compact_after: Mutex<u32>,
     pub(crate) sync_password: Mutex<Option<String>>,
+    /// How many objects CalDAV sync has built for upload or comparison.
+    pub(crate) caldav_renders: AtomicU64,
 }
 
 /// One local write transaction: stamps and records field changes, then
@@ -295,6 +298,11 @@ impl Store {
     }
 
     #[doc(hidden)]
+    pub fn caldav_renders_for_tests(&self) -> u64 {
+        self.caldav_renders.load(Ordering::Relaxed)
+    }
+
+    #[doc(hidden)]
     pub fn data_dir(&self) -> &Path {
         &self.dir
     }
@@ -325,6 +333,7 @@ impl Store {
             dir,
             compact_after: Mutex::new(64),
             sync_password: Mutex::new(None),
+            caldav_renders: AtomicU64::new(0),
         }))
     }
 

@@ -5,6 +5,7 @@
 //! only then local changes go up.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::sync::atomic::Ordering;
 
 use base64::Engine;
 use rusqlite::{params, OptionalExtension};
@@ -15,19 +16,24 @@ use super::client::{Calendar, Client, Condition, Written};
 use super::ical;
 use super::map::{self, Registers, Remote, Standard, TaskState};
 use crate::db::{self, Change, Touched, KIND_ATTACHMENT, KIND_FILTER, KIND_LIST, KIND_TASK};
-use crate::error::Result;
+use crate::error::{AppError, Result};
 use crate::hlc;
 use crate::model::{Repeat, SyncReport, INBOX_ID};
 use crate::store::{append_pos_in_list, complete_in, Store, Writer};
 
 const INBOX_SLUG: &str = "lists-inbox";
 const MAX_ID: usize = 200;
+const HOME_KEY: &str = "caldav_home";
+/// Objects asked for in one `calendar-multiget`.
+const MULTIGET: usize = 20;
 
 struct Item {
     href: String,
     calendar: String,
     etag: String,
     raw: String,
+    /// `task_version` at the last reconciliation with this object.
+    synced: Option<String>,
 }
 
 fn registers(conn: &rusqlite::Connection, kind: &str, id: &str) -> Result<Registers> {
@@ -56,6 +62,20 @@ fn task_state(conn: &rusqlite::Connection, id: &str) -> Result<TaskState> {
             .insert(attachment.clone(), registers(conn, KIND_ATTACHMENT, &attachment)?);
     }
     Ok(state)
+}
+
+/// Changes whenever a register of the task or of one of its attachments does:
+/// a register is only ever replaced by one with a greater stamp, and a new one
+/// raises the count.
+fn task_version(conn: &rusqlite::Connection, id: &str) -> Result<String> {
+    let (stamp, count): (Option<String>, i64) = conn
+        .prepare_cached(
+            "SELECT max(stamp), count(*) FROM fields
+             WHERE (kind = ?1 AND id = ?3)
+                OR (kind = ?2 AND id IN (SELECT id FROM attachments WHERE task_id = ?3))",
+        )?
+        .query_row(params![KIND_TASK, KIND_ATTACHMENT, id], |r| Ok((r.get(0)?, r.get(1)?)))?;
+    Ok(format!("{}/{count}", stamp.unwrap_or_default()))
 }
 
 fn usable_id(id: &str) -> bool {
@@ -137,7 +157,7 @@ impl Store {
             .lock()
             .conn
             .query_row(
-                "SELECT href, calendar, etag, raw FROM caldav_items WHERE uid = ?1",
+                "SELECT href, calendar, etag, raw, synced FROM caldav_items WHERE uid = ?1",
                 [uid],
                 |r| {
                     Ok(Item {
@@ -145,13 +165,24 @@ impl Store {
                         calendar: r.get(1)?,
                         etag: r.get(2)?,
                         raw: r.get(3)?,
+                        synced: r.get(4)?,
                     })
                 },
             )
             .optional()?)
     }
 
-    fn save_item(&self, href: &str, calendar: &str, uid: &str, etag: &str, raw: &str) -> Result<()> {
+    /// Records what the server holds. `synced` is the task's version when the
+    /// object is known to say the same as the task, `None` when that has to be found out.
+    fn save_item(
+        &self,
+        href: &str,
+        calendar: &str,
+        uid: &str,
+        etag: &str,
+        raw: &str,
+        synced: Option<&str>,
+    ) -> Result<()> {
         let inner = self.lock();
         // One object per task: a copy left behind in another calendar is forgotten.
         inner.conn.execute(
@@ -159,11 +190,30 @@ impl Store {
             params![uid, href],
         )?;
         inner.conn.execute(
-            "INSERT INTO caldav_items (href, calendar, uid, etag, raw) VALUES (?1, ?2, ?3, ?4, ?5)
-             ON CONFLICT (href) DO UPDATE SET calendar = excluded.calendar, uid = excluded.uid, etag = excluded.etag, raw = excluded.raw",
-            params![href, calendar, uid, etag, raw],
+            "INSERT INTO caldav_items (href, calendar, uid, etag, raw, synced) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT (href) DO UPDATE SET calendar = excluded.calendar, uid = excluded.uid, etag = excluded.etag,
+                raw = excluded.raw, synced = excluded.synced",
+            params![href, calendar, uid, etag, raw, synced],
         )?;
         Ok(())
+    }
+
+    fn mark_synced(&self, href: &str, version: &str) -> Result<()> {
+        self.lock().conn.execute(
+            "UPDATE caldav_items SET synced = ?2 WHERE href = ?1",
+            params![href, version],
+        )?;
+        Ok(())
+    }
+
+    /// Objects known in a calendar: address → (ETag, task).
+    fn items_in(&self, calendar: &str) -> Result<BTreeMap<String, (String, String)>> {
+        let inner = self.lock();
+        let mut stmt = inner
+            .conn
+            .prepare("SELECT href, etag, uid FROM caldav_items WHERE calendar = ?1")?;
+        let rows = stmt.query_map([calendar], |r| Ok((r.get(0)?, (r.get(1)?, r.get(2)?))))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
     fn forget_item(&self, href: &str) -> Result<()> {
@@ -388,11 +438,28 @@ fn desired_props(list_id: &str, registers: &Registers) -> (String, String, Strin
     (name, text(registers, "color"), encode_registers(registers))
 }
 
-pub fn sync(store: &Store, client: &Client) -> Result<SyncReport> {
+/// One run against the server at `url`. The collection of calendars is looked
+/// up once and remembered (C18).
+pub fn run(store: &Store, url: &str, user: &str, password: &str) -> Result<SyncReport> {
+    let known = db::meta_get(&store.lock().conn, HOME_KEY)?;
+    if let Some(home) = known {
+        let client = Client::at(url, user, password, &home)?;
+        if let Some(calendars) = client.calendars()? {
+            return sync(store, &client, calendars);
+        }
+    }
+    let client = Client::connect(url, user, password)?;
+    let calendars = client
+        .calendars()?
+        .ok_or_else(|| AppError::sync(format!("{} does not exist on the server", client.home())))?;
+    db::meta_set(&store.lock().conn, HOME_KEY, client.home())?;
+    sync(store, &client, calendars)
+}
+
+fn sync(store: &Store, client: &Client, calendars: Vec<Calendar>) -> Result<SyncReport> {
     let mut report = SyncReport::default();
 
     // ---- lists ↔ calendars ----
-    let calendars = client.calendars()?;
     let mut calendar_of: HashMap<String, String> = HashMap::new();
     let mut seen_calendars: BTreeSet<String> = BTreeSet::new();
     for calendar in &calendars {
@@ -408,6 +475,15 @@ pub fn sync(store: &Store, client: &Client) -> Result<SyncReport> {
         let inner = store.lock();
         let mut stmt = inner.conn.prepare("SELECT href, list_id, sent FROM caldav_calendars")?;
         let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+        rows.collect::<rusqlite::Result<_>>()?
+    };
+    // Change tag and sync token of each calendar as it was last read.
+    let read_at: HashMap<String, (String, String)> = {
+        let inner = store.lock();
+        let mut stmt = inner
+            .conn
+            .prepare("SELECT href, coalesce(tag, ''), coalesce(token, '') FROM caldav_calendars")?;
+        let rows = stmt.query_map([], |r| Ok((r.get(0)?, (r.get(1)?, r.get(2)?))))?;
         rows.collect::<rusqlite::Result<_>>()?
     };
     for (href, list_id, _) in &known_calendars {
@@ -527,38 +603,98 @@ pub fn sync(store: &Store, client: &Client) -> Result<SyncReport> {
     // ---- objects the server has ----
     let mut listed: BTreeSet<String> = BTreeSet::new();
     let mut seen_uids: BTreeSet<String> = BTreeSet::new();
+    let mut multiget = true;
     for (list_id, calendar) in &calendar_of {
-        for (href, etag) in client.list(calendar)? {
+        let remote = calendars.iter().find(|c| c.href == *calendar);
+        let tag = remote.map(|c| c.tag.as_str()).unwrap_or_default();
+        let (read_tag, read_token) = read_at.get(calendar).cloned().unwrap_or_default();
+        let held = store.items_in(calendar)?;
+        // An object whose ETag is not known is read whatever the calendar says.
+        let unread = held.values().any(|(etag, _)| etag.is_empty());
+        if !tag.is_empty() && read_tag == tag && !unread {
+            // C19: nothing in the calendar changed since it was last read.
+            for (href, (_, uid)) in held {
+                listed.insert(href);
+                seen_uids.insert(uid);
+            }
+            continue;
+        }
+
+        // C20: what the calendar holds now, from the changes since the last
+        // read or from a full listing, and the token that describes it.
+        let delta = if read_token.is_empty() {
+            None
+        } else {
+            client.changes_since(calendar, &read_token)?
+        };
+        let (current, token) = match delta {
+            Some(delta) => {
+                let mut current: BTreeMap<String, String> = held
+                    .iter()
+                    .filter(|(href, _)| !delta.removed.contains(href))
+                    .map(|(href, (etag, _))| (href.clone(), etag.clone()))
+                    .collect();
+                current.extend(delta.changed);
+                (current.into_iter().collect::<Vec<_>>(), delta.token)
+            }
+            // The token was read before the listing: a change in between is
+            // reported again next time and found to be known.
+            None => (
+                client.list(calendar)?,
+                remote.map(|c| c.sync_token.clone()).unwrap_or_default(),
+            ),
+        };
+
+        let mut changed: Vec<(String, String)> = Vec::new();
+        for (href, etag) in current {
             listed.insert(href.clone());
-            let known: Option<(String, String)> = store
-                .lock()
-                .conn
-                .query_row("SELECT etag, uid FROM caldav_items WHERE href = ?1", [&href], |r| {
-                    Ok((r.get(0)?, r.get(1)?))
-                })
-                .optional()?;
-            if let Some((known_etag, uid)) = &known {
-                if !etag.is_empty() && *known_etag == etag {
+            match held.get(&href) {
+                Some((known_etag, uid)) if !etag.is_empty() && *known_etag == etag => {
                     seen_uids.insert(uid.clone());
-                    continue;
+                }
+                _ => changed.push((href, etag)),
+            }
+        }
+        for chunk in changed.chunks(MULTIGET) {
+            // C21: one request for the lot where the server can; the rest one by one.
+            let mut fetched: HashMap<String, (String, String)> = HashMap::new();
+            if chunk.len() > 1 && multiget {
+                let hrefs: Vec<&str> = chunk.iter().map(|(href, _)| href.as_str()).collect();
+                match client.multiget(calendar, &hrefs)? {
+                    Some(objects) => fetched.extend(objects.into_iter().map(|o| (o.href, (o.body, o.etag)))),
+                    None => multiget = false,
                 }
             }
-            let Some((body, fresh_etag)) = client.get(&href)? else {
-                listed.remove(&href);
-                continue;
-            };
-            let Some(parsed) = ical::parse(&body) else {
-                continue;
-            };
-            let Some(remote) = map::read(&parsed).filter(|r| usable_id(&r.uid)) else {
-                continue; // an event, or something this app cannot identify
-            };
-            report.pulled += store.merge_object(list_id, &remote)?;
-            report.blobs_downloaded += store.save_blobs(&parsed)?;
-            let etag = if fresh_etag.is_empty() { etag } else { fresh_etag };
-            store.save_item(&href, calendar, &remote.uid, &etag, &body)?;
-            seen_uids.insert(remote.uid);
+            for (href, etag) in chunk {
+                let (body, fresh_etag) = match fetched.remove(href) {
+                    Some(object) => object,
+                    None => match client.get(href)? {
+                        Some(object) => object,
+                        None => {
+                            listed.remove(href);
+                            continue;
+                        }
+                    },
+                };
+                let Some(parsed) = ical::parse(&body) else {
+                    continue;
+                };
+                let Some(remote) = map::read(&parsed).filter(|r| usable_id(&r.uid)) else {
+                    continue; // an event, or something this app cannot identify
+                };
+                report.pulled += store.merge_object(list_id, &remote)?;
+                report.blobs_downloaded += store.save_blobs(&parsed)?;
+                let etag = if fresh_etag.is_empty() { etag } else { &fresh_etag };
+                store.save_item(href, calendar, &remote.uid, etag, &body, None)?;
+                seen_uids.insert(remote.uid);
+            }
         }
+        // The tag is the one read before the objects: a change that landed in
+        // between differs from it and is picked up by the next run.
+        store.lock().conn.execute(
+            "UPDATE caldav_calendars SET tag = ?2, token = ?3 WHERE href = ?1",
+            params![calendar, tag, token],
+        )?;
     }
 
     // ---- objects that disappeared (C14) ----
@@ -613,7 +749,7 @@ pub fn sync(store: &Store, client: &Client) -> Result<SyncReport> {
                     report.pushed += 1;
                 } else {
                     // Changed on the server meanwhile: read it again on the next run.
-                    store.save_item(&item.href, &item.calendar, &id, "", &item.raw)?;
+                    store.save_item(&item.href, &item.calendar, &id, "", &item.raw, None)?;
                 }
             }
             continue;
@@ -628,6 +764,12 @@ pub fn sync(store: &Store, client: &Client) -> Result<SyncReport> {
             store.forget_item(&old.href)?;
             item = None;
         }
+        // C17: nothing changed on either side since the two were last compared.
+        if let Some(synced) = item.as_ref().and_then(|i| i.synced.as_deref()) {
+            if synced == task_version(&store.lock().conn, &id)? {
+                continue;
+            }
+        }
         let href = item
             .as_ref()
             .map_or_else(|| format!("{calendar}{}", object_name(&id)), |i| i.href.clone());
@@ -635,12 +777,16 @@ pub fn sync(store: &Store, client: &Client) -> Result<SyncReport> {
         let mut etag = item.as_ref().map(|i| i.etag.clone());
         // C13: on a refusal, read what is there, merge and try once more.
         for attempt in 0..2 {
+            // Taken before the state: an edit that lands in between is seen on the next run.
+            let version = task_version(&store.lock().conn, &id)?;
             let state = task_state(&store.lock().conn, &id)?;
             let rendered = map::render(&id, &state, base.as_ref(), &blob, now);
+            store.caldav_renders.fetch_add(1, Ordering::Relaxed);
             if base
                 .as_ref()
                 .is_some_and(|b| map::fingerprint(b) == map::fingerprint(&rendered))
             {
+                store.mark_synced(&href, &version)?;
                 break; // C16: nothing to say
             }
             let body = ical::serialize(&rendered);
@@ -651,7 +797,14 @@ pub fn sync(store: &Store, client: &Client) -> Result<SyncReport> {
             };
             match client.put(&href, &body, condition)? {
                 Written::Done(new_etag) => {
-                    store.save_item(&href, calendar, &id, new_etag.as_deref().unwrap_or(""), &body)?;
+                    store.save_item(
+                        &href,
+                        calendar,
+                        &id,
+                        new_etag.as_deref().unwrap_or(""),
+                        &body,
+                        Some(&version),
+                    )?;
                     report.pushed += 1;
                     let managed = |c: Option<&ical::Component>| -> BTreeSet<String> {
                         c.and_then(|c| c.sub("VTODO"))
@@ -676,7 +829,7 @@ pub fn sync(store: &Store, client: &Client) -> Result<SyncReport> {
                     if let Some(remote) = parsed.as_ref().and_then(map::read).filter(|r| r.uid == id) {
                         report.pulled += store.merge_object(&list_id, &remote)?;
                     }
-                    store.save_item(&href, calendar, &id, &fresh_etag, &fresh)?;
+                    store.save_item(&href, calendar, &id, &fresh_etag, &fresh, None)?;
                     base = parsed;
                     etag = Some(fresh_etag);
                 }
