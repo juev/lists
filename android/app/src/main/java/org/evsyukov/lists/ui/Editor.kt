@@ -28,6 +28,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Add
@@ -442,6 +445,7 @@ fun MultiChoiceDialog(title: String, options: List<String>, selected: List<Boole
 private fun TagDialog(known: List<String>, onDismiss: () -> Unit, onAdd: (String) -> Unit) {
     var text by remember { mutableStateOf("") }
     AlertDialog(
+        modifier = Modifier.aboveKeyboard(),
         onDismissRequest = onDismiss,
         title = { Text(str(R.string.tag)) },
         text = {
@@ -540,6 +544,7 @@ fun RepeatDialog(value: Repeat?, onPick: (Repeat?) -> Unit, onDismiss: () -> Uni
     var count by remember { mutableStateOf(value?.count?.toString().orEmpty()) }
 
     AlertDialog(
+        modifier = Modifier.aboveKeyboard(),
         onDismissRequest = onDismiss,
         title = { Text(str(R.string.repeat)) },
         text = {
@@ -629,6 +634,13 @@ fun RepeatDialog(value: Repeat?, onPick: (Repeat?) -> Unit, onDismiss: () -> Uni
     )
 }
 
+/**
+ * For a dialog with text fields: without it the dialog keeps its height when
+ * the keyboard opens, and its lower fields and buttons end up underneath.
+ */
+@Composable
+private fun Modifier.aboveKeyboard() = windowInsetsPadding(WindowInsets.safeDrawing)
+
 @Composable
 private fun SwitchRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
     Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -652,6 +664,7 @@ fun ListDialog(list: TaskList?, model: MainViewModel, onDismiss: () -> Unit) {
     val sorts = listOf(SortMode.MANUAL to str(R.string.sort_manual), SortMode.DUE to str(R.string.sort_due), SortMode.PRIORITY to str(R.string.sort_priority), SortMode.TITLE to str(R.string.sort_title))
 
     AlertDialog(
+        modifier = Modifier.aboveKeyboard(),
         onDismissRequest = onDismiss,
         title = { Text(if (list == null) str(R.string.new_list) else list.displayName()) },
         text = {
@@ -755,6 +768,7 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
     }
 
     AlertDialog(
+        modifier = Modifier.aboveKeyboard(),
         onDismissRequest = onDismiss,
         title = { Text(str(R.string.settings)) },
         text = {
@@ -914,6 +928,7 @@ fun FilterDialog(filter: SavedFilter?, state: UiState, model: MainViewModel, onD
     val matching = remember(spec) { runCatching { Repo.store.previewFilter(spec).size }.getOrDefault(0) }
 
     AlertDialog(
+        modifier = Modifier.aboveKeyboard(),
         onDismissRequest = onDismiss,
         title = { Text(filter?.name ?: str(R.string.new_filter)) },
         text = {
