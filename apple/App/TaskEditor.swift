@@ -65,7 +65,9 @@ struct TaskEditor: View {
                     notesFocused = editing
                     if !editing { commitNotes() }
                 },
-                onFinish: finish)
+                onFinish: finish,
+                // The binding gets the new text first; the note is saved right after it.
+                onToggle: { DispatchQueue.main.async { commitNotes() } })
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
