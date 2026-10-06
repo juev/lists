@@ -27,6 +27,22 @@ fn start() -> Dav {
     }
 }
 
+impl Dav {
+    /// Requests the server received while `run` was going.
+    fn requests(&self, run: impl FnOnce()) -> Vec<String> {
+        let log = self.root.path().join(".requests");
+        std::fs::write(&log, "").unwrap();
+        run();
+        let seen = std::fs::read_to_string(&log).unwrap();
+        std::fs::remove_file(&log).unwrap();
+        seen.lines().map(str::to_string).collect()
+    }
+
+    fn storage(&self) -> std::path::PathBuf {
+        self.root.path().join("dav/user/lists/v1")
+    }
+}
+
 fn connect(d: &Device, dav: &Dav, password: &str) {
     d.set_sync_config(SyncConfig::WebDav {
         url: dav.url.clone(),
@@ -95,6 +111,8 @@ fn compaction_works_over_webdav() {
     }
     let logs = std::fs::read_dir(dav.root.path().join("dav/user/lists/v1/log"))
         .unwrap()
+        .flatten()
+        .filter(|f| f.file_name().to_string_lossy().ends_with(".jsonl"))
         .count();
     assert!(logs <= 2, "old log files were deleted over HTTP, {logs} left");
     b.sync_now().unwrap();
@@ -168,4 +186,71 @@ fn password_is_kept_out_of_the_database_and_asked_for_again_after_restart() {
     assert!(err.contains("password is not available"), "{err}");
     store.set_sync_password(Some("secret".into()));
     store.sync_now().unwrap();
+}
+
+const LOG: &str = "PROPFIND /dav/user/lists/v1/log/ depth=1";
+const SNAP: &str = "PROPFIND /dav/user/lists/v1/snap/ depth=1";
+
+/// A and B in step; A compacts after every file it writes.
+fn in_step(dav: &Dav) -> (Device, Device) {
+    let (a, b) = (device(), device());
+    connect(&a, dav, "secret");
+    connect(&b, dav, "secret");
+    add(&a, "t1");
+    a.sync_now().unwrap();
+    b.sync_now().unwrap();
+    a.sync_now().unwrap();
+    (a, b)
+}
+
+#[test]
+fn s17_idle_run_is_one_request() {
+    let dav = start();
+    let (a, b) = in_step(&dav);
+    for d in [&a, &b] {
+        let seen = dav.requests(|| {
+            assert_eq!(d.sync_now().unwrap(), SyncReport::default());
+        });
+        assert_eq!(seen, [LOG]);
+    }
+}
+
+#[test]
+fn s17_device_left_behind_by_compaction_catches_up_without_listing_snapshots() {
+    let dav = start();
+    let (a, b) = in_step(&dav);
+    a.set_compact_after_for_tests(0);
+    for title in ["t2", "t3"] {
+        add(&a, title);
+        a.sync_now().unwrap();
+    }
+    let seen = dav.requests(|| {
+        b.sync_now().unwrap();
+    });
+    assert!(
+        seen.iter().any(|r| r.starts_with("GET /dav/user/lists/v1/snap/")),
+        "{seen:?}"
+    );
+    assert!(!seen.contains(&SNAP.to_string()), "{seen:?}");
+    assert_eq!(view(&b, Scope::Inbox).len(), 3);
+}
+
+#[test]
+fn s17_snapshot_written_without_a_mark_is_found_by_listing() {
+    let dav = start();
+    let (a, b) = in_step(&dav);
+    a.set_compact_after_for_tests(0);
+    add(&a, "t2");
+    a.sync_now().unwrap();
+    // What a version without marks leaves behind: nothing of A in the log.
+    for entry in std::fs::read_dir(dav.storage().join("log")).unwrap().flatten() {
+        if entry.file_name().to_string_lossy().starts_with(&a.device_id()) {
+            std::fs::remove_file(entry.path()).unwrap();
+        }
+    }
+    let seen = dav.requests(|| {
+        b.sync_now().unwrap();
+    });
+    assert!(seen.contains(&SNAP.to_string()), "{seen:?}");
+    assert_eq!(view(&b, Scope::Inbox).len(), 2);
 }

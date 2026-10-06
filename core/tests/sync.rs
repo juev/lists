@@ -311,7 +311,7 @@ fn s10_s11_compaction_keeps_late_and_new_devices_complete() {
     let a_id = a.device_id();
     let a_logs: Vec<String> = files(&storage, "log")
         .into_iter()
-        .filter(|f| f.starts_with(&a_id))
+        .filter(|f| f.starts_with(&a_id) && f.ends_with(".jsonl"))
         .collect();
     assert!(a_logs.len() <= 3, "old log files are removed: {a_logs:?}");
     assert_eq!(
@@ -343,7 +343,9 @@ fn s11_device_whose_logs_are_all_compacted_is_still_readable() {
     a.set_compact_after_for_tests(0);
     add(&a, "единственная");
     sync(&a, &storage);
-    assert!(files(&storage, "log").is_empty(), "everything of A is in its snapshot");
+    // Everything of A is in its snapshot; what is left in the log is the mark that says so.
+    let left = files(&storage, "log");
+    assert!(matches!(&left[..], [mark] if mark.ends_with(".snap")), "{left:?}");
 
     sync(&c, &storage);
     assert_eq!(view(&c, Scope::Inbox), ["единственная"]);
@@ -443,6 +445,26 @@ fn s14_newer_storage_format_stops_sync_but_not_local_work() {
     assert!(err.to_string().contains("format 2"), "{err}");
     add(&a, "локально");
     assert_eq!(view(&a, Scope::Inbox), ["локально"]);
+}
+
+#[test]
+fn s14_format_raised_while_the_app_runs_is_noticed_at_the_first_unreadable_file() {
+    let storage = tempfile::tempdir().unwrap();
+    let (a, b) = (device(), device());
+    add(&a, "t1");
+    settle(&a, &b, &storage);
+
+    // Another device moved the storage on and wrote a file this version cannot read.
+    let root = storage.path().join("lists/v1");
+    std::fs::write(root.join("vault.json"), br#"{"format":2,"vault":"x"}"#).unwrap();
+    let next = format!("{}-{:010}.jsonl", a.device_id(), 2);
+    std::fs::write(
+        root.join("log").join(next),
+        format!("{{\"v\":2,\"device\":\"{}\",\"seq\":2,\"count\":0}}\n", a.device_id()),
+    )
+    .unwrap();
+    let err = b.sync_with(&DirRemote::new(storage.path())).unwrap_err();
+    assert!(err.to_string().contains("format 2"), "{err}");
 }
 
 #[test]

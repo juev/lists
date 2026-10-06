@@ -6,6 +6,8 @@ use std::path::PathBuf;
 use crate::error::{AppError, Result};
 
 pub trait Remote: Send + Sync {
+    /// Tells one storage from another within a process.
+    fn id(&self) -> String;
     /// File names directly inside `dir`. A missing directory is empty.
     fn list(&self, dir: &str) -> Result<Vec<String>>;
     fn get(&self, path: &str) -> Result<Option<Vec<u8>>>;
@@ -38,6 +40,10 @@ impl DirRemote {
 }
 
 impl Remote for DirRemote {
+    fn id(&self) -> String {
+        self.root.to_string_lossy().into_owned()
+    }
+
     fn list(&self, dir: &str) -> Result<Vec<String>> {
         let entries = match fs::read_dir(self.resolve(dir)?) {
             Ok(entries) => entries,

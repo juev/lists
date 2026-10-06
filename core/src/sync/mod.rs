@@ -3,6 +3,7 @@
 //! ```text
 //! lists/v1/vault.json
 //! lists/v1/log/<device>-<seq>.jsonl     immutable batch of field changes
+//! lists/v1/log/<device>-<seq>.snap      empty: the device has a snapshot as of <seq>
 //! lists/v1/snap/<device>-<seq>.jsonl    full state of a device as of its log <seq>
 //! lists/v1/blobs/<aa>/<sha256>          attachment content
 //! ```
@@ -77,19 +78,30 @@ fn decode(data: &[u8]) -> Option<Batch> {
     (changes.len() == header.count && text.ends_with('\n')).then_some(Batch { header, changes })
 }
 
+/// Batches of changes: log files and snapshots.
+const DATA: &str = ".jsonl";
+/// A mark in `log/` that tells readers about a snapshot without a look into `snap/`.
+const MARK: &str = ".snap";
+
+type Index = BTreeMap<String, BTreeSet<u64>>;
+
 fn file_name(device: &str, seq: u64) -> String {
-    format!("{device}-{seq:010}.jsonl")
+    format!("{device}-{seq:010}{DATA}")
 }
 
-fn parse_name(name: &str) -> Option<(String, u64)> {
-    let (device, seq) = name.strip_suffix(".jsonl")?.split_once('-')?;
+fn mark_name(device: &str, seq: u64) -> String {
+    format!("{device}-{seq:010}{MARK}")
+}
+
+fn parse_name(name: &str, suffix: &str) -> Option<(String, u64)> {
+    let (device, seq) = name.strip_suffix(suffix)?.split_once('-')?;
     (seq.len() == 10 && !device.is_empty()).then_some(())?;
     Some((device.to_string(), seq.parse().ok()?))
 }
 
-fn index(names: Vec<String>) -> BTreeMap<String, BTreeSet<u64>> {
-    let mut map: BTreeMap<String, BTreeSet<u64>> = BTreeMap::new();
-    for (device, seq) in names.iter().filter_map(|n| parse_name(n)) {
+fn index(names: &[String], suffix: &str) -> Index {
+    let mut map = Index::new();
+    for (device, seq) in names.iter().filter_map(|n| parse_name(n, suffix)) {
         map.entry(device).or_default().insert(seq);
     }
     map
@@ -160,10 +172,44 @@ impl Store {
         }
     }
 
-    fn pull(&self, remote: &dyn Remote, me: &str, logs: &BTreeMap<String, BTreeSet<u64>>) -> Result<u32> {
-        let snaps = index(remote.list(&format!("{ROOT}/snap"))?);
+    /// Whether the marks in `log/` leave something unexplained: a device whose
+    /// next file is gone although later ones exist, or a known device with
+    /// nothing left there. Versions that wrote no marks leave such traces.
+    fn marks_fall_short(&self, me: &str, logs: &Index, marks: &Index) -> Result<bool> {
+        let cursors: BTreeMap<String, u64> = {
+            let inner = self.lock();
+            let mut stmt = inner.conn.prepare("SELECT device, seq FROM peers")?;
+            let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? as u64)))?;
+            rows.collect::<rusqlite::Result<_>>()?
+        };
+        let empty = BTreeSet::new();
+        Ok(logs
+            .keys()
+            .chain(cursors.keys())
+            .filter(|d| d.as_str() != me)
+            .any(|device| {
+                let cursor = cursors.get(device).copied().unwrap_or(0);
+                let files = logs.get(device).unwrap_or(&empty);
+                if files.contains(&(cursor + 1)) || marks.get(device).and_then(|m| m.last()) > Some(&cursor) {
+                    return false;
+                }
+                files.range(cursor + 1..).next().is_some() || (files.is_empty() && !marks.contains_key(device))
+            }))
+    }
+
+    /// Reads what other devices wrote. Returns how many registers changed and
+    /// whether a file could not be read.
+    fn pull(&self, remote: &dyn Remote, me: &str, logs: &Index, marks: &Index, first: bool) -> Result<(u32, bool)> {
+        // S17: the marks name the snapshots; `snap/` is listed only when they cannot be relied on.
+        let mut snaps = marks.clone();
+        if first || self.marks_fall_short(me, logs, marks)? {
+            for (device, seqs) in index(&remote.list(&format!("{ROOT}/snap"))?, DATA) {
+                snaps.entry(device).or_default().extend(seqs);
+            }
+        }
         let devices: BTreeSet<&String> = logs.keys().chain(snaps.keys()).filter(|d| d.as_str() != me).collect();
         let mut changed = 0;
+        let mut unreadable = false;
         for device in devices {
             loop {
                 let cursor = self.cursor(device)?;
@@ -174,6 +220,7 @@ impl Store {
                     };
                     let Some(batch) = decode(&data).filter(|b| b.header.device == *device && b.header.seq == next)
                     else {
+                        unreadable = true;
                         break;
                     };
                     changed += self.merge(&batch, &BTreeMap::from([(device.clone(), next)]))?;
@@ -187,6 +234,7 @@ impl Store {
                     break;
                 };
                 let Some(batch) = decode(&data).filter(|b| b.header.device == *device) else {
+                    unreadable = true;
                     break;
                 };
                 let mut cursors = batch.header.covers.clone();
@@ -195,7 +243,7 @@ impl Store {
                 changed += self.merge(&batch, &cursors)?;
             }
         }
-        Ok(changed)
+        Ok((changed, unreadable))
     }
 
     /// Moves unsent changes into the outbox as one numbered file, then uploads the outbox.
@@ -250,7 +298,13 @@ impl Store {
     }
 
     /// Replaces this device's log files with one snapshot of its full state.
-    fn compact(&self, remote: &dyn Remote, me: &str, own_logs: &BTreeSet<u64>) -> Result<()> {
+    fn compact(
+        &self,
+        remote: &dyn Remote,
+        me: &str,
+        own_logs: &BTreeSet<u64>,
+        own_marks: &BTreeSet<u64>,
+    ) -> Result<()> {
         let (body, seq) = {
             let inner = self.lock();
             let seq = own_seq(&inner.conn)?;
@@ -276,13 +330,17 @@ impl Store {
             };
             (encode(&header, &changes)?, seq)
         };
-        let old_snaps = index(remote.list(&format!("{ROOT}/snap"))?)
+        let old_snaps = index(&remote.list(&format!("{ROOT}/snap"))?, DATA)
             .remove(me)
             .unwrap_or_default();
         remote.put(&format!("{ROOT}/snap/{}", file_name(me, seq)), &body)?;
-        // Only after the snapshot is in place do the files it replaces go away.
+        // Only after the snapshot and its mark are in place do the files they replace go away.
+        remote.put(&format!("{ROOT}/log/{}", mark_name(me, seq)), b"")?;
         for old in own_logs.iter().filter(|s| **s <= seq) {
             remote.delete(&format!("{ROOT}/log/{}", file_name(me, *old)))?;
+        }
+        for old in own_marks.iter().filter(|s| **s < seq) {
+            remote.delete(&format!("{ROOT}/log/{}", mark_name(me, *old)))?;
         }
         for old in old_snaps.iter().filter(|s| **s < seq) {
             remote.delete(&format!("{ROOT}/snap/{}", file_name(me, *old)))?;
@@ -338,9 +396,22 @@ impl Store {
         let me = self.device_id();
         let mut report = SyncReport::default();
 
-        self.check_vault(remote)?;
-        let mut logs = index(remote.list(&format!("{ROOT}/log"))?);
-        report.pulled = self.pull(remote, &me, &logs)?;
+        // S14, S17: the format and the snapshots are looked at once per storage
+        // and process, and again when something does not add up.
+        let storage = remote.id();
+        let first = self.storage_seen.lock().unwrap_or_else(|p| p.into_inner()).as_deref() != Some(storage.as_str());
+        if first {
+            self.check_vault(remote)?;
+        }
+        let names = remote.list(&format!("{ROOT}/log"))?;
+        let mut logs = index(&names, DATA);
+        let own_marks = index(&names, MARK).remove(&me).unwrap_or_default();
+        let (pulled, unreadable) = self.pull(remote, &me, &logs, &index(&names, MARK), first)?;
+        if unreadable && !first {
+            self.check_vault(remote)?;
+        }
+        *self.storage_seen.lock().unwrap_or_else(|p| p.into_inner()) = Some(storage);
+        report.pulled = pulled;
         report.pushed = self.push(remote, &me)?;
 
         let mut own_logs = logs.remove(&me).unwrap_or_default();
@@ -351,7 +422,7 @@ impl Store {
         let limit = *self.compact_after.lock().unwrap_or_else(|p| p.into_inner());
         let forced = db::meta_get(&self.lock().conn, "force_snapshot")?.is_some();
         if forced || own_logs.len() as u32 > limit {
-            self.compact(remote, &me, &own_logs)?;
+            self.compact(remote, &me, &own_logs, &own_marks)?;
             db::meta_del(&self.lock().conn, "force_snapshot")?;
         }
 
@@ -514,9 +585,13 @@ mod tests {
 
     #[test]
     fn names_round_trip() {
-        assert_eq!(parse_name(&file_name("abc", 42)), Some(("abc".into(), 42)));
-        assert_eq!(parse_name("abc-42.jsonl"), None);
-        assert_eq!(parse_name("readme.txt"), None);
+        assert_eq!(parse_name(&file_name("abc", 42), DATA), Some(("abc".into(), 42)));
+        assert_eq!(parse_name("abc-42.jsonl", DATA), None);
+        assert_eq!(parse_name("readme.txt", DATA), None);
+        // A mark is not a batch and a batch is not a mark.
+        assert_eq!(parse_name(&mark_name("abc", 42), MARK), Some(("abc".into(), 42)));
+        assert_eq!(parse_name(&mark_name("abc", 42), DATA), None);
+        assert_eq!(parse_name(&file_name("abc", 42), MARK), None);
     }
 
     #[test]
