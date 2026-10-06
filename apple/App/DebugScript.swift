@@ -14,6 +14,9 @@ import AppKit
 /// `task` (prints the due date and the repeat of the selected task), `done` (completes it),
 /// `cards` (prints the open cards and the selected row), `rows` (prints the rows in the order they are drawn), `panel` (prints whether quick entry is on screen and what runs modally),
 /// `windows` (prints the windows of the app),
+/// `notes` (prints the note of the open card as it is drawn: what is hidden, what is replaced and which fonts differ),
+/// `shot:/path/to.png` (draws that note into a file, on screen or not),
+/// `caret:5` (puts the cursor of that note at the offset), `box:0` (clicks the checkbox with that number in it),
 /// `completedview:on` and `completedview:off` (flip the setting that offers the Completed view), `scope` (prints the current view),
 /// `menu:Title` (prints whether the menu bar item with that title is enabled),
 /// `sidebar` (prints how many rows each list of the main window has, the sidebar among them),
@@ -139,6 +142,21 @@ enum DebugScript {
                 case "state":
                     let window = target
                     print("debug: key window \(window.map { type(of: $0) }.map(String.init(describing:)) ?? "none"), first responder \(window?.firstResponder.map { String(describing: type(of: $0)) } ?? "none")\((window?.firstResponder as? NSText).map { " with \"\($0.string)\"" } ?? "")")
+                case "shot":
+                    // The note drawn into a file: it need not be on screen for that.
+                    if let view = notesView(in: target?.contentView), let image = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
+                        view.cacheDisplay(in: view.bounds, to: image)
+                        let page = NSImage(size: view.bounds.size, flipped: false) { rect in
+                            NSColor.textBackgroundColor.setFill()
+                            rect.fill()
+                            return image.draw(in: rect)
+                        }
+                        let data = page.tiffRepresentation.flatMap(NSBitmapImageRep.init(data:))?.representation(using: .png, properties: [:])
+                        try? data?.write(to: URL(fileURLWithPath: argument))
+                    }
+                case "notes": print("debug: notes \(notesView(in: target?.contentView)?.debugState ?? "none")")
+                case "caret": notesView(in: target?.contentView)?.setSelectedRange(NSRange(location: Int(argument) ?? 0, length: 0))
+                case "box": print("debug: box \(argument) clicked \(notesView(in: target?.contentView)?.debugClickBox(Int(argument) ?? 0) ?? false)")
                 default: print("debug: unknown step \(step)")
                 }
                 try? await _Concurrency.Task.sleep(for: .milliseconds(60))
@@ -146,6 +164,11 @@ enum DebugScript {
             print("debug: script finished")
             fflush(stdout)
         }
+    }
+
+    private static func notesView(in view: NSView?) -> MarkdownTextView? {
+        guard let view else { return nil }
+        return (view as? MarkdownTextView) ?? view.subviews.lazy.compactMap(notesView(in:)).first
     }
 
     private static var shown: [TaskItem] {

@@ -1,7 +1,8 @@
 import AppKit
 import SwiftUI
 
-/// The notes of an open task: a text view that grows with its text.
+/// The notes of an open task: a text view that grows with its text and shows
+/// it as Markdown (`MarkdownTextView`).
 ///
 /// AppKit rather than `TextEditor`: which key finishes editing is a setting,
 /// and only the text view's own commands tell Return from ⌥Return reliably.
@@ -14,13 +15,15 @@ struct NotesTextView: NSViewRepresentable {
     @Binding var wantsFocus: Bool
     var onEditingChanged: (Bool) -> Void
     var onFinish: () -> Void
+    /// A checkbox in the note was clicked; the text is already changed.
+    var onToggle: () -> Void = {}
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
-    func makeNSView(context: Context) -> NSTextView {
+    func makeNSView(context: Context) -> MarkdownTextView {
         let view = PlainTextView()
+        view.prepare()
         view.delegate = context.coordinator
-        view.isRichText = false
         view.allowsUndo = true
         view.drawsBackground = false
         view.textContainerInset = .zero
@@ -28,15 +31,16 @@ struct NotesTextView: NSViewRepresentable {
         view.textContainer?.widthTracksTextView = true
         view.isVerticallyResizable = false
         view.isHorizontallyResizable = false
-        view.textColor = .secondaryLabelColor
-        view.string = text
+        view.baseFont = font
+        view.onToggle = { [coordinator = context.coordinator] in coordinator.parent.onToggle() }
+        view.setText(text)
         return view
     }
 
-    func updateNSView(_ view: NSTextView, context: Context) {
+    func updateNSView(_ view: MarkdownTextView, context: Context) {
         context.coordinator.parent = self
-        if view.string != text { view.string = text }
-        if view.font != font { view.font = font }
+        if view.string != text { view.setText(text) }
+        if view.baseFont != font { view.baseFont = font }
         if wantsFocus {
             DispatchQueue.main.async {
                 guard let window = view.window else { return }
@@ -47,7 +51,7 @@ struct NotesTextView: NSViewRepresentable {
         }
     }
 
-    func sizeThatFits(_ proposal: ProposedViewSize, nsView view: NSTextView, context: Context) -> CGSize? {
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView view: MarkdownTextView, context: Context) -> CGSize? {
         guard let container = view.textContainer, let layout = view.layoutManager else { return nil }
         // Asked for an ideal size, the view has no width to wrap at: answer with
         // the width it has, never with the text view's own (zero) idea of it.
@@ -55,13 +59,13 @@ struct NotesTextView: NSViewRepresentable {
         let width = offered ?? max(view.bounds.width, 240)
         container.containerSize = NSSize(width: width, height: .greatestFiniteMagnitude)
         layout.ensureLayout(for: container)
-        let line = layout.defaultLineHeight(for: view.font ?? font)
+        let line = layout.defaultLineHeight(for: view.baseFont)
         return CGSize(width: width, height: max(ceil(layout.usedRect(for: container).height), ceil(line)))
     }
 
     /// Takes text only: a dropped file belongs to the card around the notes,
     /// which attaches it, and not in the text as a path.
-    private final class PlainTextView: NSTextView {
+    private final class PlainTextView: MarkdownTextView {
         override var acceptableDragTypes: [NSPasteboard.PasteboardType] {
             super.acceptableDragTypes.filter { $0 != .fileURL && $0.rawValue != "NSFilenamesPboardType" }
         }
@@ -88,6 +92,9 @@ struct NotesTextView: NSViewRepresentable {
                  #selector(NSResponder.cancelOperation(_:)):
                 parent.onFinish()
                 return true
+            case #selector(NSResponder.insertNewline(_:)), #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)),
+                 #selector(NSResponder.insertLineBreak(_:)):
+                return (view as? MarkdownTextView)?.continueList() ?? false
             default:
                 return false
             }
