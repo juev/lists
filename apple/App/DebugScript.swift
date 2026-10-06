@@ -7,6 +7,7 @@ import AppKit
 /// `type:text`, `key:return`, `key:n+cmd`, `sleep:0.5`, `click:x,y`, `quick`, `settings`,
 /// `state` (prints who has the keyboard and the text being typed into), `copyfiles:path,path` and `copyimage`
 /// (fill the pasteboard), `draft` (prints the files of the open new-task card),
+/// `files` (prints the attachments of the selected task: the name of the copy made for Quick Look, the type the system sees in it and the size of the thumbnail),
 /// `inbox` (switches to the Inbox view), `open` (expands the selected task), `select:1` and `select:-1` (move the selection the way the arrow keys do),
 /// `pick:title` (selects a row the way a click does), `indent` and `outdent` (move the selected task under the one above and back),
 /// `newtask` (opens the card of a new task), `title:text` (fills its title), `finish` (closes it the way Esc does),
@@ -84,6 +85,14 @@ enum DebugScript {
                     NSPasteboard.general.setData(image.tiffRepresentation, forType: .tiff)
                 case "draft":
                     print("debug: draft files \(AppModel.shared.draft?.files.map(\.lastPathComponent) ?? [])")
+                case "files":
+                    let files = AppModel.shared.selection.flatMap { try? AppModel.shared.store?.attachments(taskId: $0) } ?? []
+                    for file in files {
+                        let named = AttachmentFiles.named(file)
+                        let thumbnail = file.localPath.flatMap { AttachmentFiles.thumbnail(path: $0, pixels: 56) }
+                        let type = named.flatMap { try? $0.resourceValues(forKeys: [.contentTypeKey]).contentType?.identifier } ?? "-"
+                        print("debug: file \(file.name) named=\(named?.lastPathComponent ?? "-") type=\(type) thumbnail=\(thumbnail.map { "\($0.width)x\($0.height)" } ?? "-")")
+                    }
                 case "open":
                     if let id = AppModel.shared.selection { AppModel.shared.toggleExpanded(id) }
                 case "select": AppModel.shared.moveSelection(Int(argument) ?? 1)
