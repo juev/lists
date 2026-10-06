@@ -64,9 +64,14 @@ header input { border: 1px solid var(--line); border-radius: 8px; padding: 6px 1
 .md { white-space: pre-wrap; overflow-wrap: anywhere; cursor: text; min-height: 1.4em; }
 .md .h1 { font-size: 1.5em; font-weight: 700; } .md .h2 { font-size: 1.3em; font-weight: 700; } .md .h3 { font-size: 1.15em; font-weight: 700; } .md .h4 { font-weight: 700; }
 .md .b { font-weight: 700; } .md .i { font-style: italic; } .md .s { text-decoration: line-through; }
-.md .code, .md .pre, .md .row { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .95em; }
+.md .code, .md .pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .95em; }
 .md .code, .md .pre { background: var(--line); border-radius: 3px; }
 .md .dim { opacity: .5; font-style: normal; }
+.md .grid { overflow-x: auto; margin: 4px 0; }
+.md table { border-collapse: collapse; }
+.md th, .md td { border: 1px solid var(--line); padding: 3px 8px; text-align: left; vertical-align: top; }
+.md th { font-weight: 700; background: var(--hover); }
+.md .center { text-align: center; } .md .right { text-align: right; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-width: 0; }
 .chip { border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; font-size: 14px; background: var(--bg); display: inline-flex; gap: 6px; align-items: center; }
 .chip input, .chip select { border: 0; background: transparent; outline: 0; max-width: 46vw; }
@@ -282,8 +287,9 @@ function moment(label, value, op, id, withTime) {
 // A note shown as Markdown (R53) from the ranges the server sends with it: what
 // is styled, what is left out and what is replaced. Every piece of the note goes
 // into a text node; the only attribute taken from it is the address of a link,
-// and that only with a web or a mail scheme.
-function markdown(text, spans) {
+// and that only with a web or a mail scheme. A table (R60) becomes a table
+// element whose cells are built the same way from the ranges of their text.
+function markdown(text, spans, tables) {
   const n = text.length, drop = new Array(n).fill(false), swap = new Array(n).fill(null);
   const marks = Array.from({ length: n }, () => []), href = new Array(n).fill(null);
   const mark = (from, to, name) => { for (let i = from; i < to; i++) marks[i].push(name); };
@@ -295,7 +301,6 @@ function markdown(text, spans) {
     else if (kind === "strike") mark(start, end, "s");
     else if (kind === "code") mark(start, end, "code");
     else if (kind === "codeBlock") mark(start, end, "pre");
-    else if (kind === "tableRow") mark(start, end, "row");
     else if (kind === "link") { if (/^(https?:\/\/|mailto:)/i.test(detail)) for (let i = start; i < end; i++) href[i] = detail; }
     else if (kind === "marker") { if (!detail && end - start === 1) swap[start] = "•"; }
     else if (kind === "quoteMarker") { swap[start] = "▎"; mark(start, start + 1, "dim"); }
@@ -308,25 +313,40 @@ function markdown(text, spans) {
       if (whole && end < n) drop[end] = true; else if (whole && start > 0) drop[start - 1] = true;
     }
   }
-  const out = [];
-  let run = "", key = null, cls = "", url = null;
-  const flush = () => {
-    if (run) out.push(url ? $("a", { href: url, target: "_blank", rel: "noopener noreferrer", class: cls }, run) : cls ? $("span", { class: cls }, run) : run);
-    run = "";
+  const pieces = (from, to) => {
+    const out = [];
+    let run = "", key = null, cls = "", url = null;
+    const flush = () => {
+      if (run) out.push(url ? $("a", { href: url, target: "_blank", rel: "noopener noreferrer", class: cls }, run) : cls ? $("span", { class: cls }, run) : run);
+      run = "";
+    };
+    for (let i = from; i < to; i++) {
+      if (drop[i]) continue;
+      const c = marks[i].join(" "), k = c + "\u0000" + (href[i] || "");
+      if (k !== key) { flush(); key = k; cls = c; url = href[i]; }
+      run += swap[i] ?? text[i];
+    }
+    flush();
+    return out;
   };
-  for (let i = 0; i < n; i++) {
-    if (drop[i]) continue;
-    const c = marks[i].join(" "), k = c + "\u0000" + (href[i] || "");
-    if (k !== key) { flush(); key = k; cls = c; url = href[i]; }
-    run += swap[i] ?? text[i];
+  const out = [];
+  let at = 0;
+  for (const table of tables || []) {
+    if (!(table.start >= at && table.start < table.end && table.end <= n)) continue;
+    out.push(...pieces(at, table.start));
+    const rows = table.rows.map(row => $("tr", {}, ...row.cells.map(([start, end], column) =>
+      $(row.header ? "th" : "td", { class: table.columns[column] || null }, ...(start >= table.start && end <= table.end ? pieces(start, end) : [])))));
+    out.push($("div", { class: "grid" }, $("table", {}, ...rows)));
+    // The table is a block of its own: the line break after it would leave an empty line.
+    at = table.end + (text[table.end] === "\n" ? 1 : 0);
   }
-  flush();
+  out.push(...pieces(at, n));
   return out;
 }
 
 function editor(d) {
   const x = d.task, id = x.id, locked = x.deleted || x.log;
-  if (locked) return $("div", { class: "edit" }, x.notes ? $("div", { class: "md" }, markdown(x.notes, d.markdown)) : null,
+  if (locked) return $("div", { class: "edit" }, x.notes ? $("div", { class: "md" }, markdown(x.notes, d.markdown, d.tables)) : null,
     x.deleted ? $("button", { class: "link", onclick: () => act("restore", { id }) }, t("Restore")) : null);
   const title = commit($("input", { type: "text", class: "name", value: x.title, placeholder: t("Title") }), "setTitle", id, x.title);
   const notes = commit($("textarea", { rows: Math.min(8, Math.max(1, x.notes.split("\n").length)), placeholder: t("Notes") }), "setNotes", id, x.notes);
@@ -334,7 +354,7 @@ function editor(d) {
   // A note that is not being edited is shown as Markdown; a click on it opens the text.
   let note = notes;
   if (x.notes) {
-    const view = $("div", { class: "md", tabindex: 0, role: "textbox", "aria-label": t("Notes") }, markdown(x.notes, d.markdown));
+    const view = $("div", { class: "md", tabindex: 0, role: "textbox", "aria-label": t("Notes") }, markdown(x.notes, d.markdown, d.tables));
     const edit = e => { if (e.target.closest("a")) return; e.preventDefault(); view.replaceWith(notes); notes.focus(); };
     view.addEventListener("click", edit);
     view.addEventListener("keydown", e => { if (e.key === "Enter") edit(e); });

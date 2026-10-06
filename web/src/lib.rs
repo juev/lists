@@ -17,8 +17,8 @@ use std::time::{Duration, Instant};
 pub use oidc::OidcConfig;
 
 use lists_core::{
-    markdown_layout, AppError, Attachment, FilterSpec, MarkdownKind, NewTask, Priority, Repeat, Scope, SortMode, Store,
-    SyncConfig, TaskItem, TaskList,
+    markdown_layout, AppError, Attachment, FilterSpec, MarkdownAlign, MarkdownKind, NewTask, Priority, Repeat, Scope,
+    SortMode, Store, SyncConfig, TaskItem, TaskList,
 };
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -151,8 +151,29 @@ fn task_json(t: &TaskItem) -> Value {
 /// The ranges of a note to style, hide and replace (R53), in UTF-16 units, which
 /// is how the page indexes the text. The page builds text nodes from them and
 /// never markup.
-fn markdown_json(notes: &str) -> Value {
-    let spans = markdown_layout(notes.to_string()).spans.into_iter().map(|span| {
+fn markdown_json(notes: &str) -> (Value, Value) {
+    let layout = markdown_layout(notes.to_string());
+    // R60: the page builds a table element from the cells; the line of dashes is not among the rows.
+    let tables = layout.tables.iter().map(|table| {
+        let columns = table.columns.iter().map(|align| match align {
+            MarkdownAlign::None => "",
+            MarkdownAlign::Left => "left",
+            MarkdownAlign::Center => "center",
+            MarkdownAlign::Right => "right",
+        });
+        let rows = table.rows.iter().map(|row| {
+            json!({
+                "header": row.header,
+                "cells": row.cells.iter().map(|c| json!([c.start, c.end])).collect::<Vec<_>>(),
+            })
+        });
+        json!({
+            "start": table.start, "end": table.end,
+            "columns": columns.collect::<Vec<_>>(), "rows": rows.collect::<Vec<_>>(),
+        })
+    });
+    let tables = Value::Array(tables.collect());
+    let spans = layout.spans.into_iter().map(|span| {
         let (kind, detail) = match span.kind {
             MarkdownKind::Heading { level } => ("heading", json!(level)),
             MarkdownKind::Strong => ("strong", Value::Null),
@@ -171,7 +192,7 @@ fn markdown_json(notes: &str) -> Value {
         };
         json!([span.start, span.end, kind, detail])
     });
-    Value::Array(spans.collect())
+    (Value::Array(spans.collect()), tables)
 }
 
 fn list_json(l: &TaskList) -> Value {
@@ -556,10 +577,12 @@ impl App {
                 (Method::Get, "/api/task") => {
                     let id = query(&url, "id").unwrap_or_default();
                     let task = self.store.task(id.clone())?;
+                    let (markdown, tables) = markdown_json(&task.notes);
                     json_reply(
                         200,
                         json!({
-                            "markdown": markdown_json(&task.notes),
+                            "markdown": markdown,
+                            "tables": tables,
                             "task": task_json(&task),
                             "subtasks": self.store.subtasks(id.clone())?.iter().map(task_json).collect::<Vec<_>>(),
                             "attachments": self.store.attachments(id)?.iter().map(attachment_json).collect::<Vec<_>>(),

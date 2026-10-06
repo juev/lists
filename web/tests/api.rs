@@ -263,6 +263,33 @@ fn r53_a_note_comes_with_the_ranges_to_show_it_as_markdown() {
 }
 
 #[test]
+fn r60_a_table_comes_with_its_cells() {
+    let web = web(None);
+    let task = call(
+        &web,
+        "",
+        json!({ "op": "quickAdd", "text": "таблица", "scope": "inbox" }),
+    );
+    let id = task["id"].as_str().unwrap().to_string();
+    let notes = "😀 | б\n:-: | --:\n**1** | 2";
+    call(&web, "", json!({ "op": "setNotes", "id": id, "value": notes }));
+
+    let detail = get(&web, "", &format!("/api/task?id={id}"));
+    assert_eq!(detail["task"]["notes"], notes);
+    // Offsets count UTF-16 units; the line of dashes is not among the rows.
+    assert_eq!(
+        detail["tables"],
+        json!([{
+            "start": 0, "end": 26, "columns": ["center", "right"],
+            "rows": [
+                { "header": true, "cells": [[0, 2], [5, 6]] },
+                { "header": false, "cells": [[17, 22], [25, 26]] },
+            ],
+        }])
+    );
+}
+
+#[test]
 fn attachments_upload_and_download_as_files() {
     let web = web(None);
     let task = call(&web, "", json!({ "op": "quickAdd", "text": "с файлом" }));
