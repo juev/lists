@@ -553,15 +553,10 @@ fn sync(store: &Store, client: &Client, calendars: Vec<Calendar>) -> Result<Sync
                 href
             }
         };
-        if *deleted {
-            // The calendar stays while it holds objects (C15), and is remembered
-            // like any other so that it is not read on every run (C19).
-            store.lock().conn.execute(
-                "INSERT INTO caldav_calendars (href, list_id) VALUES (?1, ?2) ON CONFLICT (href) DO NOTHING",
-                params![href, list_id],
-            )?;
-            continue;
-        }
+        // A deleted list goes on like any other: its calendar stays while it
+        // holds objects, the state tells the other devices that the list is
+        // gone (C15), and the row keeps the calendar from being read on every
+        // run (C19).
         let remote = calendars.iter().find(|c| c.href == href);
         let already_sent = sent.get(&href).cloned().flatten();
         let standard_differs =

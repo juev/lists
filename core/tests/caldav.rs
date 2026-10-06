@@ -1139,6 +1139,38 @@ fn deleted_list_with_an_event(dav: &Dav) -> (Device, TaskList, PathBuf) {
 }
 
 #[test]
+fn c15_list_deleted_on_one_device_is_deleted_on_the_other_while_the_calendar_stays() {
+    let dav = start();
+    let (a, b, _home, office, work) = two_calendars(&dav);
+    let event = dav.home().join(&work.id).join("meeting.ics");
+    std::fs::write(&event, FOREIGN_EVENT).unwrap();
+    a.delete_list(work.id.clone()).unwrap();
+    settle(&a, &b);
+    b.sync_now().unwrap();
+    assert!(event.exists(), "C15: a calendar that is not empty stays");
+    assert!(a.list(work.id.clone()).is_err(), "deleted where it was deleted");
+    assert!(
+        b.task(office.id).unwrap().deleted,
+        "the task of the list is in the trash on the other device"
+    );
+    assert!(
+        b.list(work.id.clone()).is_err(),
+        "the list is deleted on the other device"
+    );
+    let idle = dav.requests(|| {
+        assert_eq!(b.sync_now().unwrap(), SyncReport::default());
+    });
+    assert_eq!(idle, ["PROPFIND /cal/ depth=1"]);
+
+    // Whichever device runs after the event is gone removes the calendar.
+    std::fs::remove_file(&event).unwrap();
+    b.sync_now().unwrap();
+    assert!(!dav.home().join(&work.id).exists());
+    a.sync_now().unwrap();
+    assert!(a.list(work.id.clone()).is_err() && b.list(work.id).is_err());
+}
+
+#[test]
 fn c19_calendar_kept_for_a_deleted_list_is_not_read_again() {
     let dav = start();
     let (a, work, event) = deleted_list_with_an_event(&dav);
