@@ -72,8 +72,13 @@ data class UiState(
             is Scope.Filter -> filters.firstOrNull { it.id == s.id }?.name ?: str(R.string.filter)
         }
 
-    /** Where a task typed into the current view goes. */
-    val targetListId: String? get() = (scope as? Scope.List)?.id
+    /** The list a task added in the current view goes to; null under a project, where the parent decides. */
+    fun newTaskListId(): String? = when (val s = scope) {
+        is Scope.Project -> null
+        Scope.Inbox -> "inbox"
+        is Scope.List -> s.id
+        else -> EntryPrefs.defaultListId(ListsApp.instance, lists)
+    }
 
     val readOnly: Boolean
         get() = when (effectiveScope) {
@@ -191,26 +196,21 @@ class MainViewModel : ViewModel() {
         if (id == null) _state.update { it.copy(editing = null) } else viewModelScope.launch { reload() }
     }
 
-    fun add(text: String) {
-        val line = text.trim()
-        if (line.isEmpty()) return
-        val state = _state.value
+    /** Adds what the new-task card collected, with the defaults of the view on screen. */
+    fun add(draft: TaskDraft) {
+        if (draft.title.isBlank()) return
+        val scope = _state.value.scope
         act { store ->
-            (state.scope as? Scope.Project)?.let {
-                store.quickAddUnder(line, it.id)
-                return@act
-            }
             val context = ListsApp.instance
-            val listId = when (state.scope) {
-                Scope.Inbox -> "inbox"
-                is Scope.List -> state.targetListId
-                else -> EntryPrefs.defaultListId(context, state.lists)
-            }
-            val task = if (EntryPrefs.parse(context)) store.quickAdd(line, listId) else store.createTask(NewTask(title = line, listId = listId))
-            EntryPrefs.noteUsedList(context, task.listId)
-            // A task typed into Today belongs to today unless the line says otherwise.
-            if (state.scope == Scope.Today && task.due == null) store.setDue(task.id, today())
-            (state.scope as? Scope.Tag)?.let { store.addTag(task.id, it.name) }
+            val task = store.createFrom(
+                context,
+                draft,
+                parentId = (scope as? Scope.Project)?.id,
+                // A task added in Today belongs to today unless the card or the line says otherwise.
+                dueIfNone = today().takeIf { scope == Scope.Today },
+            )
+            if (scope !is Scope.Project) EntryPrefs.noteUsedList(context, task.listId)
+            (scope as? Scope.Tag)?.let { store.addTag(task.id, it.name) }
         }
     }
 

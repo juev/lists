@@ -7,11 +7,11 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -20,8 +20,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.List
@@ -50,10 +48,12 @@ import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.NavigationDrawerItem
@@ -71,6 +71,7 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberDrawerState
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -90,7 +91,6 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
@@ -139,6 +139,7 @@ fun MainScreen(model: MainViewModel, onReminderSet: () -> Unit) {
     var clearMenu by remember { mutableStateOf(false) }
     var clearCompleted by remember { mutableStateOf<ClearCompleted?>(null) }
     var duePickerFor by remember { mutableStateOf<TaskItem?>(null) }
+    var adding by remember { mutableStateOf(false) }
 
     LaunchedEffect(state.notice) {
         val notice = state.notice ?: return@LaunchedEffect
@@ -204,7 +205,11 @@ fun MainScreen(model: MainViewModel, onReminderSet: () -> Unit) {
                                 }
                             }
                         }
-                    !state.readOnly -> AddBar(onAdd = model::add)
+                }
+            },
+            floatingActionButton = {
+                if (!state.readOnly) {
+                    FloatingActionButton(onClick = { adding = true }) { Icon(Icons.Outlined.Add, str(R.string.new_task)) }
                 }
             },
         ) { padding ->
@@ -212,7 +217,8 @@ fun MainScreen(model: MainViewModel, onReminderSet: () -> Unit) {
                 if (state.loaded && state.sections.all { it.tasks.isEmpty() }) {
                     EmptyState(state.effectiveScope)
                 } else {
-                    LazyColumn(Modifier.fillMaxSize()) {
+                    // Room below the last row, so that the add button does not cover it.
+                    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 88.dp)) {
                         for (section in state.sections) {
                             section.title?.let { title ->
                                 item(key = "h:${section.key}") {
@@ -242,6 +248,7 @@ fun MainScreen(model: MainViewModel, onReminderSet: () -> Unit) {
     }
 
     state.editing?.let { EditorSheet(it, state, model, onReminderSet) }
+    if (adding) NewTaskSheet(state, onAdd = model::add) { adding = false }
 
     duePickerFor?.let { task ->
         MomentDialog(
@@ -352,29 +359,24 @@ private fun EmptyState(scope: Scope) {
     }
 }
 
-/** The quick-entry line: always at hand, above the keyboard. */
+/**
+ * The new-task card over the list. It stays open after a task is added, for
+ * the next one; back or a tap outside closes it.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun AddBar(onAdd: (String) -> Unit) {
-    var text by remember { mutableStateOf("") }
-    Surface(tonalElevation = 3.dp, modifier = Modifier.imePadding()) {
-        Column(Modifier.navigationBarsPadding()) {
-            QuickChips(text, Modifier.padding(start = 16.dp, top = 6.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                TextField(
-                    value = text,
-                    onValueChange = { text = it },
-                    placeholder = { Text(str(R.string.new_task)) },
-                    singleLine = true,
-                    colors = transparentField(),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                    keyboardActions = KeyboardActions(onDone = { onAdd(text); text = "" }),
-                    modifier = Modifier.weight(1f),
-                )
-                IconButton(onClick = { onAdd(text); text = "" }, enabled = text.isNotBlank()) {
-                    Icon(Icons.Outlined.Add, str(R.string.add))
-                }
-            }
-        }
+private fun NewTaskSheet(state: UiState, onAdd: (TaskDraft) -> Unit, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+        NewTaskCard(
+            lists = state.lists.filter { !it.archived },
+            listId = remember { state.newTaskListId() },
+            parse = EntryPrefs.parse(context),
+            onCancel = onDismiss,
+            onSubmit = onAdd,
+            modifier = Modifier.navigationBarsPadding().padding(start = 8.dp, end = 8.dp, bottom = 8.dp),
+            keepOpen = true,
+        )
     }
 }
 
