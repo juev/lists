@@ -47,6 +47,8 @@ pub struct Config {
     pub oidc: Option<OidcConfig>,
     pub sync: SyncConfig,
     pub sync_password: Option<String>,
+    /// ntfy server through which other devices ask this one to sync.
+    pub push_server: Option<String>,
 }
 
 struct App {
@@ -625,6 +627,7 @@ pub fn start(config: Config) -> Result<Running, Box<dyn std::error::Error>> {
     let store = Store::open(config.data_dir)?;
     store.set_sync_config(config.sync)?;
     store.set_sync_password(config.sync_password);
+    store.set_push_server(config.push_server)?;
     let server =
         Arc::new(Server::http(&config.listen).map_err(|e| format!("cannot listen on {}: {e}", config.listen))?);
     let addr = server.server_addr().to_ip().ok_or("not an IP address")?;
@@ -642,6 +645,17 @@ pub fn start(config: Config) -> Result<Running, Box<dyn std::error::Error>> {
             while let Ok(mut request) = server.recv() {
                 let response = app.handle(&mut request);
                 let _ = request.respond(response);
+            }
+        });
+    }
+
+    // A nudge from another device is one more reason to sync. The call blocks
+    // while there is nothing to hear and paces itself when the server is away.
+    {
+        let app = app.clone();
+        std::thread::spawn(move || loop {
+            if app.store.wait_for_nudge() {
+                app.dirty.store(true, Ordering::Relaxed);
             }
         });
     }

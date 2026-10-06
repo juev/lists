@@ -14,6 +14,7 @@ services:
       LISTS_SYNC_URL: ${LISTS_SYNC_URL:-}
       LISTS_SYNC_USER: ${LISTS_SYNC_USER:-}
       LISTS_SYNC_PASSWORD: ${LISTS_SYNC_PASSWORD:-}
+      LISTS_PUSH_SERVER: ${LISTS_PUSH_SERVER:-}
 
 volumes:
   lists-data:

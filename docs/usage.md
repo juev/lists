@@ -101,6 +101,12 @@ Open Settings → Sync and choose the kind:
 
 Use the same kind and the same address on every device. After that sync needs no attention: a small icon shows the state, and an error does not block work. On Android sync also runs in the background every 15 minutes.
 
+### Faster delivery
+
+Storage cannot tell a device that something changed, so an edit made elsewhere waits for the next run: up to a minute in an open app. To shorten the wait, give the Mac app (Settings → Sync → Push server) and the web server (`LISTS_PUSH_SERVER`) the address of an [ntfy](https://ntfy.sh) server, the public `https://ntfy.sh` or your own. A device that uploads a change then asks the others to sync, and they do so within seconds.
+
+The request carries no data, only "sync now"; tasks still travel through your storage. Each device listens on a random topic name, which is the only protection: the ntfy server can see when you edit, not what. Devices may use different servers, as long as each can reach the others'. Android does not listen yet; it sends requests like the rest.
+
 Edits are saved locally at once. Two devices that change different fields of one task both keep their change; when they change the same field, the later edit wins. How the two kinds compare is in the [README](../README.md#sync).
 
 ## Notifications

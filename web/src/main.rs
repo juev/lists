@@ -65,6 +65,7 @@ fn main() {
         oidc,
         sync,
         sync_password: env("LISTS_SYNC_PASSWORD"),
+        push_server: env("LISTS_PUSH_SERVER"),
     };
     match start(config) {
         Ok(running) => {

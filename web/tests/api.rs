@@ -19,6 +19,7 @@ fn web(password: Option<&str>) -> Web {
         oidc: None,
         sync: SyncConfig::Off,
         sync_password: None,
+        push_server: None,
     })
     .unwrap();
     Web {

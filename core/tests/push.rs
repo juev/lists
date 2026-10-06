@@ -187,3 +187,146 @@ fn c22_server_that_drops_custom_properties_gets_no_nudges_and_no_repeated_writes
     let seen = std::fs::read_to_string(&log).unwrap();
     assert!(!seen.contains("PROPPATCH"), "{seen}");
 }
+
+/// Stands in for an ntfy server: `POST /<topic>` reaches everyone who holds
+/// `GET /<topic>/json` open.
+struct Ntfy {
+    base: String,
+    listeners: Arc<Mutex<Vec<(String, std::net::TcpStream)>>>,
+}
+
+impl Ntfy {
+    fn start() -> Ntfy {
+        use std::io::{BufRead, BufReader, Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let listeners: Arc<Mutex<Vec<(String, std::net::TcpStream)>>> = Arc::default();
+        let held = listeners.clone();
+        std::thread::spawn(move || {
+            for stream in listener.incoming().flatten() {
+                let held = held.clone();
+                std::thread::spawn(move || {
+                    let mut reader = BufReader::new(stream.try_clone().unwrap());
+                    let mut first = String::new();
+                    reader.read_line(&mut first).unwrap();
+                    let mut length = 0;
+                    loop {
+                        let mut header = String::new();
+                        reader.read_line(&mut header).unwrap();
+                        if header.trim().is_empty() {
+                            break;
+                        }
+                        if let Some(value) = header.to_ascii_lowercase().strip_prefix("content-length:") {
+                            length = value.trim().parse().unwrap();
+                        }
+                    }
+                    let mut body = vec![0; length];
+                    reader.read_exact(&mut body).unwrap();
+                    let mut stream = stream;
+                    let mut parts = first.split_whitespace();
+                    match (parts.next(), parts.next()) {
+                        (Some("GET"), Some(path)) if path.ends_with("/json") => {
+                            stream
+                                .write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/x-ndjson\r\nConnection: close\r\n\r\n{\"event\":\"open\"}\n")
+                                .unwrap();
+                            let topic = path.trim_end_matches("/json").to_string();
+                            held.lock().unwrap().push((topic, stream));
+                        }
+                        (Some("POST"), Some(path)) => {
+                            for (topic, listener) in held.lock().unwrap().iter_mut() {
+                                if topic == path {
+                                    let _ = listener
+                                        .write_all(b"{\"id\":\"x\",\"event\":\"message\",\"message\":\"sync\"}\n");
+                                }
+                            }
+                            stream
+                                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
+                                .unwrap();
+                        }
+                        _ => {}
+                    }
+                });
+            }
+        });
+        Ntfy { base, listeners }
+    }
+
+    /// Waits until `count` subscriptions are open.
+    fn wait_for_listeners(&self, count: usize) {
+        for _ in 0..500 {
+            if self.listeners.lock().unwrap().len() >= count {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        panic!("nobody subscribed");
+    }
+
+    fn drop_listeners(&self) {
+        for (_, stream) in self.listeners.lock().unwrap().drain(..) {
+            let _ = stream.shutdown(std::net::Shutdown::Both);
+        }
+    }
+}
+
+/// Starts the wait on a thread of its own; the answer arrives on the channel.
+fn waiting(d: &Device) -> std::sync::mpsc::Receiver<bool> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let store = d.store.clone();
+    std::thread::spawn(move || {
+        let _ = tx.send(store.wait_for_nudge());
+    });
+    rx
+}
+
+const SOON: std::time::Duration = std::time::Duration::from_secs(5);
+
+#[test]
+fn s22_an_edit_elsewhere_wakes_the_waiting_device() {
+    let storage = tempfile::tempdir().unwrap();
+    let ntfy = Ntfy::start();
+    let (a, b) = (device(), device());
+    for d in [&a, &b] {
+        d.set_sync_config(folder(&storage)).unwrap();
+        d.set_push_server(Some(format!("{}/", ntfy.base))).unwrap();
+        d.sync_now().unwrap();
+    }
+    let topic = b.push_endpoint().unwrap().unwrap();
+    assert!(
+        topic.starts_with(&format!("{}/", ntfy.base)) && topic.len() == ntfy.base.len() + 33,
+        "{topic}"
+    );
+    assert_ne!(a.push_endpoint().unwrap(), b.push_endpoint().unwrap());
+
+    let woken = waiting(&b);
+    ntfy.wait_for_listeners(1);
+    add(&a, "от A");
+    a.sync_now().unwrap();
+    assert!(woken.recv_timeout(SOON).unwrap(), "the nudge arrives at once");
+    b.sync_now().unwrap();
+    assert_eq!(view(&b, Scope::Inbox), ["от A"]);
+
+    // The topic is chosen once: turning the setting off and on keeps the address.
+    b.set_push_server(None).unwrap();
+    assert_eq!(b.push_endpoint().unwrap(), None);
+    b.set_push_server(Some(ntfy.base.clone())).unwrap();
+    assert_eq!(b.push_endpoint().unwrap().unwrap(), topic);
+}
+
+#[test]
+fn s23_a_broken_subscription_counts_as_a_nudge_and_a_missing_server_as_none() {
+    let ntfy = Ntfy::start();
+    let b = device();
+    b.set_push_retry_for_tests(50);
+    assert!(!b.wait_for_nudge(), "no server is set");
+
+    b.set_push_server(Some(ntfy.base.clone())).unwrap();
+    let woken = waiting(&b);
+    ntfy.wait_for_listeners(1);
+    ntfy.drop_listeners();
+    assert!(woken.recv_timeout(SOON).unwrap());
+
+    b.set_push_server(Some("http://127.0.0.1:9".into())).unwrap();
+    assert!(!b.wait_for_nudge(), "nobody answers there");
+    assert!(b.set_push_server(Some("ntfy.sh".into())).is_err());
+}

@@ -154,6 +154,21 @@ final class AppModel {
             MainActor.assumeIsolated { self?.syncNow() }
         }
         watchSyncFolder()
+        listenForNudges()
+    }
+
+    /// Another device that uploaded a change asks this one to sync. The call
+    /// blocks on a thread of its own until that happens, and paces itself
+    /// while no push server is set or it cannot be reached.
+    private func listenForNudges() {
+        guard let store else { return }
+        Thread.detachNewThread { [weak self] in
+            while true {
+                if store.waitForNudge() {
+                    DispatchQueue.main.async { MainActor.assumeIsolated { self?.syncNow() } }
+                }
+            }
+        }
     }
 
     // MARK: Reading
