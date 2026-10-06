@@ -17,7 +17,7 @@
   --bg: #ffffff; --panel: #f4f5f7; --text: #1c1d21; --muted: #6d7078; --line: #e3e5ea;
   --accent: #2f6fed; --danger: #d93a3a; --warn: #e8890c; --hover: rgba(0,0,0,.05);
 }
-/* Dark follows the system unless the look is chosen in this browser (R59): then the root element carries `light` or `dark`. */
+/* Dark follows the system unless the look is chosen in this browser (R61): then the root element carries `light` or `dark`. */
 @media (prefers-color-scheme: dark) {
   :root:not(.light) { color-scheme: dark; --bg: #17181c; --panel: #1f2126; --text: #ececf0; --muted: #9a9da6; --line: #2e3037; --hover: rgba(255,255,255,.07); }
 }
@@ -162,7 +162,7 @@ function preview(a, href) {
   document.addEventListener("keydown", key);
   document.body.append(box);
 }
-// The look of the page (R59) belongs to this browser: `light` or `dark` in `localStorage`, nothing for the system's.
+// The look of the page (R61) belongs to this browser: `light` or `dark` in `localStorage`, nothing for the system's.
 const look = () => { try { const v = localStorage.getItem("appearance"); return v === "light" || v === "dark" ? v : "system"; } catch { return "system"; } };
 function setLook(v) {
   try { if (v === "system") localStorage.removeItem("appearance"); else localStorage.setItem("appearance", v); } catch {}
