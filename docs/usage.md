@@ -49,7 +49,7 @@ Notes are read as Markdown and styled while you type; there is no separate previ
 - `- [ ]` and `- [x]` are shown as a checkbox. A click on macOS or a tap on Android toggles it and saves the note. These checkboxes are part of the text; they are not subtasks.
 - Return at the end of a list item starts the next one, with the next number in a numbered list and an empty checkbox in a task list. Return on an empty item removes its marker. A block quote continues the same way.
 - A link opens with ⌘-click on macOS and with a tap on Android while the note is not being edited. Only `http`, `https` and `mailto` addresses are links.
-- Tables are shown in a monospaced font and are not laid out as a grid. An image is shown as a link with its text and is not loaded. HTML is shown as typed.
+- A table is laid out as a grid in the web interface: aligned columns, a header row, the alignment set by `:---`, `:---:` and `---:`. On macOS and Android it is still shown as typed, in a monospaced font. An image is shown as a link with its text and is not loaded. HTML is shown as typed.
 
 In the web interface a note is shown formatted until you click it; the click opens the plain text for editing, and leaving the field saves it. Checkboxes are not toggled there. Quick entry on Android and the share sheets keep a plain text field.
 
