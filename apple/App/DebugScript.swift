@@ -1,12 +1,17 @@
 #if DEBUG
 import AppKit
+import SwiftUI
 
 /// Drives the app from inside for checks that need key presses: macOS lets no
 /// outside process send them without the Accessibility permission. Debug
 /// builds only. `LISTS_DEBUG_SCRIPT` holds steps separated by `;`:
 /// `type:text`, `key:return`, `key:n+cmd`, `sleep:0.5`, `click:x,y`, `quick`, `settings`,
 /// `state` (prints who has the keyboard and the text being typed into), `copyfiles:path,path` and `copyimage`
-/// (fill the pasteboard), `draft` (prints the files of the open new-task card),
+/// (fill the pasteboard), `draft` (prints the files and the dates of the open new-task card),
+/// `code:17` (presses the key with that key code, whatever the layout, in the date editor: the open popover, or the one `dateeditor` made),
+/// `dateeditor:2026-10-05` (builds the editor of the date popover with that value, or with none, in a window that is never shown,
+/// and prints each value it applies: a hidden app shows no popovers), `datefield:time` and `datefield:calendar` (give the keyboard to its time field or to its calendar),
+/// `dateeditor` alone prints who has the keyboard in the date editor and the day selected in its calendar,
 /// `files` (prints the attachments of the selected task: the name of the copy made for Quick Look, the type the system sees in it and the size of the thumbnail),
 /// `inbox` (switches to the Inbox view), `open` (expands the selected task), `select:1` and `select:-1` (move the selection the way the arrow keys do),
 /// `pick:title` (selects a row the way a click does), `indent` and `outdent` (move the selected task under the one above and back),
@@ -84,7 +89,23 @@ enum DebugScript {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setData(image.tiffRepresentation, forType: .tiff)
                 case "draft":
-                    print("debug: draft files \(AppModel.shared.draft?.files.map(\.lastPathComponent) ?? [])")
+                    let draft = AppModel.shared.draft
+                    print("debug: draft files \(draft?.files.map(\.lastPathComponent) ?? []), start \(draft?.start ?? "none"), due \(draft?.due ?? "none")")
+                case "code":
+                    if let code = UInt16(argument) { post(code: code, to: popoverWindow ?? dateEditor) }
+                case "dateeditor":
+                    if step.contains(":") {
+                        dateEditor = editorWindow(value: argument.isEmpty ? nil : argument)
+                    } else {
+                        let window = popoverWindow ?? dateEditor
+                        let pickers = datePickers(in: window?.contentView)
+                        let day = pickers.first { $0.datePickerStyle == .clockAndCalendar }.map { Moment.string($0.dateValue, withTime: false) }
+                        print("debug: date editor \(window == nil ? "closed" : "open"), first responder \(window?.firstResponder.map { String(describing: type(of: $0)) } ?? "none"), selected \(day ?? "none")")
+                    }
+                case "datefield":
+                    let window = popoverWindow ?? dateEditor
+                    let field = datePickers(in: window?.contentView).first { ($0.datePickerStyle == .clockAndCalendar) == (argument == "calendar") }
+                    print("debug: \(argument) field \(field.map { window?.makeFirstResponder($0) ?? false }.map { $0 ? "has the keyboard" : "refused the keyboard" } ?? "missing")")
                 case "files":
                     let files = AppModel.shared.selection.flatMap { try? AppModel.shared.store?.attachments(taskId: $0) } ?? []
                     for file in files {
@@ -227,6 +248,42 @@ enum DebugScript {
     /// The window the script types into: the key window, or the main window of
     /// an app that was left in the background.
     static var target: NSWindow? { NSApp.keyWindow ?? backgroundWindow }
+
+    /// The window of the popover that is open, if one is.
+    private static var popoverWindow: NSWindow? {
+        NSApp.windows.first { $0.isVisible && String(describing: type(of: $0)).contains("Popover") }
+    }
+
+    /// The date editor that `dateeditor` built off screen.
+    private static var dateEditor: NSWindow?
+
+    private static func editorWindow(value: String?) -> NSWindow {
+        let editor = DateEditor(title: "debug", value: value) { print("debug: date applied \($0 ?? "none")") }
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300), styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = NSHostingView(rootView: editor)
+        window.contentView?.layoutSubtreeIfNeeded()
+        return window
+    }
+
+    private static func datePickers(in view: NSView?) -> [NSDatePicker] {
+        guard let view else { return [] }
+        return ((view as? NSDatePicker).map { [$0] } ?? []) + view.subviews.flatMap(datePickers(in:))
+    }
+
+    /// A key press told by its key code alone, put in the queue the way the keyboard
+    /// does, so that event monitors see it.
+    private static func post(code: UInt16, to window: NSWindow?) {
+        guard let window else { return print("debug: no date editor for key code \(code)") }
+        for type in [NSEvent.EventType.keyDown, .keyUp] {
+            if let event = NSEvent.keyEvent(
+                with: type, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                windowNumber: window.windowNumber, context: nil, characters: "", charactersIgnoringModifiers: "",
+                isARepeat: false, keyCode: code) {
+                NSApp.postEvent(event, atStart: false)
+            }
+        }
+    }
 
     /// The main window of an app that a quiet script left hidden. `canBecomeMain`
     /// is false for it, so it is told by its look.

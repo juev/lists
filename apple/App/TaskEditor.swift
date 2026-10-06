@@ -314,9 +314,15 @@ struct DateEditor: View {
                     .datePickerStyle(.graphical)
                     .labelsHidden()
                 VStack(alignment: .leading, spacing: 6) {
-                    Button(L("Today")) { pick(days: 0) }
-                    Button(L("Tomorrow")) { pick(days: 1) }
-                    Button(L("In a week")) { pick(days: 7) }
+                    choice(L("Today"), key: "T", days: 0)
+                    choice(L("Tomorrow"), key: "M", days: 1)
+                    choice(L("In a week"), key: "W", days: 7)
+                    Group {
+                        Text(L("1–9  in that many days"))
+                        Text(L("+ −  a day later, earlier"))
+                    }
+                    .font(AppFont.style(.caption))
+                    .foregroundStyle(.secondary)
                 }
                 .controlSize(.small)
             }
@@ -328,7 +334,9 @@ struct DateEditor: View {
             }
             HStack {
                 if value != nil {
-                    Button(L("Remove"), role: .destructive) { apply(nil); dismiss() }
+                    Button(role: .destructive) { apply(nil); dismiss() } label: {
+                        keyed(L("Remove"), key: "⌫")
+                    }
                 }
                 Spacer()
                 Button(L("Done")) { apply(Moment.string(date, withTime: withTime)); dismiss() }
@@ -337,6 +345,7 @@ struct DateEditor: View {
         }
         .padding(12)
         .fixedSize()
+        .background(KeyCatcher(handle: press))
         .onAppear {
             withTime = timeRequired || value.map(Moment.hasTime) ?? false
             if let value, let parsed = Moment.date(value) {
@@ -354,6 +363,89 @@ struct DateEditor: View {
         date = calendar.date(bySettingHour: time.hour ?? 9, minute: time.minute ?? 0, second: 0, of: day) ?? day
         apply(Moment.string(date, withTime: withTime))
         dismiss()
+    }
+
+    private func choice(_ title: String, key: String, days: Int) -> some View {
+        Button { pick(days: days) } label: { keyed(title, key: key) }
+    }
+
+    /// A button label with the key that does the same (R39).
+    private func keyed(_ title: String, key: String) -> some View {
+        HStack(spacing: 6) {
+            Text(title)
+            Text(key).foregroundStyle(.secondary)
+        }
+    }
+
+    /// The common choices from the keyboard (R39). The time field keeps its keys while it is typed into.
+    private func press(_ event: NSEvent) -> Bool {
+        guard event.modifierFlags.intersection([.command, .control, .option]).isEmpty,
+              !Self.editingTime(in: event.window), let key = DateKey(code: event.keyCode) else { return false }
+        switch key {
+        case .pick(let days): pick(days: days)
+        case .shift(let days): date = Calendar.current.date(byAdding: .day, value: days, to: date) ?? date
+        case .remove:
+            guard value != nil else { return false }
+            apply(nil)
+            dismiss()
+        }
+        return true
+    }
+
+    /// The calendar and the time field are both date pickers; only the time field takes typing.
+    private static func editingTime(in window: NSWindow?) -> Bool {
+        (window?.firstResponder as? NSDatePicker).map { $0.datePickerStyle != .clockAndCalendar } ?? false
+    }
+}
+
+/// What a key does in the date popover. Keys are told by their place on the
+/// keyboard, not by the character, so every layout gives the same choices.
+enum DateKey: Equatable {
+    case pick(days: Int), shift(days: Int), remove
+
+    private static let digits: [UInt16: Int] = [
+        18: 1, 19: 2, 20: 3, 21: 4, 23: 5, 22: 6, 26: 7, 28: 8, 25: 9,
+        83: 1, 84: 2, 85: 3, 86: 4, 87: 5, 88: 6, 89: 7, 91: 8, 92: 9,
+    ]
+
+    init?(code: UInt16) {
+        switch code {
+        case 17: self = .pick(days: 0) // T
+        case 46: self = .pick(days: 1) // M
+        case 13: self = .pick(days: 7) // W
+        case 24, 69: self = .shift(days: 1) // = and + of the main block, + of the keypad
+        case 27, 78: self = .shift(days: -1)
+        case 51, 117: self = .remove // ⌫ and ⌦
+        default:
+            guard let days = Self.digits[code] else { return nil }
+            self = .pick(days: days)
+        }
+    }
+}
+
+/// Shows the key presses of the window it sits in to `handle` before the
+/// focused control gets them; a press that was handled goes no further.
+private struct KeyCatcher: NSViewRepresentable {
+    let handle: (NSEvent) -> Bool
+
+    func makeNSView(context: Context) -> Catcher { Catcher() }
+
+    func updateNSView(_ view: Catcher, context: Context) { view.handle = handle }
+
+    final class Catcher: NSView {
+        var handle: (NSEvent) -> Bool = { _ in false }
+        private var monitor: Any?
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if let monitor { NSEvent.removeMonitor(monitor) }
+            monitor = nil
+            guard window != nil else { return }
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                guard let self, event.window === self.window, self.handle(event) else { return event }
+                return nil
+            }
+        }
     }
 }
 
