@@ -21,6 +21,10 @@ class MarkdownTextView: NSTextView, NSLayoutManagerDelegate {
     private var quotes: [NSRange] = []
     private var rules: [NSRange] = []
     private var codeBlocks: [NSRange] = []
+    /// R60: the bars that stand for a tab between two cells, and the tables drawn as a grid.
+    private var cellTabs = IndexSet()
+    private var grids: [(header: NSRange, width: CGFloat)] = []
+    private var styledWidth: CGFloat = 0
     private var activeBlocks: [NSRange] = []
     private var blocks: [NSRange] = []
     private var focused = false
@@ -85,8 +89,24 @@ class MarkdownTextView: NSTextView, NSLayoutManagerDelegate {
         let dim = NSColor.tertiaryLabelColor
         let plain: [NSAttributedString.Key: Any] = [.font: baseFont, .foregroundColor: NSColor.secondaryLabelColor]
 
-        var hidden = IndexSet(), bullets = IndexSet()
-        boxes = []; links = []; quotes = []; rules = []; codeBlocks = []
+        var hidden = IndexSet(), bullets = IndexSet(), tabs = IndexSet()
+        boxes = []; links = []; quotes = []; rules = []; codeBlocks = []; grids = []
+        styledWidth = textContainer?.size.width ?? 0
+
+        // R60: the tables to draw as a grid, each with the lines of its rows. A table
+        // stays as typed while the cursor is in it, and where it does not start its
+        // line: in a list item or a quote.
+        var tables: [(table: MarkdownTable, lines: [NSRange], rule: NSRange)] = []
+        for table in info.tables {
+            let range = NSRange(location: Int(table.start), length: Int(table.end - table.start))
+            guard NSMaxRange(range) <= length, Int(table.block) < blocks.count, !activeBlocks.contains(blocks[Int(table.block)]),
+                  text.lineRange(for: NSRange(location: range.location, length: 0)).location == range.location else { continue }
+            var lines: [NSRange] = []
+            text.enumerateSubstrings(in: range, options: [.byLines, .substringNotRequired]) { _, line, _, _ in lines.append(line) }
+            guard lines.count == table.rows.count + 1 else { continue }
+            tables.append((table, [lines[0]] + lines[2...], lines[1]))
+        }
+        let inGrid = { (range: NSRange) in tables.contains { $0.lines.contains { NSIntersectionRange($0, range).length > 0 } || $0.rule == range } }
 
         func retrait(_ range: NSRange, _ change: (NSFont) -> NSFont) {
             storage.enumerateAttribute(.font, in: range) { value, run, _ in
@@ -136,7 +156,7 @@ class MarkdownTextView: NSTextView, NSLayoutManagerDelegate {
                 retrait(range) { NSFont.monospacedSystemFont(ofSize: $0.pointSize * 0.95, weight: .regular) }
                 codeBlocks.append(range)
             case .tableRow:
-                retrait(range) { NSFont.monospacedSystemFont(ofSize: $0.pointSize * 0.95, weight: .regular) }
+                if !inGrid(range) { retrait(range) { NSFont.monospacedSystemFont(ofSize: $0.pointSize * 0.95, weight: .regular) } }
             case .quote:
                 quotes.append(range)
                 indent(range, first: 12, rest: 12)
@@ -185,12 +205,79 @@ class MarkdownTextView: NSTextView, NSLayoutManagerDelegate {
                 }
             }
         }
+        for (table, lines, rule) in tables {
+            let cells = table.rows.map { $0.cells.map { NSRange(location: Int($0.start), length: Int($0.end - $0.start)) } }
+            let columns = table.columns.count
+            // What the parser made of a row has to lie in its line, in order; otherwise the table stays as typed.
+            let sound = columns > 0 && zip(cells, lines).allSatisfy { row, line in
+                row.count == columns && row.first!.location >= line.location && NSMaxRange(row.last!) <= NSMaxRange(line)
+                    && zip(row, row.dropFirst()).allSatisfy { NSMaxRange($0) <= $1.location }
+            }
+            for (row, header) in zip(cells, table.rows.map(\.header)) where sound && header {
+                row.forEach { cell in retrait(cell) { self.derived($0, .bold) } }
+                storage.addAttribute(.foregroundColor, value: NSColor.labelColor, range: NSUnionRange(row.first!, row.last!))
+            }
+            /// The width of a cell as it is seen: without the markup hidden in it.
+            func width(_ cell: NSRange) -> CGFloat {
+                let seen = NSMutableAttributedString(attributedString: storage.attributedSubstring(from: cell))
+                for index in (0..<cell.length).reversed() where hidden.contains(cell.location + index) {
+                    seen.deleteCharacters(in: NSRange(location: index, length: 1))
+                }
+                return ceil(seen.size().width)
+            }
+            let widths = sound ? cells.map { $0.map(width) } : []
+            let column = (0..<columns).map { index in widths.map { $0[index] }.max() ?? 0 }
+            let gap = ceil(baseFont.pointSize * 1.4)
+            let total = column.reduce(0, +) + gap * CGFloat(max(0, columns - 1))
+            // A grid is not wrapped: a table wider than the note stays as typed.
+            guard sound, styledWidth <= 0 || total <= styledWidth else {
+                for line in lines + [rule] { retrait(line) { NSFont.monospacedSystemFont(ofSize: $0.pointSize * 0.95, weight: .regular) } }
+                continue
+            }
+            var stops: [NSTextTab] = [], left: CGFloat = 0
+            for index in 0..<columns {
+                if index > 0 {
+                    switch table.columns[index] {
+                    case .right: stops.append(NSTextTab(textAlignment: .right, location: left + column[index]))
+                    case .center: stops.append(NSTextTab(textAlignment: .center, location: left + column[index] / 2))
+                    default: stops.append(NSTextTab(textAlignment: .left, location: left))
+                    }
+                }
+                left += column[index] + gap
+            }
+            for (number, (row, line)) in zip(cells, lines).enumerated() {
+                hidden.insert(integersIn: line.location..<row[0].location)
+                hidden.insert(integersIn: NSMaxRange(row[columns - 1])..<NSMaxRange(line))
+                for (cell, next) in zip(row, row.dropFirst()) {
+                    let between = NSRange(location: NSMaxRange(cell), length: next.location - NSMaxRange(cell))
+                    let bar = text.range(of: "|", range: between)
+                    for index in between.location..<NSMaxRange(between) {
+                        if index == bar.location { tabs.insert(index) } else { hidden.insert(index) }
+                    }
+                }
+                let style = NSMutableParagraphStyle()
+                style.tabStops = stops
+                style.lineBreakMode = .byClipping
+                style.paragraphSpacing = 3
+                // The first cell has no tab before it: it is moved by the indent of its line.
+                let spare = column[0] - widths[number][0]
+                style.firstLineHeadIndent = table.columns[0] == .right ? spare : table.columns[0] == .center ? spare / 2 : 0
+                storage.addAttribute(.paragraphStyle, value: style, range: text.paragraphRange(for: line))
+            }
+            // The line of dashes takes no room.
+            hidden.insert(integersIn: rule.location..<NSMaxRange(rule))
+            let gone = NSMutableParagraphStyle()
+            gone.maximumLineHeight = 0.01
+            storage.addAttributes([.font: NSFont.systemFont(ofSize: 0.01), .paragraphStyle: gone], range: text.lineRange(for: rule))
+            grids.append((lines[0], total))
+        }
         storage.endEditing()
         typingAttributes = plain
 
-        if hidden != concealed || bullets != self.bullets {
+        if hidden != concealed || bullets != self.bullets || tabs != cellTabs {
             concealed = hidden
             self.bullets = bullets
+            cellTabs = tabs
             layout.invalidateGlyphs(forCharacterRange: full, changeInLength: 0, actualCharacterRange: nil)
             layout.invalidateLayout(forCharacterRange: full, actualCharacterRange: nil)
         }
@@ -213,6 +300,9 @@ class MarkdownTextView: NSTextView, NSLayoutManagerDelegate {
             if concealed.contains(character) {
                 newProperties[i] = .null
                 changed = true
+            } else if cellTabs.contains(character) {
+                newProperties[i] = .controlCharacter
+                changed = true
             } else if bullets.contains(character) {
                 var bullet: [UniChar] = [0x2022]
                 var glyph: [CGGlyph] = [0]
@@ -225,6 +315,19 @@ class MarkdownTextView: NSTextView, NSLayoutManagerDelegate {
         guard changed else { return 0 }
         layoutManager.setGlyphs(newGlyphs, properties: newProperties, characterIndexes: characterIndexes, font: font, forGlyphRange: range)
         return range.length
+    }
+
+    /// R60: the bar between two cells of a grid acts as a tab to the next column.
+    func layoutManager(
+        _ layoutManager: NSLayoutManager, shouldUse action: NSLayoutManager.ControlCharacterAction, forControlCharacterAt charIndex: Int
+    ) -> NSLayoutManager.ControlCharacterAction {
+        cellTabs.contains(charIndex) ? .horizontalTab : action
+    }
+
+    /// Whether a table fits depends on the width, so the note is styled again when that changes.
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        if let width = textContainer?.size.width, width != styledWidth, !markdownLayout(text: string).tables.isEmpty { restyle() }
     }
 
     // MARK: Drawing
@@ -253,6 +356,10 @@ class MarkdownTextView: NSTextView, NSLayoutManagerDelegate {
         for rule in rules {
             guard let rect = rect(of: rule) else { continue }
             NSRect(x: textContainerOrigin.x, y: rect.midY, width: bounds.width - textContainerOrigin.x * 2, height: 1).fill()
+        }
+        for grid in grids {
+            guard let rect = rect(of: grid.header) else { continue }
+            NSRect(x: textContainerOrigin.x, y: rect.maxY + 1, width: grid.width, height: 1).fill()
         }
         NSColor.quaternaryLabelColor.setFill()
         for block in codeBlocks {
@@ -336,12 +443,13 @@ class MarkdownTextView: NSTextView, NSLayoutManagerDelegate {
         let visible = (string as NSString).length == 0 ? "" : String(string.utf16.enumerated().compactMap { index, unit -> Character? in
             if concealed.contains(index) { return nil }
             if bullets.contains(index) { return "•" }
+            if cellTabs.contains(index) { return "\t" }
             if let box = boxes.first(where: { $0.range.location + 1 == index }) { return box.checked ? "☑" : "☐" }
             return UnicodeScalar(unit).map(Character.init) ?? "?"
         })
         let height = layoutManager.flatMap { layout in textContainer.map { layout.ensureLayout(for: $0); return layout.usedRect(for: $0).height } } ?? 0
         return "focused \(focused), text \(string.debugDescription), seen \(visible.debugDescription), hidden [\(list(concealed))], "
-            + "boxes \(boxes.map { "\($0.range.location):\($0.checked)" }), links \(links.map(\.url)), quotes \(quotes.count), rules \(rules.count), code blocks \(codeBlocks.count), "
+            + "boxes \(boxes.map { "\($0.range.location):\($0.checked)" }), links \(links.map(\.url)), quotes \(quotes.count), rules \(rules.count), code blocks \(codeBlocks.count), grids \(grids.map { Int($0.width) }), "
             + "fonts \(fonts), height \(String(format: "%.0f", height))"
     }
 
