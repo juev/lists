@@ -444,7 +444,12 @@ impl Store {
     fn run_configured(&self) -> Result<Option<SyncReport>> {
         Ok(Some(match self.sync_config()? {
             SyncConfig::Off => return Ok(None),
-            SyncConfig::Folder { path } => self.sync_with(&DirRemote::new(path))?,
+            SyncConfig::Folder { path } => {
+                let report = self.sync_with(&DirRemote::new(path))?;
+                // What this run wrote is not news to it.
+                self.folder_changed();
+                report
+            }
             SyncConfig::WebDav { url, user } => {
                 self.sync_with(&WebDavRemote::new(&url, &user, &self.password(&user)?)?)?
             }
@@ -538,6 +543,23 @@ impl Store {
         db::meta_set(&tx, "force_snapshot", "1")?;
         tx.commit()?;
         Ok(())
+    }
+
+    /// For sync through a folder: whether a file appeared in its log or left
+    /// it since the last call or the last run. Cheap enough to ask every couple
+    /// of seconds; with any other kind of sync the answer is no.
+    pub fn folder_changed(&self) -> bool {
+        let Ok(SyncConfig::Folder { path }) = self.sync_config() else {
+            return false;
+        };
+        let Ok(mut names) = DirRemote::new(path).list(&format!("{ROOT}/log")) else {
+            return false;
+        };
+        names.sort();
+        let mut seen = self.folder_seen.lock().unwrap_or_else(|p| p.into_inner());
+        let changed = seen.as_ref() != Some(&names);
+        *seen = Some(names);
+        changed
     }
 
     /// Runs one sync. Does nothing when sync is not configured.

@@ -97,7 +97,7 @@ Open Settings → Sync and choose the kind:
 
 - **WebDAV**: address, user name and password. For Nextcloud and similar servers use an app password.
 - **CalDAV**: address, user name and password. Lists become calendars, and tasks stay visible to other CalDAV apps.
-- **Folder** (macOS and the web server): a directory, for example one that another tool keeps in sync. Android does not offer it.
+- **Folder** (macOS and the web server): a directory, for example one that another tool keeps in sync. Android does not offer it. Changes that the other tool brings into the folder are picked up within a few seconds.
 
 Use the same kind and the same address on every device. After that sync needs no attention: a small icon shows the state, and an error does not block work. On Android sync also runs in the background every 15 minutes.
 

@@ -382,6 +382,7 @@ struct SettingsView: View {
                 store.setSyncPassword(password: password)
             }
             model.reload()
+            model.watchSyncFolder()
             model.syncNow()
         } catch {
             message = describe(error)
