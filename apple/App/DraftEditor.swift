@@ -115,6 +115,8 @@ struct DraftEditor: View {
     }
 
     private func close() {
+        // Esc with a popover open is for the popover: it reaches the card as well.
+        if popover != nil { return popover = nil }
         if draft.isBlank {
             draft.files.forEach(IncomingFiles.discard)
         } else {
