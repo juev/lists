@@ -218,12 +218,11 @@ fun EditorSheet(editing: Editing, state: UiState, model: MainViewModel, onRemind
                     }
                 }
             }
-            CommittedField(
+            MarkdownField(
                 key = task.id,
                 value = task.notes,
                 placeholder = str(R.string.notes),
                 enabled = !locked,
-                singleLine = false,
                 textStyle = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.fillMaxWidth().padding(start = 36.dp, end = 8.dp),
             ) { value -> model.act { it.setNotes(task.id, value) } }
