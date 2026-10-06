@@ -98,7 +98,9 @@ struct Sidebar: View {
                 row(.today, L("Today"), "star", count: model.counts.today, alert: model.counts.overdue > 0)
                 row(.upcoming, L("Upcoming"), "calendar", count: model.counts.upcoming)
                 row(.all, L("All"), "square.stack", count: 0)
-                row(.completed, L("Completed"), "checkmark.circle", count: 0)
+                if model.showCompletedView {
+                    row(.completed, L("Completed"), "checkmark.circle", count: 0)
+                }
                 if model.counts.trash > 0 {
                     row(.trash, L("Trash"), "trash", count: model.counts.trash)
                 }
@@ -328,7 +330,7 @@ struct ListEditor: View {
                 Text(L("By priority")).tag(SortMode.priority)
                 Text(L("By title")).tag(SortMode.title)
             }
-            Toggle(L("Show completed"), isOn: $showDone)
+            Toggle(L("Keep completed tasks in this list"), isOn: $showDone)
             Section(L("New tasks")) {
                 Picker(L("Priority"), selection: $defaultPriority) {
                     ForEach(Priority.all, id: \.self) { Text($0.title).tag($0) }

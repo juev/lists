@@ -14,6 +14,9 @@ import AppKit
 /// `task` (prints the due date and the repeat of the selected task), `done` (completes it),
 /// `cards` (prints the open cards and the selected row), `rows` (prints the rows in the order they are drawn), `panel` (prints whether quick entry is on screen and what runs modally),
 /// `windows` (prints the windows of the app),
+/// `completedview:on` and `completedview:off` (flip the setting that offers the Completed view), `scope` (prints the current view),
+/// `menu:Title` (prints whether the menu bar item with that title is enabled),
+/// `sidebar` (prints how many rows each list of the main window has, the sidebar among them),
 /// `quicktrace` (shows quick entry transparent and without the keyboard, and prints its geometry frame by frame:
 /// a line that differs from the next one is a card that moved after it was shown).
 /// With `LISTS_DEBUG_QUIET` set the script leaves the app in the background instead of bringing its window forward;
@@ -97,6 +100,13 @@ enum DebugScript {
                     let task = AppModel.shared.selectedTask
                     print("debug: task \(task?.title ?? "none"), due \(task?.due ?? "none"), repeat \(task?.repeat?.summary ?? "none")")
                 case "inbox": AppModel.shared.scope = .inbox
+                case "completedview": AppModel.shared.showCompletedView = argument != "off"
+                case "scope": print("debug: scope \(AppModel.shared.scopeTitle), completed view \(AppModel.shared.showCompletedView ? "on" : "off")")
+                case "menu":
+                    let items = (NSApp.mainMenu?.items ?? []).flatMap { $0.submenu?.items ?? [] }
+                    let item = items.first { $0.title == argument }
+                    print("debug: menu \(argument) \(item.map { $0.isEnabled ? "enabled" : "disabled" } ?? "missing")")
+                case "sidebar": print("debug: sidebar rows \(tableRows(in: target?.contentView?.superview))")
                 case "cards":
                     let model = AppModel.shared
                     let open = model.expanded.map(taskTitle).sorted()
@@ -148,6 +158,12 @@ enum DebugScript {
 
     private static func taskId(titled title: String) -> String? {
         shown.first { $0.title == title }?.id
+    }
+
+    /// Row counts of the tables in a window: SwiftUI draws each `List` as one, the sidebar included.
+    private static func tableRows(in view: NSView?) -> [Int] {
+        guard let view else { return [] }
+        return ((view as? NSTableView).map { [$0.numberOfRows] } ?? []) + view.subviews.flatMap(tableRows(in:))
     }
 
     private static func geometry(_ panel: NSPanel) -> String {

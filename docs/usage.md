@@ -19,6 +19,8 @@ The fixed views next to the lists:
 | Completed | finished tasks and the record of each finished repeat; Clear… at the bottom removes those older than a month, older than a year, or all of them |
 | Trash | deleted tasks; they can be restored until the trash is emptied by hand |
 
+On macOS, Settings → Sidebar → "Show Completed in the sidebar" removes the Completed view from the sidebar and from the Go menu (⌘5). It is a setting of that Mac and does not sync. It is not the per-list switch "Keep completed tasks in this list" (context menu of a list → Configure…), which decides whether finished tasks stay at the end of that one list.
+
 Search looks through titles and notes in all lists.
 
 ## Tasks
