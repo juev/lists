@@ -5,6 +5,14 @@
 "Delete everything in the trash for good?" = "Удалить всё из корзины навсегда?";
 "Empty Trash" = "Очистить корзину";
 "This cannot be undone." = "Это действие нельзя отменить.";
+"Clear…" = "Очистить…";
+"Clear" = "Очистить";
+"Older than a month" = "Старше месяца";
+"Older than a year" = "Старше года";
+"Everything" = "Всё";
+"Delete completed tasks older than a month for good?" = "Удалить навсегда выполненное старше месяца?";
+"Delete completed tasks older than a year for good?" = "Удалить навсегда выполненное старше года?";
+"Delete all completed tasks for good?" = "Удалить навсегда всё выполненное?";
 "New task" = "Новая задача";
 "All done for today" = "На сегодня всё";
 "Tasks due today will show up here." = "Задачи со сроком на сегодня появятся здесь.";

@@ -136,6 +136,8 @@ fun MainScreen(model: MainViewModel, onReminderSet: () -> Unit) {
     var creatingFilter by remember { mutableStateOf(false) }
     var settings by remember { mutableStateOf(false) }
     var confirmEmptyTrash by remember { mutableStateOf(false) }
+    var clearMenu by remember { mutableStateOf(false) }
+    var clearCompleted by remember { mutableStateOf<ClearCompleted?>(null) }
     var duePickerFor by remember { mutableStateOf<TaskItem?>(null) }
 
     LaunchedEffect(state.notice) {
@@ -190,6 +192,17 @@ fun MainScreen(model: MainViewModel, onReminderSet: () -> Unit) {
                     state.effectiveScope == Scope.Trash && state.sections.any { it.tasks.isNotEmpty() } ->
                         Row(Modifier.fillMaxWidth().navigationBarsPadding().padding(8.dp), horizontalArrangement = Arrangement.End) {
                             TextButton(onClick = { confirmEmptyTrash = true }) { Text(str(R.string.empty_trash), color = MaterialTheme.colorScheme.error) }
+                        }
+                    state.effectiveScope == Scope.Completed && state.sections.any { it.tasks.isNotEmpty() } ->
+                        Row(Modifier.fillMaxWidth().navigationBarsPadding().padding(8.dp), horizontalArrangement = Arrangement.End) {
+                            Box {
+                                TextButton(onClick = { clearMenu = true }) { Text(str(R.string.clear_more), color = MaterialTheme.colorScheme.error) }
+                                DropdownMenu(expanded = clearMenu, onDismissRequest = { clearMenu = false }) {
+                                    ClearCompleted.entries.forEach { choice ->
+                                        DropdownMenuItem(text = { Text(str(choice.title)) }, onClick = { clearMenu = false; clearCompleted = choice })
+                                    }
+                                }
+                            }
                         }
                     !state.readOnly -> AddBar(onAdd = model::add)
                 }
@@ -256,6 +269,30 @@ fun MainScreen(model: MainViewModel, onReminderSet: () -> Unit) {
             dismissButton = { TextButton(onClick = { confirmEmptyTrash = false }) { Text(str(R.string.cancel)) } },
         )
     }
+    // Clearing bypasses the trash, so it is confirmed like emptying the trash (R46).
+    clearCompleted?.let { choice ->
+        AlertDialog(
+            onDismissRequest = { clearCompleted = null },
+            title = { Text(str(choice.question)) },
+            text = { Text(str(R.string.cannot_undo)) },
+            confirmButton = {
+                TextButton(onClick = { clearCompleted = null; model.act { it.clearCompleted(choice.before()) } }) {
+                    Text(str(R.string.clear), color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = { TextButton(onClick = { clearCompleted = null }) { Text(str(R.string.cancel)) } },
+        )
+    }
+}
+
+/** What "Clear…" in Completed removes. */
+private enum class ClearCompleted(val title: Int, val question: Int, private val months: Long?) {
+    OlderThanMonth(R.string.older_than_month, R.string.clear_month_question, 1),
+    OlderThanYear(R.string.older_than_year, R.string.clear_year_question, 12),
+    Everything(R.string.everything, R.string.clear_all_question, null);
+
+    /** Tasks completed before this day go; null removes all of them. */
+    fun before(): String? = months?.let { java.time.LocalDate.now().minusMonths(it).toString() }
 }
 
 @Composable

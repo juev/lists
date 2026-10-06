@@ -130,6 +130,8 @@ const TASK_COLUMNS: &str = "
 
 /// Visible, not a completion record.
 const LIVE: &str = "t.eff_deleted = 0 AND t.log_of IS NULL";
+/// What the Completed view lists: finished top-level tasks and the records of finished repeats.
+const COMPLETED: &str = "t.eff_deleted = 0 AND t.done IS NOT NULL AND (t.eff_parent IS NULL OR t.log_of IS NOT NULL)";
 const NOT_ARCHIVED: &str = "t.eff_list NOT IN (SELECT id FROM lists WHERE archived = 1)";
 
 fn task_from_row(r: &Row) -> rusqlite::Result<TaskItem> {
@@ -499,12 +501,9 @@ impl Store {
                 ),
                 &[],
             ),
-            Scope::Completed => query_tasks(
-                conn,
-                "WHERE t.eff_deleted = 0 AND t.done IS NOT NULL AND (t.eff_parent IS NULL OR t.log_of IS NOT NULL)
-                 ORDER BY t.done DESC, t.id LIMIT 500",
-                &[],
-            ),
+            Scope::Completed => {
+                query_tasks(conn, &format!("WHERE {COMPLETED} ORDER BY t.done DESC, t.id"), &[])
+            }
             Scope::Trash => query_tasks(conn, "WHERE t.deleted = 1 AND t.purged = 0 ORDER BY t.title, t.id", &[]),
             Scope::Tag { name } => query_tasks(
                 conn,
@@ -982,6 +981,31 @@ impl Store {
         self.write(|w| {
             let mut stmt = w.tx.prepare("SELECT id FROM tasks WHERE deleted = 1 AND purged = 0")?;
             let ids: Vec<String> = stmt.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
+            drop(stmt);
+            for id in &ids {
+                w.task(id, "purged", json!(true))?;
+            }
+            Ok(ids.len() as u32)
+        })
+    }
+
+    /// Removes what the Completed view lists for good, bypassing the trash:
+    /// everything, or only what was completed before the day `before`
+    /// (`YYYY-MM-DD`). Subtasks go with their task. Returns how many entries
+    /// of the view were removed.
+    pub fn clear_completed(&self, before: Option<String>) -> Result<u32> {
+        if let Some(day) = &before {
+            if day.len() != 10 || recur::split(day).is_none() {
+                return Err(AppError::invalid(format!("bad date: {day}")));
+            }
+        }
+        self.write(|w| {
+            let mut stmt = w.tx.prepare(&format!(
+                "SELECT t.id FROM tasks t WHERE {COMPLETED} AND (?1 IS NULL OR substr(t.done, 1, 10) < ?1)"
+            ))?;
+            let ids: Vec<String> = stmt
+                .query_map([&before], |r| r.get(0))?
+                .collect::<rusqlite::Result<_>>()?;
             drop(stmt);
             for id in &ids {
                 w.task(id, "purged", json!(true))?;

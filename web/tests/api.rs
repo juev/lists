@@ -201,6 +201,27 @@ fn a_task_from_quick_entry_to_the_trash() {
     );
     assert_eq!(call(&web, &cookie, json!({ "op": "emptyTrash" }))["removed"], 1);
 
+    let completed = |web: &Web| {
+        get(web, &cookie, "/api/tasks?scope=completed")
+            .as_array()
+            .unwrap()
+            .len()
+    };
+    let finished = call(&web, &cookie, json!({ "op": "quickAdd", "text": "сделано" }));
+    call(&web, &cookie, json!({ "op": "complete", "id": finished["id"] }));
+    let done_on = get(&web, &cookie, "/api/tasks?scope=completed")[0]["done"]
+        .as_str()
+        .unwrap()[..10]
+        .to_string();
+    assert_eq!(
+        call(&web, &cookie, json!({ "op": "clearCompleted", "before": done_on }))["removed"],
+        0,
+        "nothing was completed before that day"
+    );
+    assert_eq!(completed(&web), 1);
+    assert_eq!(call(&web, &cookie, json!({ "op": "clearCompleted" }))["removed"], 1);
+    assert_eq!(completed(&web), 0);
+
     let bad = ureq::post(&format!("{}/api/call", web.base))
         .set("Cookie", &cookie)
         .set("X-Lists", "1")

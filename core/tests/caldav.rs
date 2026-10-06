@@ -451,6 +451,34 @@ fn c6_c14_trash_removes_the_object_and_a_vanished_object_goes_to_the_trash() {
 }
 
 #[test]
+fn c6_cleared_completed_tasks_leave_the_server() {
+    let dav = start();
+    let (a, b) = pair(&dav);
+    let done = add(&a, "сделанная");
+    add_sub(&a, &done, "её часть");
+    a.complete_task(done.id.clone()).unwrap();
+    let rep = add(&a, "зарядка");
+    a.set_due(rep.id.clone(), Some("2026-10-05".into())).unwrap();
+    a.set_repeat(rep.id.clone(), Some(daily())).unwrap();
+    a.complete_task(rep.id.clone()).unwrap();
+    settle(&a, &b);
+    assert_eq!(dav.objects(), 4, "two tasks, a subtask and the record of the repeat");
+
+    assert_eq!(a.clear_completed(None).unwrap(), 2);
+    a.sync_now().unwrap();
+    assert_eq!(dav.objects(), 1, "only the open repeating task is left");
+
+    // The server carries no word of a purge: for B the objects vanished (C14).
+    b.sync_now().unwrap();
+    assert!(view(&b, Scope::Completed).is_empty());
+    assert_eq!(view(&b, Scope::Inbox), ["зарядка"]);
+    assert_eq!(view(&b, Scope::Trash), ["её часть", "зарядка", "сделанная"]);
+    a.sync_now().unwrap();
+    assert_eq!(dav.objects(), 1, "nobody puts the objects back");
+    assert!(view(&a, Scope::Trash).is_empty());
+}
+
+#[test]
 fn c1_c15_lists_are_calendars_with_their_settings() {
     let dav = start();
     let (a, b) = pair(&dav);

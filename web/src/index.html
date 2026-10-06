@@ -99,6 +99,9 @@ const RU = {
   "Every two weeks": "Каждые две недели", "Every month": "Каждый месяц", "Every quarter": "Каждый квартал", "Every year": "Каждый год", "Custom": "Свой вариант",
   "Tag": "Тег", "Subtask": "Подзадача", "Attach file": "Прикрепить файл", "Move to": "Переместить в", "Duplicate": "Дублировать", "Delete": "Удалить",
   "Restore": "Восстановить", "Empty Trash": "Очистить корзину", "Delete everything in the trash for good?": "Удалить всё из корзины навсегда?",
+  "Clear…": "Очистить…", "Older than a month": "Старше месяца", "Older than a year": "Старше года", "Everything": "Всё",
+  "Delete completed tasks older than a month for good?": "Удалить навсегда выполненное старше месяца?", "Delete completed tasks older than a year for good?": "Удалить навсегда выполненное старше года?",
+  "Delete all completed tasks for good?": "Удалить навсегда всё выполненное?",
   "Password": "Пароль", "Sign in": "Войти", "Wrong password": "Неверный пароль", "Sign out": "Выйти", "All done for today": "На сегодня всё",
   "No tasks": "Задач нет", "Nothing found": "Ничего не найдено", "Synced": "Синхронизировано", "Sync failed": "Синхронизация не удалась",
   "waiting": "ожидает отправки", "Deleted": "Удалено", "Undo": "Отменить", "Task completed": "Выполнено", "Moved to the next occurrence": "Перенесено на следующий повтор",
@@ -146,6 +149,7 @@ function toast(text, undo) {
 const pad = n => String(n).padStart(2, "0");
 const iso = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 const today = () => iso(new Date());
+const monthsAgo = n => { const d = new Date(), day = d.getDate(); d.setDate(1); d.setMonth(d.getMonth() - n); d.setDate(Math.min(day, new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate())); return iso(d); };
 const plus = n => { const d = new Date(); d.setDate(d.getDate() + n); return iso(d); };
 const dayOf = v => (v || "").slice(0, 10);
 const parseDay = v => { const [y, m, d] = dayOf(v).split("-").map(Number); return new Date(y, m - 1, d); };
@@ -377,8 +381,21 @@ function render() {
         current && !state.search ? $("div", { class: "chips", style: "padding:8px 10px 0" }, listTools(current)) : null,
         empty ? $("div", { class: "empty" }, t(state.search ? "Nothing found" : state.scope === "today" ? "All done for today" : "No tasks"))
           : secs.map(s => [s.title ? $("div", { class: "section" + (s.bad ? " bad" : "") }, s.title) : null, s.tasks.map(x => taskNode(x, origin))]),
-        state.scope === "trash" && !empty ? $("div", { style: "text-align:right;padding:14px" }, $("button", { class: "link danger", onclick: () => confirm(t("Delete everything in the trash for good?")) && act("emptyTrash") }, t("Empty Trash"))) : null),
+        state.scope === "trash" && !empty ? $("div", { style: "text-align:right;padding:14px" }, $("button", { class: "link danger", onclick: () => confirm(t("Delete everything in the trash for good?")) && act("emptyTrash") }, t("Empty Trash"))) : null,
+        state.scope === "completed" && !state.search && !empty ? $("div", { style: "text-align:right;padding:14px" }, clearCompleted()) : null),
       readOnly() || state.filterEdit || state.scope.startsWith("filter:") ? null : $("div", { id: "add" }, $("span", { style: "color:var(--muted)" }, "+"), add))));
+}
+
+// Clearing cannot be undone, so each choice is confirmed (R46).
+function clearCompleted() {
+  const choices = [["month", "Older than a month", "Delete completed tasks older than a month for good?", () => monthsAgo(1)],
+    ["year", "Older than a year", "Delete completed tasks older than a year for good?", () => monthsAgo(12)],
+    ["all", "Everything", "Delete all completed tasks for good?", () => null]];
+  return $("select", { class: "link danger", style: "border:0;background:transparent;cursor:pointer", "aria-label": t("Clear…"), onchange: e => {
+    const choice = choices.find(c => c[0] === e.target.value);
+    e.target.value = "";
+    if (choice && confirm(t(choice[2]))) act("clearCompleted", { before: choice[3]() });
+  } }, $("option", { value: "" }, t("Clear…")), choices.map(c => $("option", { value: c[0] }, t(c[1]))));
 }
 
 async function showLogin() {
