@@ -153,7 +153,10 @@ A reminder set on a task itself replaces the one derived from its due date. The 
 | ⌘V | attach the files or the image on the clipboard to the open card |
 | ↑ ↓ | select |
 | Enter | open the selected task with the cursor in its title; close it when it is open |
-| Tab | from the title to the notes |
+| Tab | from the title to the notes, from the notes to the chips of the card, then from chip to chip and back to the title |
+| ⇧Tab | back through the chips, from the first one to the notes |
+| ⌥Tab | a tab character in the notes |
+| Space or Return on a chip | what a click on it does: its date, repeat or tag popover, its menu, or the removal of a tag |
 | Esc | close the open card and go back to the list |
 | Space or ⌘Enter | complete |
 | ⌘T | due today |
