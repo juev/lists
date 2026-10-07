@@ -82,7 +82,8 @@
 "No connection: %@" = "Подключения нет: %@";
 "Push server" = "Сервер уведомлений";
 "Push token" = "Токен сервера уведомлений";
-"Only for an ntfy server that requires sign-in. The token is sent to this server and to no other." = "Только для сервера ntfy, который требует входа. Токен уходит на этот сервер и больше никуда.";
+"The push server requires sign-in" = "Сервер уведомлений требует входа";
+"An access token of the ntfy server. It is sent to this server and to no other." = "Токен доступа сервера ntfy. Он уходит на этот сервер и больше никуда.";
 "The push server refused access. Check the push token." = "Сервер уведомлений отказал в доступе. Проверьте токен.";
 "The push token could not be saved in the system keychain: %@" = "Не удалось сохранить токен в системной связке ключей: %@";
 "Optional. Through an ntfy server other devices ask this Mac to sync at once. No data passes through it." = "Необязательно. Через сервер ntfy другие устройства просят этот Mac синхронизироваться сразу. Данные через него не идут.";
