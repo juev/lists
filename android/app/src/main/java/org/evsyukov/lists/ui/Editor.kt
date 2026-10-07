@@ -74,6 +74,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -95,6 +96,9 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.evsyukov.lists.Push
 import org.evsyukov.lists.R
 import org.evsyukov.lists.str
@@ -121,6 +125,7 @@ import org.evsyukov.lists.title
 import org.evsyukov.lists.today
 import org.evsyukov.lists.weekdayNames
 import uniffi.lists_core.Attachment
+import uniffi.lists_core.ConnectionCheck
 import uniffi.lists_core.DueWindow
 import uniffi.lists_core.FilterSpec
 import uniffi.lists_core.FilterStatus
@@ -133,6 +138,7 @@ import uniffi.lists_core.Store
 import uniffi.lists_core.SyncConfig
 import uniffi.lists_core.TaskItem
 import uniffi.lists_core.TaskList
+import uniffi.lists_core.checkSyncConnection
 import java.io.File
 import java.time.Instant
 import java.time.LocalDate
@@ -793,6 +799,11 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
     val context = LocalContext.current
     var password by remember { mutableStateOf(if (enabled) Secrets.load(context).orEmpty() else "") }
     var error by remember { mutableStateOf<String?>(null) }
+    // What the last connection test found and whether that was a failure; shown under its button.
+    var tested by remember { mutableStateOf<String?>(null) }
+    var testFailed by remember { mutableStateOf(false) }
+    var testing by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
     var push by remember { mutableStateOf(Push.enabled(context)) }
     var notifyOn by remember { mutableStateOf(NotifyPrefs.enabled(context)) }
     var leads by remember { mutableStateOf(NotifyPrefs.leads(context)) }
@@ -869,6 +880,25 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 8.dp),
                     )
+                    // Asks the server with what the fields hold now; nothing is saved (S26).
+                    TextButton(enabled = !testing, onClick = {
+                        val config = if (kind == "caldav") SyncConfig.CalDav(url, user) else SyncConfig.WebDav(url, user)
+                        val secret = password
+                        tested = null
+                        testing = true
+                        scope.launch {
+                            val result = withContext(Dispatchers.IO) { runCatching { checkSyncConnection(config, secret) } }
+                            testing = false
+                            testFailed = result.isFailure
+                            tested = result.fold(
+                                { str(if (it == ConnectionCheck.WILL_CREATE) R.string.connected_will_create else R.string.connected) },
+                                { str(R.string.no_connection, describe(it)) },
+                            )
+                        }
+                    }) { Text(str(R.string.test_connection)) }
+                    (if (testing) str(R.string.testing_connection) else tested)?.let {
+                        Text(it, style = MaterialTheme.typography.bodySmall, color = if (testFailed && !testing) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                     val noDistributor = str(R.string.push_no_distributor)
                     SwitchRow(str(R.string.push_switch), push) { on ->
                         val activity = context.activity()
@@ -905,7 +935,7 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
                     Secrets.save(context, password.takeIf { enabled })
                     Repo.store.setSyncPassword(password.takeIf { enabled })
                 }
-                    .onSuccess { error = null; model.sync() }
+                    .onSuccess { error = null; tested = null; model.sync() }
                     .onFailure { error = describe(it) }
             }) { Text(str(R.string.save_and_sync)) }
         },

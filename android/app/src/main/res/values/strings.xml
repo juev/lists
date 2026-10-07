@@ -51,6 +51,11 @@
     <string name="password">Password</string>
     <string name="webdav_hint">For Nextcloud and similar servers use an app password. Data on the server is not encrypted.</string>
     <string name="save_and_sync">Save and sync</string>
+    <string name="test_connection">Test connection</string>
+    <string name="testing_connection">Testing the connection…</string>
+    <string name="connected">Connected.</string>
+    <string name="connected_will_create">Connected. The folder does not exist yet; the first sync creates it.</string>
+    <string name="no_connection">No connection: %1$s</string>
     <string name="last_sync_failed">The last attempt failed: %1$s</string>
     <string name="synced_at">Synced: %1$s</string>
     <string name="trash">Trash</string>
