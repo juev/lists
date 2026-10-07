@@ -65,7 +65,7 @@ A project is a top-level task marked as a project. It appears in the sidebar wit
 
 ## Repeats
 
-A repeat is set in the card of a task. On macOS the card of a new task, in the main window, in the quick-entry window and in the menu bar, always has a Repeat chip. In an open task the chip appears once a rule is set; until then Repeat is under the "+" button. ⇧⌘R opens it from anywhere in either card. On Android the card of a new task and the quick-entry window have a Repeat chip, and in the editor Repeat is under the "+" button until a rule is set. The rule counts from the due date, or from the start date when there is no due date.
+A repeat is set in the card of a task. On macOS the card of a new task, in the main window, in the quick-entry window and in the menu bar, always has a Repeat chip. In an open task the chip appears once a rule is set; until then Repeat is under the "+" button. ⇧⌘R opens it from anywhere in either card. On Android the card of a new task and the quick-entry window have a Repeat icon, and in the editor Repeat is under the "+" button until a rule is set. The rule counts from the due date, or from the start date when there is no due date.
 
 Presets: every day, on weekdays, every week, every two weeks, every month, every quarter, every year.
 
@@ -77,7 +77,7 @@ On Android the end date of a repeat cannot be set; the web interface offers the 
 
 ## Quick entry
 
-One line becomes a task. Recognized parts are removed from the title and shown as chips before saving. Nothing has to be typed as text, though: the quick-entry window carries the same fields as the task card, and a value set in a field wins over one read from the title. Recognition can be turned off in Settings; the title is then kept as typed. Files can be added there too: on Android the "File or image" chip picks any number of them.
+One line becomes a task. Recognized parts are removed from the title and shown as chips before saving. Nothing has to be typed as text, though: the quick-entry window carries the same fields as the task card, and a value set in a field wins over one read from the title. Recognition can be turned off in Settings; the title is then kept as typed. Files can be added there too: on Android the paperclip in the card picks any number of them.
 
 | Typed | Meaning |
 |---|---|
@@ -97,7 +97,7 @@ The quick-entry window starts the note with the clipboard: copy a link or a piec
 Where the entry field is:
 
 - **macOS**: the card in the main window (⌘N); a global hotkey that opens a small window over any app (⌃⌥Space by default, changeable in Settings); the menu bar item, which also lists today's tasks; the share extension; the Services menu; the `lists://add?text=…` URL.
-- **Android**: the "+" button on the main screen, which opens the card of a new task as a bottom sheet and keeps it open for the next task after Done on the keyboard or Add (back or a tap outside closes it); a small window over the current app from Share, from the text-selection menu, from the launcher shortcut and from the quick settings tile.
+- **Android**: the "+" button on the main screen, which opens the card of a new task as a bottom sheet and keeps it open for the next task after Done on the keyboard or the send button (back or a tap outside closes it). The card is compact: the title, one line of the note and a row of icons for the start date, the due date, the repeat, the priority, files and the list, each with its value next to it once set. The button beside the title expands the card to the full screen, where the note has room and the fields are rows with names; the same button brings it back, and nothing typed is lost. In landscape the card is always expanded. Besides the button there is a small window over the current app from Share, from the text-selection menu, from the launcher shortcut and from the quick settings tile.
 - **Web**: the New task field in the task list.
 
 ## Saved filters
