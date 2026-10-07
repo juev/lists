@@ -226,6 +226,7 @@ struct SettingsView: View {
     @State private var folder = ""
     @State private var pushServer = ""
     @State private var message: String?
+    @State private var testing = false
 
     var body: some View {
         Form {
@@ -345,7 +346,10 @@ struct SettingsView: View {
                 }
                 HStack {
                     Button(L("Save and sync"), action: save)
-                    if model.syncing { ProgressView().controlSize(.small) }
+                    if kind == .webdav || kind == .caldav {
+                        Button(L("Test connection"), action: test).disabled(testing)
+                    }
+                    if model.syncing || testing { ProgressView().controlSize(.small) }
                     Spacer()
                 }
                 if let text = message ?? status {
@@ -385,6 +389,23 @@ struct SettingsView: View {
         panel.canChooseFiles = false
         panel.canCreateDirectories = true
         if panel.runModal() == .OK, let picked = panel.url { folder = picked.path }
+    }
+
+    /// Asks the server with what the fields hold now; nothing is saved (S26).
+    private func test() {
+        let config: SyncConfig = kind == .caldav ? .calDav(url: url, user: user) : .webDav(url: url, user: user)
+        let password = password
+        message = nil
+        testing = true
+        Task {
+            let result = await Task.detached { Result { try checkSyncConnection(config: config, password: password) } }.value
+            testing = false
+            switch result {
+            case .success(.ready): message = L("Connected.")
+            case .success(.willCreate): message = L("Connected. The folder does not exist yet; the first sync creates it.")
+            case .failure(let error): message = L("No connection: %@", describe(error))
+            }
+        }
     }
 
     private func save() {

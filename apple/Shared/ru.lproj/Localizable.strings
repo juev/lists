@@ -76,6 +76,10 @@
 "Path" = "Путь";
 "A folder synced by another tool or a network drive will do." = "Подойдёт папка, которую синхронизирует другая программа, или сетевой диск.";
 "Save and sync" = "Сохранить и синхронизировать";
+"Test connection" = "Проверить подключение";
+"Connected." = "Подключение есть.";
+"Connected. The folder does not exist yet; the first sync creates it." = "Подключение есть. Папки ещё нет, её создаст первая синхронизация.";
+"No connection: %@" = "Подключения нет: %@";
 "Push server" = "Сервер уведомлений";
 "Optional. Through an ntfy server other devices ask this Mac to sync at once. No data passes through it." = "Необязательно. Через сервер ntfy другие устройства просят этот Mac синхронизироваться сразу. Данные через него не идут.";
 "The last attempt failed: %@" = "Последняя попытка не удалась: %@";
