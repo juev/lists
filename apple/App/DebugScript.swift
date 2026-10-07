@@ -9,7 +9,9 @@ import SwiftUI
 /// `type:text`, `key:return`, `key:n+cmd`, `sleep:0.5`, `click:x,y`, `quick`, `settings`,
 /// `state` (prints who has the keyboard and the text being typed into), `copyfiles:path,path` and `copyimage`
 /// (fill the pasteboard), `draft` (prints the files and the dates of the open new-task card),
-/// `code:17` (presses the key with that key code, whatever the layout, in the date editor: the open popover, or the one `dateeditor` made),
+/// `code:17` (presses the key with that key code, whatever the layout, in the date editor: the open popover, or the one `dateeditor` made;
+/// for a popover the press carries the window the popover hangs on, as a press on the keyboard does: `scripts/postkey.swift` sends
+/// such a press from outside and is the check of that),
 /// `dateeditor:2026-10-05` (builds the editor of the date popover with that value, or with none, in a window that is never shown,
 /// and prints each value it applies: a hidden app shows no popovers), `datefield:time` and `datefield:calendar` (give the keyboard to its time field or to its calendar),
 /// `dateeditor` alone prints who has the keyboard in the date editor and the day selected in its calendar,
@@ -113,7 +115,8 @@ enum DebugScript {
                     let draft = AppModel.shared.draft
                     print("debug: draft files \(draft?.files.map(\.lastPathComponent) ?? []), start \(draft?.start ?? "none"), due \(draft?.due ?? "none")")
                 case "code":
-                    if let code = UInt16(argument) { post(code: code, to: popoverWindow ?? dateEditor) }
+                    // A press on the keyboard comes with the window a popover hangs on, not with the popover.
+                    if let code = UInt16(argument) { post(code: code, to: popoverWindow.map { $0.parent ?? $0 } ?? dateEditor) }
                 case "dateeditor":
                     if step.contains(":") {
                         dateEditor = editorWindow(value: argument.isEmpty ? nil : argument)

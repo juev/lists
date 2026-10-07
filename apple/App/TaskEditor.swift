@@ -403,7 +403,7 @@ struct DateEditor: View {
                     }
                 }
                 Spacer()
-                Button(L("Done")) { apply(Moment.string(date, withTime: withTime)); dismiss() }
+                Button(L("Done"), action: confirm)
                     .keyboardShortcut(.defaultAction)
             }
         }
@@ -418,6 +418,11 @@ struct DateEditor: View {
                 date = Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: Date().addingTimeInterval(86400)) ?? Date()
             }
         }
+    }
+
+    private func confirm() {
+        apply(Moment.string(date, withTime: withTime))
+        dismiss()
     }
 
     private func pick(days: Int) {
@@ -441,11 +446,13 @@ struct DateEditor: View {
         }
     }
 
-    /// The common choices from the keyboard (R39). The time field keeps its keys while it is typed into.
+    /// The common choices from the keyboard (R39). The time field keeps its keys while it is typed into;
+    /// Return confirms from there as well.
     private func press(_ event: NSEvent) -> Bool {
         guard event.modifierFlags.intersection([.command, .control, .option]).isEmpty,
-              !Self.editingTime(in: event.window), let key = DateKey(code: event.keyCode) else { return false }
+              let key = DateKey(code: event.keyCode), key == .confirm || !Self.editingTime(in: event.window) else { return false }
         switch key {
+        case .confirm: confirm()
         case .pick(let days): pick(days: days)
         case .shift(let days): date = Calendar.current.date(byAdding: .day, value: days, to: date) ?? date
         case .remove:
@@ -465,7 +472,7 @@ struct DateEditor: View {
 /// What a key does in the date popover. Keys are told by their place on the
 /// keyboard, not by the character, so every layout gives the same choices.
 enum DateKey: Equatable {
-    case pick(days: Int), shift(days: Int), remove
+    case pick(days: Int), shift(days: Int), remove, confirm
 
     private static let digits: [UInt16: Int] = [
         18: 1, 19: 2, 20: 3, 21: 4, 23: 5, 22: 6, 26: 7, 28: 8, 25: 9,
@@ -480,6 +487,7 @@ enum DateKey: Equatable {
         case 24, 69: self = .shift(days: 1) // = and + of the main block, + of the keypad
         case 27, 78: self = .shift(days: -1)
         case 51, 117: self = .remove // ⌫ and ⌦
+        case 36, 76: self = .confirm // Return and Enter of the keypad
         default:
             guard let days = Self.digits[code] else { return nil }
             self = .pick(days: days)
@@ -487,8 +495,8 @@ enum DateKey: Equatable {
     }
 }
 
-/// Shows the key presses of the window it sits in to `handle` before the
-/// focused control gets them; a press that was handled goes no further.
+/// Shows the key presses headed for the window it sits in to `handle` before
+/// the focused control gets them; a press that was handled goes no further.
 private struct KeyCatcher: NSViewRepresentable {
     let handle: (NSEvent) -> Bool
 
@@ -506,9 +514,16 @@ private struct KeyCatcher: NSViewRepresentable {
             monitor = nil
             guard window != nil else { return }
             monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-                guard let self, event.window === self.window, self.handle(event) else { return event }
+                guard let self, self.receives(event), self.handle(event) else { return event }
                 return nil
             }
+        }
+
+        /// A press in a popover comes with the window the popover hangs on, whose
+        /// first responder is then a view of the popover.
+        private func receives(_ event: NSEvent) -> Bool {
+            guard let window else { return false }
+            return event.window === window || (event.window?.firstResponder as? NSView)?.window === window
         }
     }
 }
