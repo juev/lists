@@ -33,6 +33,7 @@ import SwiftUI
 /// `ghost` (puts the windows of a hidden app on screen transparent, deaf to the mouse and without the keyboard, popovers that open later among them:
 /// a hidden app shows no popovers; key presses then go to the open popover first, as they do when it has the keyboard),
 /// `completedview:on` and `completedview:off` (flip the setting that offers the Completed view), `scope` (prints the current view),
+/// `keepdone:5` (sets for how many minutes a completed task stays in view) and `keepdone` alone (prints it),
 /// `appearance:dark`, `appearance:light` and `appearance:system` (choose the look the way Settings does),
 /// `appearance` alone prints the choice and the look each window of the app has, the quick-entry panel among them,
 /// `menu:Title` (prints whether the menu bar item with that title is enabled),
@@ -171,6 +172,9 @@ enum DebugScript {
                     print("debug: task \(task?.title ?? "none"), due \(task?.due ?? "none"), repeat \(task?.repeat?.summary ?? "none")")
                 case "inbox": AppModel.shared.scope = .inbox
                 case "completedview": AppModel.shared.showCompletedView = argument != "off"
+                case "keepdone":
+                    if let minutes = UInt32(argument) { AppModel.shared.setKeepDone(minutes) }
+                    print("debug: keep done \(AppModel.shared.keepDone)")
                 case "appearance":
                     if step.contains(":") {
                         AppModel.shared.appearance = argument

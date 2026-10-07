@@ -308,3 +308,8 @@
 "Start date (⌘S)" = "Дата начала (⌘S)";
 "Due date (⌘D)" = "Срок (⌘D)";
 "Repeat (⇧⌘R)" = "Повтор (⇧⌘R)";
+"Completed tasks" = "Выполненные задачи";
+"Leave the view" = "Пропадают";
+"at once" = "сразу";
+"after an hour" = "через час";
+"after %d min" = "через %d мин";

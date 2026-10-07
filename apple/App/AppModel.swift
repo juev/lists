@@ -28,6 +28,8 @@ final class AppModel {
     var scope: Scope = .today { didSet { if scope != oldValue { expanded.removeAll(); subtasksShown.removeAll(); draft = nil; selection = nil; reload() } } }
     var search = "" { didSet { if search != oldValue { reload() } } }
     var sections: [TaskSection] = []
+    /// Minutes a completed task stays in its view; shared by all devices (R68).
+    private(set) var keepDone: UInt32 = 5
     var children: [String: [TaskItem]] = [:]
     var expanded: Set<String> = []
     /// Expanded tasks whose subtasks are on show; they stay folded until asked for.
@@ -182,7 +184,10 @@ final class AppModel {
             MainActor.assumeIsolated { self?.reload(); self?.syncNow() }
         }
         timer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.syncNow() }
+            MainActor.assumeIsolated {
+                self?.dropKeptRows()
+                self?.syncNow()
+            }
         }
         watchSyncFolder()
         listenForNudges()
@@ -268,6 +273,15 @@ final class AppModel {
         }
     }
 
+    /// Rows kept after completion leave by the clock, not by a change (R68).
+    private func dropKeptRows() {
+        if sections.contains(where: { $0.tasks.contains { $0.done != nil } }) { reload() }
+    }
+
+    func setKeepDone(_ minutes: UInt32) {
+        perform { try $0.setKeepDoneMinutes(minutes: minutes) }
+    }
+
     func reload() {
         guard let store else { return }
         do {
@@ -275,6 +289,7 @@ final class AppModel {
             tags = try store.tags()
             counts = try store.counts()
             syncStatus = try store.syncStatus()
+            keepDone = try store.keepDoneMinutes()
             if case .list(let id) = scope, list(id) == nil { scope = .inbox }
             if case .tag(let name) = scope, !tags.contains(where: { $0.name == name }) { scope = .inbox }
             projects = try store.projects()
