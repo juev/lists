@@ -161,7 +161,8 @@
     <string name="push_no_distributor">Install a UnifiedPush app such as ntfy and try again.</string>
     <string name="push_server">Push server</string>
     <string name="push_token">Push token</string>
-    <string name="push_token_hint">Only when the other devices listen on an ntfy server that requires sign-in: with its address and an access token this device can ask them to sync. The token is sent to this server and to no other.</string>
+    <string name="push_sign_in">ntfy server that requires sign-in</string>
+    <string name="push_token_hint">The other devices listen on this server. With its address and an access token this device can ask them to sync. The token is sent to this server and to no other.</string>
     <string name="push_refused">The push server refused access. Check the push token.</string>
     <string name="syncing">Syncing…</string>
     <string name="close">Close</string>

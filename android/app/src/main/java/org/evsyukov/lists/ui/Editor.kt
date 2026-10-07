@@ -809,6 +809,8 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
     // S29: receiving is the distributor's; these two serve sending to a server that requires sign-in.
     var pushServer by remember { mutableStateOf(runCatching { Repo.store.pushSendServer() }.getOrNull().orEmpty()) }
     var pushToken by remember { mutableStateOf(if (enabled) Secrets.load(context, Secrets.PUSH_TOKEN).orEmpty() else "") }
+    // Off until a server is set: a public ntfy server needs neither field.
+    var pushSignIn by remember { mutableStateOf(pushServer.isNotEmpty()) }
     var pushRefused by remember { mutableStateOf(false) }
     // S30: nudges go out with sync runs, so the answer comes later than the save.
     LaunchedEffect(Unit) {
@@ -925,11 +927,14 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
                         }
                     }
                     Text(str(R.string.push_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    OutlinedTextField(pushServer, { pushServer = it.trim() }, singleLine = true, label = { Text(str(R.string.push_server)) }, placeholder = { Text("https://ntfy.example.org") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri))
-                    OutlinedTextField(pushToken, { pushToken = it.trim() }, singleLine = true, label = { Text(str(R.string.push_token)) }, placeholder = { Text("tk_…") }, visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password))
-                    Text(str(R.string.push_token_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp))
-                    if (pushRefused) {
-                        Text(str(R.string.push_refused), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                    SwitchRow(str(R.string.push_sign_in), pushSignIn) { pushSignIn = it }
+                    if (pushSignIn) {
+                        OutlinedTextField(pushServer, { pushServer = it.trim() }, singleLine = true, label = { Text(str(R.string.push_server)) }, placeholder = { Text("https://ntfy.example.org") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri))
+                        OutlinedTextField(pushToken, { pushToken = it.trim() }, singleLine = true, label = { Text(str(R.string.push_token)) }, placeholder = { Text("tk_…") }, visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password))
+                        Text(str(R.string.push_token_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp))
+                        if (pushRefused) {
+                            Text(str(R.string.push_refused), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                        }
                     }
                 } else {
                     Text(str(R.string.local_only), color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -952,7 +957,7 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
                     Repo.store.setSyncConfig(config)
                     Secrets.save(context, password.takeIf { enabled })
                     Repo.store.setSyncPassword(password.takeIf { enabled })
-                    val sender = enabled && pushServer.isNotEmpty()
+                    val sender = enabled && pushSignIn && pushServer.isNotEmpty()
                     Repo.store.setPushSendServer(pushServer.takeIf { sender })
                     Secrets.save(context, pushToken.takeIf { sender }, Secrets.PUSH_TOKEN)
                     Repo.store.setPushToken(pushToken.takeIf { sender })
