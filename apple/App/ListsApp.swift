@@ -254,6 +254,15 @@ struct SettingsView: View {
                 @Bindable var model = model
                 Toggle(L("Show Completed in the sidebar"), isOn: $model.showCompletedView)
             }
+            Section(L("Completed tasks")) {
+                // What R68 offers, and the value in force when another device set something else.
+                Picker(L("Leave the view"), selection: Binding(get: { model.keepDone }, set: { model.setKeepDone($0) })) {
+                    ForEach(Set<UInt32>([0, 1, 5, 15, 60, model.keepDone]).sorted(), id: \.self) { minutes in
+                        Text(minutes == 0 ? L("at once") : minutes == 60 ? L("after an hour") : L("after %d min", Int(minutes)))
+                            .tag(minutes)
+                    }
+                }
+            }
             Section(L("Notifications")) {
                 @Bindable var model = model
                 Toggle(L("Show notifications"), isOn: $model.notifyEnabled)
