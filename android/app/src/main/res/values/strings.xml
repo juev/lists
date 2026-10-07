@@ -158,6 +158,10 @@
     <string name="local_only">Data is kept on this device only.</string>
     <string name="push_switch">Sync at once after a change elsewhere</string>
     <string name="push_hint">Other devices ask this one to sync through a UnifiedPush app such as ntfy. No data passes through it.</string>
+    <string name="background_work">Background work</string>
+    <string name="background_restricted">Restricted</string>
+    <string name="background_unrestricted">Unrestricted</string>
+    <string name="background_hint">A phone that restricts Lists puts off sync while the app is closed. The UnifiedPush app needs the same, and some phones also need autostart allowed for both.</string>
     <string name="push_no_distributor">Install a UnifiedPush app such as ntfy and try again.</string>
     <string name="push_server">Push server</string>
     <string name="push_token">Push token</string>
