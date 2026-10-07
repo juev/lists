@@ -702,6 +702,7 @@ dependencies = [
  "tiny_http",
  "uniffi",
  "ureq",
+ "url",
  "uuid",
  "zip",
 ]

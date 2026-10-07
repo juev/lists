@@ -20,6 +20,13 @@ impl std::ops::Deref for Device {
     }
 }
 
+impl Device {
+    /// Where the device keeps its database.
+    pub fn dir(&self) -> &std::path::Path {
+        self._dir.path()
+    }
+}
+
 pub fn device() -> Device {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path().to_string_lossy().into_owned()).unwrap();

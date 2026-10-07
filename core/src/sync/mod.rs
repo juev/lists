@@ -341,7 +341,7 @@ impl Store {
             .filter_map(|data| serde_json::from_slice::<PushRecord>(&data).ok())
             .map(|record| record.url)
             .collect();
-        crate::push::poke(urls.iter().map(String::as_str));
+        self.poke(urls.iter().map(String::as_str));
     }
 
     /// Replaces this device's log files with one snapshot of its full state.

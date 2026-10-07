@@ -1,4 +1,4 @@
-//! Nudges between devices: S18–S21 in docs/specs/sync.md, C22 in docs/specs/caldav.md.
+//! Nudges between devices: S18–S23 and S27–S30 in docs/specs/sync.md, C22 in docs/specs/caldav.md.
 
 mod common;
 #[path = "common/dav.rs"]
@@ -189,10 +189,17 @@ fn c22_server_that_drops_custom_properties_gets_no_nudges_and_no_repeated_writes
 }
 
 /// Stands in for an ntfy server: `POST /<topic>` reaches everyone who holds
-/// `GET /<topic>/json` open.
+/// `GET /<topic>/json` open. It can ask for an access token and can send
+/// every request on to another server.
 struct Ntfy {
     base: String,
     listeners: Arc<Mutex<Vec<(String, std::net::TcpStream)>>>,
+    /// The token the server asks for; `None` lets everyone in.
+    token: Arc<Mutex<Option<String>>>,
+    /// Where requests are redirected to, when set.
+    elsewhere: Arc<Mutex<Option<String>>>,
+    /// Method, path and `Authorization` of every request, `-` when there was none.
+    seen: Arc<Mutex<Vec<String>>>,
 }
 
 impl Ntfy {
@@ -202,14 +209,20 @@ impl Ntfy {
         let base = format!("http://{}", listener.local_addr().unwrap());
         let listeners: Arc<Mutex<Vec<(String, std::net::TcpStream)>>> = Arc::default();
         let held = listeners.clone();
+        let token: Arc<Mutex<Option<String>>> = Arc::default();
+        let elsewhere: Arc<Mutex<Option<String>>> = Arc::default();
+        let seen: Arc<Mutex<Vec<String>>> = Arc::default();
+        let (asked, away, log) = (token.clone(), elsewhere.clone(), seen.clone());
         std::thread::spawn(move || {
             for stream in listener.incoming().flatten() {
                 let held = held.clone();
+                let (asked, away, log) = (asked.clone(), away.clone(), log.clone());
                 std::thread::spawn(move || {
                     let mut reader = BufReader::new(stream.try_clone().unwrap());
                     let mut first = String::new();
                     reader.read_line(&mut first).unwrap();
                     let mut length = 0;
+                    let mut authorization = "-".to_string();
                     loop {
                         let mut header = String::new();
                         reader.read_line(&mut header).unwrap();
@@ -219,12 +232,43 @@ impl Ntfy {
                         if let Some(value) = header.to_ascii_lowercase().strip_prefix("content-length:") {
                             length = value.trim().parse().unwrap();
                         }
+                        if header.to_ascii_lowercase().starts_with("authorization:") {
+                            authorization = header["authorization:".len()..].trim().to_string();
+                        }
                     }
                     let mut body = vec![0; length];
                     reader.read_exact(&mut body).unwrap();
                     let mut stream = stream;
                     let mut parts = first.split_whitespace();
-                    match (parts.next(), parts.next()) {
+                    let (method, path) = (parts.next(), parts.next());
+                    log.lock().unwrap().push(format!(
+                        "{} {} {authorization}",
+                        method.unwrap_or_default(),
+                        path.unwrap_or_default()
+                    ));
+                    if let Some(target) = away.lock().unwrap().clone() {
+                        let moved = format!(
+                            "HTTP/1.1 307 Temporary Redirect\r\nLocation: {target}{}\r\nContent-Length: 0\r\n\r\n",
+                            path.unwrap_or_default()
+                        );
+                        stream.write_all(moved.as_bytes()).unwrap();
+                        return;
+                    }
+                    // Like ntfy: 401 to a token it does not know, 403 to a visitor without one.
+                    if let Some(token) = asked.lock().unwrap().clone() {
+                        if authorization != format!("Bearer {token}") {
+                            let code = if authorization == "-" {
+                                "403 Forbidden"
+                            } else {
+                                "401 Unauthorized"
+                            };
+                            stream
+                                .write_all(format!("HTTP/1.1 {code}\r\nContent-Length: 0\r\n\r\n").as_bytes())
+                                .unwrap();
+                            return;
+                        }
+                    }
+                    match (method, path) {
                         (Some("GET"), Some(path)) if path.ends_with("/json") => {
                             stream
                                 .write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/x-ndjson\r\nConnection: close\r\n\r\n{\"event\":\"open\"}\n")
@@ -248,7 +292,26 @@ impl Ntfy {
                 });
             }
         });
-        Ntfy { base, listeners }
+        Ntfy {
+            base,
+            listeners,
+            token,
+            elsewhere,
+            seen,
+        }
+    }
+
+    fn require(&self, token: &str) {
+        *self.token.lock().unwrap() = Some(token.into());
+    }
+
+    fn redirect_to(&self, other: &Ntfy) {
+        *self.elsewhere.lock().unwrap() = Some(other.base.clone());
+    }
+
+    /// What arrived since the last look.
+    fn take(&self) -> Vec<String> {
+        std::mem::take(&mut self.seen.lock().unwrap())
     }
 
     /// Waits until `count` subscriptions are open.
@@ -329,4 +392,193 @@ fn s23_a_broken_subscription_counts_as_a_nudge_and_a_missing_server_as_none() {
     b.set_push_server(Some("http://127.0.0.1:9".into())).unwrap();
     assert!(!b.wait_for_nudge(), "nobody answers there");
     assert!(b.set_push_server(Some("ntfy.sh".into())).is_err());
+}
+
+const TOKEN: &str = "tk_3gd7d2yftt4b8ixyfe9mnmro88o76";
+
+/// Two devices on one storage, both listening through `ntfy`.
+fn pair_on(ntfy: &Ntfy, storage: &tempfile::TempDir) -> (Device, Device) {
+    let (a, b) = (device(), device());
+    for d in [&a, &b] {
+        d.set_push_retry_for_tests(50);
+        d.set_sync_config(folder(storage)).unwrap();
+        d.set_push_server(Some(ntfy.base.clone())).unwrap();
+        d.sync_now().unwrap();
+    }
+    (a, b)
+}
+
+fn path_of(address: Option<String>) -> String {
+    let address = address.unwrap();
+    address[address.rfind('/').unwrap()..].to_string()
+}
+
+#[test]
+fn s27_a_token_opens_a_server_that_requires_sign_in() {
+    let storage = tempfile::tempdir().unwrap();
+    let ntfy = Ntfy::start();
+    ntfy.require(TOKEN);
+    let (a, b) = pair_on(&ntfy, &storage);
+    a.set_push_token(Some(format!(" {TOKEN}\n")));
+    b.set_push_token(Some(TOKEN.into()));
+    let topic = path_of(b.push_endpoint().unwrap());
+
+    let woken = waiting(&b);
+    ntfy.wait_for_listeners(1);
+    add(&a, "от A");
+    a.sync_now().unwrap();
+    assert!(woken.recv_timeout(SOON).unwrap(), "the nudge arrives at once");
+    assert_eq!(
+        ntfy.take(),
+        [
+            format!("GET {topic}/json Bearer {TOKEN}"),
+            format!("POST {topic} Bearer {TOKEN}")
+        ]
+    );
+    assert!(!a.push_refused() && !b.push_refused());
+
+    // The token is the app's to keep: neither the database nor the storage has it.
+    for root in [a.dir(), b.dir(), storage.path()] {
+        let mut left = vec![root.to_path_buf()];
+        while let Some(dir) = left.pop() {
+            for entry in std::fs::read_dir(dir).unwrap().flatten() {
+                if entry.path().is_dir() {
+                    left.push(entry.path());
+                } else {
+                    let data = std::fs::read(entry.path()).unwrap();
+                    assert!(
+                        !data.windows(TOKEN.len()).any(|w| w == TOKEN.as_bytes()),
+                        "{:?}",
+                        entry.path()
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn s28_the_token_goes_to_the_own_server_only() {
+    let storage = tempfile::tempdir().unwrap();
+    let (home, other) = (Ntfy::start(), Ntfy::start());
+    let (a, b, c) = (device(), device(), device());
+    for d in [&a, &b, &c] {
+        d.set_sync_config(folder(&storage)).unwrap();
+    }
+    a.set_push_server(Some(home.base.clone())).unwrap();
+    a.set_push_token(Some(TOKEN.into()));
+    // The same host on another port is another server.
+    b.set_push_endpoint(Some(format!("{}/b", other.base))).unwrap();
+    // An address that names the own server but leads elsewhere.
+    let disguised = format!(
+        "http://{}@{}/c",
+        home.base.trim_start_matches("http://"),
+        other.base.trim_start_matches("http://")
+    );
+    c.set_push_endpoint(Some(disguised)).unwrap();
+    for d in [&b, &c, &a] {
+        d.sync_now().unwrap();
+    }
+    add(&a, "от A");
+    a.sync_now().unwrap();
+    let mut got = other.take();
+    got.sort();
+    assert_eq!(got.len(), 2, "{got:?}");
+    assert!(
+        got[0].starts_with("POST /b -") && got[1].starts_with("POST /c "),
+        "{got:?}"
+    );
+    assert!(!format!("{got:?}").contains(TOKEN), "{got:?}");
+    assert_eq!(home.take(), Vec::<String>::new());
+
+    // A redirect does not take the token along, neither from a nudge nor from a subscription.
+    b.set_push_endpoint(Some(format!("{}/b", home.base))).unwrap();
+    c.set_push_endpoint(None).unwrap();
+    b.sync_now().unwrap();
+    c.sync_now().unwrap();
+    home.redirect_to(&other);
+    add(&a, "ещё от A");
+    a.sync_now().unwrap();
+    a.set_push_retry_for_tests(50);
+    let _ = waiting(&a).recv_timeout(SOON);
+    let topic = path_of(a.push_endpoint().unwrap());
+    let sent = home.take();
+    assert!(sent.contains(&format!("POST /b Bearer {TOKEN}")), "{sent:?}");
+    assert!(sent.contains(&format!("GET {topic}/json Bearer {TOKEN}")), "{sent:?}");
+    let got = other.take();
+    assert!(got.contains(&format!("GET {topic}/json -")), "{got:?}");
+    assert!(!format!("{got:?}").contains(TOKEN), "{got:?}");
+}
+
+#[test]
+fn s30_a_refusal_is_reported_until_the_server_lets_the_device_in() {
+    let ntfy = Ntfy::start();
+    ntfy.require(TOKEN);
+    let b = device();
+    b.set_push_retry_for_tests(50);
+    b.set_push_server(Some(ntfy.base.clone())).unwrap();
+    assert!(!b.push_refused(), "nothing was asked yet");
+
+    assert!(!b.wait_for_nudge(), "no token");
+    assert!(b.push_refused());
+    b.set_push_token(Some("tk_wrong".into()));
+    assert!(!b.push_refused(), "a changed setting has not been tried yet");
+    assert!(!b.wait_for_nudge(), "a token the server does not know");
+    assert!(b.push_refused());
+
+    // The server starts to accept the token: the next attempt clears the report.
+    ntfy.require("tk_wrong");
+    let woken = waiting(&b);
+    ntfy.wait_for_listeners(1);
+    assert!(!b.push_refused());
+    ntfy.drop_listeners();
+    assert!(woken.recv_timeout(SOON).unwrap());
+
+    // A server that is away says nothing about the token.
+    b.set_push_server(Some("http://127.0.0.1:9".into())).unwrap();
+    assert!(!b.wait_for_nudge());
+    assert!(!b.push_refused());
+}
+
+#[test]
+fn s29_a_device_that_only_sends_names_its_server() {
+    let storage = tempfile::tempdir().unwrap();
+    let ntfy = Ntfy::start();
+    ntfy.require(TOKEN);
+    let (phone, b) = (device(), device());
+    for d in [&phone, &b] {
+        d.set_sync_config(folder(&storage)).unwrap();
+    }
+    b.set_push_endpoint(Some(format!("{}/b", ntfy.base))).unwrap();
+    b.sync_now().unwrap();
+    phone.sync_now().unwrap();
+
+    // Without a server of its own the device has nowhere to show the token.
+    phone.set_push_token(Some(TOKEN.into()));
+    add(&phone, "с телефона");
+    phone.sync_now().unwrap();
+    assert_eq!(ntfy.take(), ["POST /b -"]);
+    assert!(!phone.push_refused());
+
+    assert!(phone.set_push_send_server(Some("ntfy.example.org".into())).is_err());
+    phone.set_push_send_server(Some(format!("{}/", ntfy.base))).unwrap();
+    assert_eq!(phone.push_send_server().unwrap(), Some(ntfy.base.clone()));
+    assert_eq!(phone.push_endpoint().unwrap(), None, "receiving is not touched");
+    add(&phone, "ещё с телефона");
+    phone.sync_now().unwrap();
+    assert_eq!(ntfy.take(), [format!("POST /b Bearer {TOKEN}")]);
+    assert!(!phone.push_refused());
+
+    // S30: the refusal of a nudge is reported, and the sync run is not hurt by it.
+    phone.set_push_token(Some("tk_wrong".into()));
+    add(&phone, "и ещё");
+    assert!(phone.sync_now().unwrap().pushed > 0);
+    assert!(phone.push_refused());
+    phone.set_push_token(Some(TOKEN.into()));
+    add(&phone, "последняя");
+    phone.sync_now().unwrap();
+    assert!(!phone.push_refused());
+
+    phone.set_push_send_server(None).unwrap();
+    assert_eq!(phone.push_send_server().unwrap(), None);
 }

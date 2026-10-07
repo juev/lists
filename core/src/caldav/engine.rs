@@ -979,7 +979,7 @@ fn sync(store: &Store, client: &Client, calendars: Vec<Calendar>) -> Result<Sync
         }
     }
     if report.pushed > 0 || report.blobs_uploaded > 0 {
-        crate::push::poke(nudged.values().map(String::as_str));
+        store.poke(nudged.values().map(String::as_str));
     }
     Ok(report)
 }

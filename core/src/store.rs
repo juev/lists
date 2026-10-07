@@ -41,6 +41,10 @@ pub struct Store {
     pub(crate) folder_seen: Mutex<Option<Vec<String>>>,
     /// How long a failed wait for a nudge holds back the next one.
     pub(crate) push_retry: Mutex<std::time::Duration>,
+    /// Access token for this device's own ntfy server (S27). Like the password, never on disk.
+    pub(crate) push_token: Mutex<Option<String>>,
+    /// S30: the own server answered 401 or 403 to the last subscription, to the last nudge.
+    pub(crate) push_refused: Mutex<(bool, bool)>,
     /// How many objects CalDAV sync has built for upload or comparison.
     pub(crate) caldav_renders: AtomicU64,
 }
@@ -349,6 +353,8 @@ impl Store {
             storage_seen: Mutex::new(None),
             folder_seen: Mutex::new(None),
             push_retry: Mutex::new(std::time::Duration::from_secs(10)),
+            push_token: Mutex::new(None),
+            push_refused: Mutex::new((false, false)),
             caldav_renders: AtomicU64::new(0),
         }))
     }
