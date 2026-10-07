@@ -18,6 +18,9 @@ pub const KIND_LIST: &str = "list";
 pub const KIND_TASK: &str = "task";
 pub const KIND_ATTACHMENT: &str = "attachment";
 pub const KIND_FILTER: &str = "filter";
+/// Settings shared by every device: one entity, `SETTINGS_ID`, read straight from `fields`.
+pub const KIND_SETTINGS: &str = "settings";
+pub const SETTINGS_ID: &str = "app";
 
 /// Bumped whenever a derived table changes shape: the tables are then dropped
 /// and rebuilt from `fields`, which never changes shape.
