@@ -159,6 +159,10 @@
     <string name="push_switch">Sync at once after a change elsewhere</string>
     <string name="push_hint">Other devices ask this one to sync through a UnifiedPush app such as ntfy. No data passes through it.</string>
     <string name="push_no_distributor">Install a UnifiedPush app such as ntfy and try again.</string>
+    <string name="push_server">Push server</string>
+    <string name="push_token">Push token</string>
+    <string name="push_token_hint">Only when the other devices listen on an ntfy server that requires sign-in: with its address and an access token this device can ask them to sync. The token is sent to this server and to no other.</string>
+    <string name="push_refused">The push server refused access. Check the push token.</string>
     <string name="syncing">Syncing…</string>
     <string name="close">Close</string>
     <string name="undo">Undo</string>

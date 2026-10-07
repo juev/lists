@@ -45,7 +45,10 @@ import java.util.concurrent.TimeUnit
 class ListsApp : Application() {
     /** The database lives in the app's private storage; nothing else on the device can read it. */
     val store: Store by lazy {
-        Store.open(File(filesDir, "lists").absolutePath).also { it.setSyncPassword(Secrets.load(this)) }
+        Store.open(File(filesDir, "lists").absolutePath).also {
+            it.setSyncPassword(Secrets.load(this))
+            it.setPushToken(Secrets.load(this, Secrets.PUSH_TOKEN))
+        }
     }
 
     override fun onCreate() {

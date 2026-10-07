@@ -97,6 +97,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.evsyukov.lists.Push
@@ -805,6 +806,17 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
     var testing by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     var push by remember { mutableStateOf(Push.enabled(context)) }
+    // S29: receiving is the distributor's; these two serve sending to a server that requires sign-in.
+    var pushServer by remember { mutableStateOf(runCatching { Repo.store.pushSendServer() }.getOrNull().orEmpty()) }
+    var pushToken by remember { mutableStateOf(if (enabled) Secrets.load(context, Secrets.PUSH_TOKEN).orEmpty() else "") }
+    var pushRefused by remember { mutableStateOf(false) }
+    // S30: nudges go out with sync runs, so the answer comes later than the save.
+    LaunchedEffect(Unit) {
+        while (true) {
+            pushRefused = runCatching { Repo.store.pushRefused() }.getOrDefault(false)
+            delay(2000)
+        }
+    }
     var notifyOn by remember { mutableStateOf(NotifyPrefs.enabled(context)) }
     var leads by remember { mutableStateOf(NotifyPrefs.leads(context)) }
     var newTaskList by remember { mutableStateOf(EntryPrefs.newTaskList(context)) }
@@ -913,6 +925,12 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
                         }
                     }
                     Text(str(R.string.push_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    OutlinedTextField(pushServer, { pushServer = it.trim() }, singleLine = true, label = { Text(str(R.string.push_server)) }, placeholder = { Text("https://ntfy.example.org") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri))
+                    OutlinedTextField(pushToken, { pushToken = it.trim() }, singleLine = true, label = { Text(str(R.string.push_token)) }, placeholder = { Text("tk_…") }, visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password))
+                    Text(str(R.string.push_token_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp))
+                    if (pushRefused) {
+                        Text(str(R.string.push_refused), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                    }
                 } else {
                     Text(str(R.string.local_only), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
@@ -934,6 +952,11 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
                     Repo.store.setSyncConfig(config)
                     Secrets.save(context, password.takeIf { enabled })
                     Repo.store.setSyncPassword(password.takeIf { enabled })
+                    val sender = enabled && pushServer.isNotEmpty()
+                    Repo.store.setPushSendServer(pushServer.takeIf { sender })
+                    Secrets.save(context, pushToken.takeIf { sender }, Secrets.PUSH_TOKEN)
+                    Repo.store.setPushToken(pushToken.takeIf { sender })
+                    pushRefused = false
                 }
                     .onSuccess { error = null; tested = null; model.sync() }
                     .onFailure { error = describe(it) }

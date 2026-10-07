@@ -158,6 +158,10 @@
     <string name="push_switch">Синхронизировать сразу после правки на другом устройстве</string>
     <string name="push_hint">Другие устройства просят это синхронизироваться через приложение UnifiedPush, например ntfy. Данные через него не идут.</string>
     <string name="push_no_distributor">Установите приложение UnifiedPush, например ntfy, и повторите.</string>
+    <string name="push_server">Сервер уведомлений</string>
+    <string name="push_token">Токен сервера уведомлений</string>
+    <string name="push_token_hint">Нужно, только если другие устройства слушают сервер ntfy, который требует входа: с его адресом и токеном доступа это устройство сможет просить их синхронизироваться. Токен уходит на этот сервер и больше никуда.</string>
+    <string name="push_refused">Сервер уведомлений отказал в доступе. Проверьте токен.</string>
     <string name="syncing">Идёт синхронизация…</string>
     <string name="close">Закрыть</string>
     <string name="undo">Отменить</string>
