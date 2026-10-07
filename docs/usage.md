@@ -131,8 +131,10 @@ The request carries no data, only "sync now"; tasks still travel through your st
 
 A server closed to anonymous users takes an access token. Create one on the server with `ntfy token add <user>` or on the account page of its web app. Lists does not take a user name and a password.
 
-- **Mac app and web server**: put the token in Settings → Sync → Push token and in `LISTS_PUSH_TOKEN`.
-- **Android**: the ntfy app receives under the account set in it, so Lists needs nothing for that. To let the phone ask the other devices to sync, fill in Settings → Sync → Push server and Push token.
+- **Mac app and web server**: in Settings → Sync turn on "The push server requires sign-in" and put the token in Push token; the web server takes it from `LISTS_PUSH_TOKEN`.
+- **Android**: the ntfy app receives under the account set in it, so Lists needs nothing for that. To let the phone ask the other devices to sync, turn on Settings → Sync → "ntfy server that requires sign-in" and fill in Push server and Push token.
+
+On the public `ntfy.sh` and on any server open to everyone leave these switches off: the fields behind them are not needed, and turning a switch off clears them.
 
 The token is sent only to the server named in the same settings: when the device subscribes, and when it asks a device that listens on that server. Requests to any other server go without it, so keep all devices on the one server. The user behind the token needs read and write access to the topics, for example `ntfy access <user> '*' rw`; the topics of the Android ntfy app start with `up`.
 
