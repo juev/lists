@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -51,9 +52,12 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.InputChip
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.ProvideTextStyle
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -63,6 +67,7 @@ import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -77,6 +82,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -85,6 +91,8 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.evsyukov.lists.Push
@@ -446,12 +454,11 @@ fun MultiChoiceDialog(title: String, options: List<String>, selected: List<Boole
 @Composable
 private fun TagDialog(known: List<String>, onDismiss: () -> Unit, onAdd: (String) -> Unit) {
     var text by rememberSaveable { mutableStateOf("") }
-    AlertDialog(
-        modifier = Modifier.aboveKeyboard(),
-        onDismissRequest = onDismiss,
-        title = { Text(str(R.string.tag)) },
-        text = {
-            Column {
+    FormDialog(
+        title = str(R.string.tag),
+        onDismiss = onDismiss,
+        content = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
                 OutlinedTextField(text, { text = it.replace(" ", "") }, singleLine = true, placeholder = { Text(str(R.string.one_word)) })
                 for (tag in known.take(6)) {
                     Text("#$tag", Modifier.fillMaxWidth().clickable { onAdd(tag); onDismiss() }.padding(vertical = 10.dp))
@@ -546,11 +553,10 @@ fun RepeatDialog(value: Repeat?, onPick: (Repeat?) -> Unit, onDismiss: () -> Uni
     var fromDone by rememberSaveable { mutableStateOf(value?.fromDone ?: false) }
     var count by rememberSaveable { mutableStateOf(value?.count?.toString().orEmpty()) }
 
-    AlertDialog(
-        modifier = Modifier.aboveKeyboard(),
-        onDismissRequest = onDismiss,
-        title = { Text(str(R.string.repeat)) },
-        text = {
+    FormDialog(
+        title = str(R.string.repeat),
+        onDismiss = onDismiss,
+        content = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 if (!custom) {
                     for ((name, rule) in repeatPresets) {
@@ -638,11 +644,57 @@ fun RepeatDialog(value: Repeat?, onPick: (Repeat?) -> Unit, onDismiss: () -> Uni
 }
 
 /**
- * For a dialog with text fields: without it the dialog keeps its height when
- * the keyboard opens, and its lower fields and buttons end up underneath.
+ * A dialog with text fields; [content] scrolls itself.
+ *
+ * The padding keeps the dialog above the keyboard: without it the dialog keeps
+ * its height, and its lower fields and buttons end up underneath.
+ *
+ * In a low window (a phone on its side) even that is not enough: the title, one
+ * field and the buttons of a dialog are taller than what the keyboard leaves.
+ * There the dialog takes the whole window, with the title and the buttons in
+ * one row. The choice follows the window and not the keyboard, so the dialog
+ * is not rebuilt, and the field does not lose the cursor, when the keyboard opens.
  */
 @Composable
-private fun Modifier.aboveKeyboard() = windowInsetsPadding(WindowInsets.safeDrawing)
+private fun FormDialog(
+    title: String,
+    onDismiss: () -> Unit,
+    confirmButton: @Composable () -> Unit,
+    dismissButton: @Composable () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    if (LocalConfiguration.current.screenHeightDp >= LOW_WINDOW_DP) {
+        AlertDialog(
+            modifier = Modifier.windowInsetsPadding(WindowInsets.safeDrawing),
+            onDismissRequest = onDismiss,
+            title = { Text(title) },
+            text = content,
+            confirmButton = confirmButton,
+            dismissButton = dismissButton,
+        )
+        return
+    }
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(Modifier.fillMaxSize()) {
+            Column(Modifier.windowInsetsPadding(WindowInsets.safeDrawing)) {
+                Row(Modifier.fillMaxWidth().padding(start = 24.dp, end = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    dismissButton()
+                    confirmButton()
+                }
+                // The colour and the size of the text of an AlertDialog.
+                CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurfaceVariant) {
+                    ProvideTextStyle(MaterialTheme.typography.bodyMedium) {
+                        Box(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 24.dp)) { content() }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Below this height a window is low: the compact height class of Material. */
+private const val LOW_WINDOW_DP = 480
 
 @Composable
 private fun SwitchRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
@@ -666,11 +718,10 @@ fun ListDialog(list: TaskList?, model: MainViewModel, onDismiss: () -> Unit) {
     var archived by remember { mutableStateOf(list?.archived ?: false) }
     val sorts = listOf(SortMode.MANUAL to str(R.string.sort_manual), SortMode.DUE to str(R.string.sort_due), SortMode.PRIORITY to str(R.string.sort_priority), SortMode.TITLE to str(R.string.sort_title))
 
-    AlertDialog(
-        modifier = Modifier.aboveKeyboard(),
-        onDismissRequest = onDismiss,
-        title = { Text(if (list == null) str(R.string.new_list) else list.displayName()) },
-        text = {
+    FormDialog(
+        title = if (list == null) str(R.string.new_list) else list.displayName(),
+        onDismiss = onDismiss,
+        content = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 if (!inbox) OutlinedTextField(name, { name = it }, singleLine = true, label = { Text(str(R.string.title)) })
                 Row(Modifier.padding(vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -771,11 +822,10 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
         }
     }
 
-    AlertDialog(
-        modifier = Modifier.aboveKeyboard(),
-        onDismissRequest = onDismiss,
-        title = { Text(str(R.string.settings)) },
-        text = {
+    FormDialog(
+        title = str(R.string.settings),
+        onDismiss = onDismiss,
+        content = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 SettingRow(str(R.string.appearance), lookLabels[LookPrefs.choices.indexOf(LookPrefs.appearance(context))]) { choosing = "appearance" }
                 HorizontalDivider(Modifier.padding(vertical = 8.dp))
@@ -936,11 +986,10 @@ fun FilterDialog(filter: SavedFilter?, state: UiState, model: MainViewModel, onD
     )
     val matching = remember(spec) { runCatching { Repo.store.previewFilter(spec).size }.getOrDefault(0) }
 
-    AlertDialog(
-        modifier = Modifier.aboveKeyboard(),
-        onDismissRequest = onDismiss,
-        title = { Text(filter?.name ?: str(R.string.new_filter)) },
-        text = {
+    FormDialog(
+        title = filter?.name ?: str(R.string.new_filter),
+        onDismiss = onDismiss,
+        content = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 OutlinedTextField(name, { name = it }, singleLine = true, label = { Text(str(R.string.title)) })
                 if (filter == null) {
