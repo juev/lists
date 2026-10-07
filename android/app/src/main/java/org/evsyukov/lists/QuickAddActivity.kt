@@ -74,7 +74,6 @@ class QuickAddActivity : ComponentActivity() {
                             listId = EntryPrefs.defaultListId(this@QuickAddActivity, lists),
                             // Typed text is parsed for dates and tags, unless that is turned off; shared text is taken as is.
                             parse = shared.title.isEmpty() && EntryPrefs.parse(this@QuickAddActivity),
-                            onCancel = ::finish,
                             onSubmit = ::save,
                             modifier = Modifier.padding(8.dp),
                             title = shared.title,

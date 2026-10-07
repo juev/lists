@@ -4,26 +4,39 @@ import android.content.Context
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.horizontalScroll
+import android.content.res.Configuration
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.List
+import androidx.compose.material.icons.automirrored.outlined.Send
+import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.Close
-import androidx.compose.material3.AssistChip
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material.icons.outlined.CloseFullscreen
+import androidx.compose.material.icons.outlined.Event
+import androidx.compose.material.icons.outlined.Flag
+import androidx.compose.material.icons.outlined.OpenInFull
+import androidx.compose.material.icons.outlined.PlayArrow
+import androidx.compose.material.icons.outlined.Repeat
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -36,13 +49,21 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import org.evsyukov.lists.R
 import org.evsyukov.lists.dateLabel
 import org.evsyukov.lists.displayName
+import org.evsyukov.lists.marks
 import org.evsyukov.lists.priorities
 import org.evsyukov.lists.str
 import org.evsyukov.lists.summary
@@ -125,14 +146,18 @@ private val urisSaver = listSaver<List<Uri>, String>(save = { uris -> uris.map(U
  * The new-task card: title, note, dates, repeat, priority, files and the list.
  * The same card sits in the sheet over the main screen and in the quick-entry
  * window. With `keepOpen` it empties itself after each task and waits for the
- * next one; the list stays as chosen.
+ * next one; the list and the size stay as chosen.
+ *
+ * It has two sizes (R64). Compact shows the fields as one row of icons;
+ * expanded takes the height it is given and shows them as labelled rows that
+ * scroll under the title. In landscape it is always expanded: the compact one
+ * has no room above the keyboard.
  */
 @Composable
 fun NewTaskCard(
     lists: List<TaskList>,
     listId: String?,
     parse: Boolean,
-    onCancel: () -> Unit,
     onSubmit: (TaskDraft) -> Unit,
     modifier: Modifier = Modifier,
     title: String = "",
@@ -158,7 +183,6 @@ fun NewTaskCard(
     var repeat by rememberSaveable(stateSaver = repeatSaver) { mutableStateOf<Repeat?>(null) }
     var priority by rememberSaveable { mutableStateOf(Priority.NONE) }
     var chosenList by rememberSaveable { mutableStateOf(listId) }
-    var listMenu by remember { mutableStateOf(false) }
     var dialog by rememberSaveable { mutableStateOf<String?>(null) }
     // Files picked here join the ones the card was opened with.
     var picked by rememberSaveable(stateSaver = urisSaver) { mutableStateOf(emptyList<Uri>()) }
@@ -166,6 +190,10 @@ fun NewTaskCard(
         picked = (picked + uris).distinct()
     }
     val attached = files + picked
+    // What the user chose in portrait; it comes back when the screen is turned upright again.
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val full = expanded || landscape
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { focus.requestFocus() }
 
@@ -183,69 +211,69 @@ fun NewTaskCard(
         focus.requestFocus()
     }
 
-    Column(modifier) {
-        TextField(
-            value = text,
-            onValueChange = { text = it },
-            placeholder = { Text(str(R.string.new_task)) },
-            singleLine = true,
-            colors = transparentField(),
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-            keyboardActions = KeyboardActions(onDone = { submit() }),
-            modifier = Modifier.fillMaxWidth().focusRequester(focus),
-        )
-        if (parse) QuickChips(text, Modifier.padding(start = 16.dp, bottom = 4.dp))
-        TextField(
-            value = note,
-            onValueChange = { note = it },
-            placeholder = { Text(str(R.string.notes)) },
-            // The text taken from the clipboard goes in one tap while it is untouched.
-            trailingIcon = if (taken != null && note == taken) {
-                { IconButton(onClick = { note = "" }) { Icon(Icons.Outlined.Close, str(R.string.remove_clipboard_note)) } }
-            } else null,
-            maxLines = 4,
-            textStyle = MaterialTheme.typography.bodyMedium,
-            colors = transparentField(),
-            modifier = Modifier.fillMaxWidth(),
-        )
-        // The same fields as in the editor, so that nothing has to be typed as text.
-        Row(
-            Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            AssistChip(onClick = { dialog = "start" }, label = { Text(start?.let { str(R.string.start_at, dateLabel(it).lowercase()) } ?: str(R.string.start)) })
-            AssistChip(onClick = { dialog = "due" }, label = { Text(due?.let { str(R.string.due_at, dateLabel(it).lowercase()) } ?: str(R.string.due)) })
-            AssistChip(onClick = { dialog = "repeat" }, label = { Text(repeat?.summary() ?: str(R.string.repeat)) })
-            AssistChip(onClick = { dialog = "priority" }, label = { Text(if (priority == Priority.NONE) str(R.string.priority) else priority.title()) })
-            AssistChip(onClick = { pickFiles.launch("*/*") }, label = { Text(str(R.string.file_or_image)) })
-        }
-        if (attached.isNotEmpty()) {
-            Text(
-                str(R.string.files_count, attached.size),
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 16.dp),
+    val listName = chosenList?.let { id -> lists.firstOrNull { it.id == id }?.displayName() ?: str(R.string.inbox) }
+
+    // One tree for both sizes: the title and the note stay the same fields, so the cursor stays where it was.
+    Column(if (full) modifier.fillMaxHeight() else modifier) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TextField(
+                value = text,
+                onValueChange = { text = it },
+                placeholder = { Text(str(R.string.new_task)) },
+                singleLine = true,
+                colors = transparentField(),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { submit() }),
+                modifier = Modifier.weight(1f).focusRequester(focus),
             )
-        }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Box {
-                // Under a project there is nothing to choose: the parent decides the list.
-                if (chosenList != null) {
-                    TextButton(onClick = { listMenu = true }) {
-                        Text(lists.firstOrNull { it.id == chosenList }?.displayName() ?: str(R.string.inbox))
-                    }
-                    DropdownMenu(expanded = listMenu, onDismissRequest = { listMenu = false }) {
-                        for (list in lists) {
-                            DropdownMenuItem(text = { Text(list.displayName()) }, onClick = { chosenList = list.id; listMenu = false })
-                        }
-                    }
+            if (!landscape) {
+                IconButton(onClick = { expanded = !expanded }) {
+                    if (expanded) Icon(Icons.Outlined.CloseFullscreen, str(R.string.collapse_card))
+                    else Icon(Icons.Outlined.OpenInFull, str(R.string.expand_card))
                 }
             }
-            Row {
-                TextButton(onClick = onCancel) { Text(str(R.string.cancel)) }
-                TextButton(onClick = { submit() }, enabled = text.isNotBlank()) { Text(str(R.string.add)) }
+            IconButton(onClick = { submit() }, enabled = text.isNotBlank()) {
+                Icon(Icons.AutoMirrored.Outlined.Send, str(R.string.add))
+            }
+        }
+        Column(if (full) Modifier.weight(1f).verticalScroll(rememberScrollState()) else Modifier) {
+            if (parse) QuickChips(text, Modifier.padding(start = 16.dp, bottom = 4.dp))
+            TextField(
+                value = note,
+                onValueChange = { note = it },
+                placeholder = { Text(str(R.string.notes)) },
+                // The text taken from the clipboard goes in one tap while it is untouched.
+                trailingIcon = if (taken != null && note == taken) {
+                    { IconButton(onClick = { note = "" }) { Icon(Icons.Outlined.Close, str(R.string.remove_clipboard_note)) } }
+                } else null,
+                // In landscape the keyboard leaves a strip: a tall note would push the fields far down.
+                minLines = if (!full) 1 else if (landscape) 2 else 4,
+                maxLines = if (full) Int.MAX_VALUE else 1,
+                textStyle = MaterialTheme.typography.bodyMedium,
+                colors = transparentField(),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            // The same fields as in the editor, so that nothing has to be typed as text.
+            val startText = start?.let { dateLabel(it).lowercase() }
+            val dueText = due?.let { dateLabel(it).lowercase() }
+            val filesText = attached.size.takeIf { it > 0 }?.toString()
+            if (full) {
+                FieldRow(Icons.Outlined.PlayArrow, str(R.string.start), startText) { dialog = "start" }
+                FieldRow(Icons.Outlined.Event, str(R.string.due), dueText) { dialog = "due" }
+                FieldRow(Icons.Outlined.Repeat, str(R.string.repeat), repeat?.summary()) { dialog = "repeat" }
+                FieldRow(Icons.Outlined.Flag, str(R.string.priority), priority.takeIf { it != Priority.NONE }?.title()) { dialog = "priority" }
+                FieldRow(Icons.Outlined.AttachFile, str(R.string.file_or_image), filesText) { pickFiles.launch("*/*") }
+                // Under a project there is nothing to choose: the parent decides the list.
+                if (listName != null) FieldRow(Icons.AutoMirrored.Outlined.List, str(R.string.list), listName) { dialog = "list" }
+            } else {
+                FittedRow(Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
+                    FieldIcon(Icons.Outlined.PlayArrow, str(R.string.start), startText) { dialog = "start" }
+                    FieldIcon(Icons.Outlined.Event, str(R.string.due), dueText) { dialog = "due" }
+                    FieldIcon(Icons.Outlined.Repeat, str(R.string.repeat), repeat?.summary()) { dialog = "repeat" }
+                    FieldIcon(Icons.Outlined.Flag, str(R.string.priority), priority.marks().ifEmpty { null }) { dialog = "priority" }
+                    FieldIcon(Icons.Outlined.AttachFile, str(R.string.file_or_image), filesText) { pickFiles.launch("*/*") }
+                    if (listName != null) FieldIcon(Icons.AutoMirrored.Outlined.List, str(R.string.list), listName) { dialog = "list" }
+                }
             }
         }
     }
@@ -254,5 +282,85 @@ fun NewTaskCard(
         "due" -> MomentDialog(str(R.string.due), due, onPick = { due = it }) { dialog = null }
         "repeat" -> RepeatDialog(repeat, onPick = { repeat = it }) { dialog = null }
         "priority" -> ChoiceDialog(str(R.string.priority), priorities.map { it.title() }, priorities.indexOf(priority), { dialog = null }) { priority = priorities[it] }
+        "list" -> ChoiceDialog(str(R.string.list), lists.map { it.displayName() }, lists.indexOfFirst { it.id == chosenList }, { dialog = null }) { chosenList = lists[it].id }
     }
+}
+
+/** A field of the compact card: its icon, and the value next to it once one is set. */
+@Composable
+private fun FieldIcon(icon: ImageVector, label: String, value: String?, onClick: () -> Unit) {
+    Row(
+        Modifier.clip(CircleShape).clickable(role = Role.Button, onClick = onClick).heightIn(min = 40.dp).widthIn(min = 36.dp).padding(horizontal = 6.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            icon,
+            label,
+            Modifier.size(18.dp),
+            tint = if (value != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (value != null) {
+            Spacer(Modifier.width(3.dp))
+            Text(value, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelMedium)
+        }
+    }
+}
+
+/** A field of the expanded card: icon, name, and the value at the end of the row. */
+@Composable
+private fun FieldRow(icon: ImageVector, label: String, value: String?, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onClick).heightIn(min = 48.dp).padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.width(16.dp))
+        Text(label)
+        Text(
+            value.orEmpty(),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.End,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f).padding(start = 16.dp),
+        )
+    }
+}
+
+/**
+ * A row that never runs past its width. Children that fit keep their size;
+ * when they do not, the widest are narrowed first and cut their text short.
+ */
+@Composable
+private fun FittedRow(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+    Layout(content, modifier) { measurables, constraints ->
+        val wanted = measurables.map { it.maxIntrinsicWidth(constraints.maxHeight) }
+        val widths = fitWidths(wanted, constraints.maxWidth)
+        val placeables = measurables.mapIndexed { index, measurable ->
+            measurable.measure(Constraints(maxWidth = widths[index], maxHeight = constraints.maxHeight))
+        }
+        val height = placeables.maxOfOrNull { it.height } ?: 0
+        layout(constraints.maxWidth, height.coerceAtLeast(constraints.minHeight)) {
+            var x = 0
+            for (placeable in placeables) {
+                placeable.placeRelative(x, (height - placeable.height) / 2)
+                x += placeable.width
+            }
+        }
+    }
+}
+
+/** Shares `total` among children that want `wanted`: the narrow ones get what they ask for, the rest split what is left evenly. */
+internal fun fitWidths(wanted: List<Int>, total: Int): List<Int> {
+    if (wanted.sum() <= total) return wanted
+    val widths = IntArray(wanted.size)
+    var left = total
+    var waiting = wanted.size
+    for (index in wanted.indices.sortedBy { wanted[it] }) {
+        widths[index] = minOf(wanted[index], left / waiting)
+        left -= widths[index]
+        waiting--
+    }
+    return widths.toList()
 }

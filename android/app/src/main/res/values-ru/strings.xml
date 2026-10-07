@@ -133,7 +133,8 @@
     <string name="prio_medium">Средний</string>
     <string name="prio_high">Высокий</string>
     <string name="add">Добавить</string>
-    <string name="files_count">Файлов: %1$s</string>
+    <string name="expand_card">Развернуть</string>
+    <string name="collapse_card">Свернуть</string>
     <string name="file">Файл</string>
     <string name="added">Добавлено</string>
     <string name="done_notice">Выполнено</string>
