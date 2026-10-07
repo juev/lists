@@ -30,6 +30,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -45,6 +47,7 @@ import org.evsyukov.lists.priorities
 import org.evsyukov.lists.str
 import org.evsyukov.lists.summary
 import org.evsyukov.lists.title
+import uniffi.lists_core.Freq
 import uniffi.lists_core.NewTask
 import uniffi.lists_core.Priority
 import uniffi.lists_core.Repeat
@@ -91,6 +94,33 @@ fun Store.createFrom(context: Context, draft: TaskDraft, parentId: String? = nul
     return task(task.id)
 }
 
+/** A repeat rule as plain values: the record the core hands over is not something a saved state can hold. */
+private val repeatSaver = listSaver<Repeat?, Any?>(
+    save = { rule ->
+        if (rule == null) emptyList()
+        else listOf(
+            rule.freq.name, rule.interval.toInt(), ArrayList(rule.weekdays.map { it.toInt() }), rule.monthday?.toInt(),
+            rule.nth, rule.nthWeekday?.toInt(), rule.fromDone, rule.count?.toInt(), rule.until,
+        )
+    },
+    restore = { saved ->
+        @Suppress("UNCHECKED_CAST")
+        Repeat(
+            freq = Freq.valueOf(saved[0] as String),
+            interval = (saved[1] as Int).toUInt(),
+            weekdays = (saved[2] as List<Int>).map { it.toUInt() },
+            monthday = (saved[3] as Int?)?.toUInt(),
+            nth = saved[4] as Int?,
+            nthWeekday = (saved[5] as Int?)?.toUInt(),
+            fromDone = saved[6] as Boolean,
+            count = (saved[7] as Int?)?.toUInt(),
+            until = saved[8] as String?,
+        )
+    },
+)
+
+private val urisSaver = listSaver<List<Uri>, String>(save = { uris -> uris.map(Uri::toString) }, restore = { saved -> saved.map(Uri::parse) })
+
 /**
  * The new-task card: title, note, dates, repeat, priority, files and the list.
  * The same card sits in the sheet over the main screen and in the quick-entry
@@ -112,18 +142,26 @@ fun NewTaskCard(
     /** The note taken from the clipboard (R58); it may arrive after the card is shown. */
     pastedNotes: String? = null,
 ) {
-    var text by remember { mutableStateOf(title) }
-    var note by remember { mutableStateOf(notes) }
-    LaunchedEffect(pastedNotes) { if (pastedNotes != null && note.isEmpty()) note = pastedNotes }
-    var start by remember { mutableStateOf<String?>(null) }
-    var due by remember { mutableStateOf<String?>(null) }
-    var repeat by remember { mutableStateOf<Repeat?>(null) }
-    var priority by remember { mutableStateOf(Priority.NONE) }
-    var chosenList by remember { mutableStateOf(listId) }
+    // Saved, not just remembered: the card keeps what was entered when the screen is turned (R63).
+    var text by rememberSaveable { mutableStateOf(title) }
+    var note by rememberSaveable { mutableStateOf(notes) }
+    // Kept apart from `pastedNotes`: a window rebuilt on rotation is not handed the same clipboard again.
+    var taken by rememberSaveable { mutableStateOf<String?>(null) }
+    LaunchedEffect(pastedNotes) {
+        if (pastedNotes != null && note.isEmpty()) {
+            note = pastedNotes
+            taken = pastedNotes
+        }
+    }
+    var start by rememberSaveable { mutableStateOf<String?>(null) }
+    var due by rememberSaveable { mutableStateOf<String?>(null) }
+    var repeat by rememberSaveable(stateSaver = repeatSaver) { mutableStateOf<Repeat?>(null) }
+    var priority by rememberSaveable { mutableStateOf(Priority.NONE) }
+    var chosenList by rememberSaveable { mutableStateOf(listId) }
     var listMenu by remember { mutableStateOf(false) }
-    var dialog by remember { mutableStateOf<String?>(null) }
+    var dialog by rememberSaveable { mutableStateOf<String?>(null) }
     // Files picked here join the ones the card was opened with.
-    var picked by remember { mutableStateOf(emptyList<Uri>()) }
+    var picked by rememberSaveable(stateSaver = urisSaver) { mutableStateOf(emptyList<Uri>()) }
     val pickFiles = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
         picked = (picked + uris).distinct()
     }
@@ -162,7 +200,7 @@ fun NewTaskCard(
             onValueChange = { note = it },
             placeholder = { Text(str(R.string.notes)) },
             // The text taken from the clipboard goes in one tap while it is untouched.
-            trailingIcon = if (pastedNotes != null && note == pastedNotes) {
+            trailingIcon = if (taken != null && note == taken) {
                 { IconButton(onClick = { note = "" }) { Icon(Icons.Outlined.Close, str(R.string.remove_clipboard_note)) } }
             } else null,
             maxLines = 4,

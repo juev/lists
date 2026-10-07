@@ -70,6 +70,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -169,7 +170,7 @@ fun EditorSheet(editing: Editing, state: UiState, model: MainViewModel, onRemind
     val locked = task.deleted || task.isLog
     val context = LocalContext.current
     val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    var dialog by remember(task.id) { mutableStateOf<String?>(null) }
+    var dialog by rememberSaveable(task.id) { mutableStateOf<String?>(null) }
     var menu by remember { mutableStateOf(false) }
     var addMenu by remember { mutableStateOf(false) }
     // Subtasks are not mentioned until the task has one or the user asks for the field.
@@ -444,7 +445,7 @@ fun MultiChoiceDialog(title: String, options: List<String>, selected: List<Boole
 
 @Composable
 private fun TagDialog(known: List<String>, onDismiss: () -> Unit, onAdd: (String) -> Unit) {
-    var text by remember { mutableStateOf("") }
+    var text by rememberSaveable { mutableStateOf("") }
     AlertDialog(
         modifier = Modifier.aboveKeyboard(),
         onDismissRequest = onDismiss,
@@ -466,9 +467,9 @@ private fun TagDialog(known: List<String>, onDismiss: () -> Unit, onAdd: (String
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MomentDialog(title: String, value: String?, timeRequired: Boolean = false, onPick: (String?) -> Unit, onDismiss: () -> Unit) {
-    var step by remember { mutableStateOf("menu") }
+    var step by rememberSaveable { mutableStateOf("menu") }
     val current = value?.let(::parseMoment)
-    var date by remember { mutableStateOf(current?.toLocalDate() ?: LocalDate.now()) }
+    var date by rememberSaveable { mutableStateOf(current?.toLocalDate() ?: LocalDate.now()) }
     val timed = current?.takeIf { hasTime(value) }
     val time = rememberTimePickerState(timed?.hour ?: 9, timed?.minute ?: 0, is24Hour = true)
 
@@ -534,15 +535,16 @@ fun MomentDialog(title: String, value: String?, timeRequired: Boolean = false, o
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun RepeatDialog(value: Repeat?, onPick: (Repeat?) -> Unit, onDismiss: () -> Unit) {
-    var custom by remember { mutableStateOf(value != null && value.presetName() == null) }
-    var freq by remember { mutableStateOf(value?.freq ?: Freq.WEEKLY) }
-    var interval by remember { mutableIntStateOf(value?.interval?.toInt() ?: 1) }
-    var weekdays by remember { mutableStateOf(value?.weekdays?.toSet() ?: emptySet()) }
-    var byWeekday by remember { mutableStateOf(value?.nth != null) }
-    var nth by remember { mutableIntStateOf(value?.nth ?: 1) }
-    var nthWeekday by remember { mutableIntStateOf(value?.nthWeekday?.toInt() ?: 1) }
-    var fromDone by remember { mutableStateOf(value?.fromDone ?: false) }
-    var count by remember { mutableStateOf(value?.count?.toString().orEmpty()) }
+    var custom by rememberSaveable { mutableStateOf(value != null && value.presetName() == null) }
+    var freq by rememberSaveable { mutableStateOf(value?.freq ?: Freq.WEEKLY) }
+    var interval by rememberSaveable { mutableIntStateOf(value?.interval?.toInt() ?: 1) }
+    // Plain integers: a saved state does not hold unsigned ones.
+    var weekdays by rememberSaveable { mutableStateOf(value?.weekdays?.map { it.toInt() }?.toSet() ?: emptySet()) }
+    var byWeekday by rememberSaveable { mutableStateOf(value?.nth != null) }
+    var nth by rememberSaveable { mutableIntStateOf(value?.nth ?: 1) }
+    var nthWeekday by rememberSaveable { mutableIntStateOf(value?.nthWeekday?.toInt() ?: 1) }
+    var fromDone by rememberSaveable { mutableStateOf(value?.fromDone ?: false) }
+    var count by rememberSaveable { mutableStateOf(value?.count?.toString().orEmpty()) }
 
     AlertDialog(
         modifier = Modifier.aboveKeyboard(),
@@ -577,7 +579,7 @@ fun RepeatDialog(value: Repeat?, onPick: (Repeat?) -> Unit, onDismiss: () -> Uni
                     if (freq == Freq.WEEKLY) {
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                             weekdayNames.forEachIndexed { index, name ->
-                                val day = (index + 1).toUInt()
+                                val day = index + 1
                                 FilterChip(
                                     selected = day in weekdays,
                                     onClick = { weekdays = if (day in weekdays) weekdays - day else weekdays + day },
@@ -618,7 +620,7 @@ fun RepeatDialog(value: Repeat?, onPick: (Repeat?) -> Unit, onDismiss: () -> Uni
                 TextButton(onClick = {
                     val monthlyByWeekday = freq == Freq.MONTHLY && byWeekday
                     onPick(
-                        every(freq, interval.toUInt(), if (freq == Freq.WEEKLY) weekdays.sorted() else emptyList()).copy(
+                        every(freq, interval.toUInt(), if (freq == Freq.WEEKLY) weekdays.sorted().map { it.toUInt() } else emptyList()).copy(
                             nth = if (monthlyByWeekday) nth else null,
                             nthWeekday = if (monthlyByWeekday) nthWeekday.toUInt() else null,
                             fromDone = fromDone,

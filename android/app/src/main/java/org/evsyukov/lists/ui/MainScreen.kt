@@ -79,6 +79,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -139,7 +140,7 @@ fun MainScreen(model: MainViewModel, onReminderSet: () -> Unit) {
     var clearMenu by remember { mutableStateOf(false) }
     var clearCompleted by remember { mutableStateOf<ClearCompleted?>(null) }
     var duePickerFor by remember { mutableStateOf<TaskItem?>(null) }
-    var adding by remember { mutableStateOf(false) }
+    var adding by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(state.notice) {
         val notice = state.notice ?: return@LaunchedEffect
