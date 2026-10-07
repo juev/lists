@@ -125,7 +125,18 @@ Storage cannot tell a device that something changed, so an edit made elsewhere w
 - **Mac app and web server**: give them the address of an [ntfy](https://ntfy.sh) server, the public `https://ntfy.sh` or your own, in Settings → Sync → Push server and in `LISTS_PUSH_SERVER`.
 - **Android**: install a [UnifiedPush](https://unifiedpush.org) app such as ntfy, open it once, then turn on Settings → Sync → "Sync at once after a change elsewhere". This works with the app closed too.
 
-The request carries no data, only "sync now"; tasks still travel through your storage. Each device listens on a random topic name, which is the only protection: the ntfy server can see when you edit, not what. Devices may use different servers, as long as each can reach the others'.
+The request carries no data, only "sync now"; tasks still travel through your storage. Each device listens on a random topic name. On a server open to everyone that name is the only protection: the ntfy server can see when you edit, not what. Devices may use different servers, as long as each can reach the others'.
+
+#### An ntfy server that requires sign-in
+
+A server closed to anonymous users takes an access token. Create one on the server with `ntfy token add <user>` or on the account page of its web app. Lists does not take a user name and a password.
+
+- **Mac app and web server**: put the token in Settings → Sync → Push token and in `LISTS_PUSH_TOKEN`.
+- **Android**: the ntfy app receives under the account set in it, so Lists needs nothing for that. To let the phone ask the other devices to sync, fill in Settings → Sync → Push server and Push token.
+
+The token is sent only to the server named in the same settings: when the device subscribes, and when it asks a device that listens on that server. Requests to any other server go without it, so keep all devices on the one server. The user behind the token needs read and write access to the topics, for example `ntfy access <user> '*' rw`; the topics of the Android ntfy app start with `up`.
+
+When the server turns the token down, the sync settings say "The push server refused access", and the web server writes that to its log. Sync itself goes on as scheduled. The Mac keeps the token in the keychain and Android encrypts it with a key from the system keystore; it is never written to the storage.
 
 Edits are saved locally at once. Two devices that change different fields of one task both keep their change; when they change the same field, the later edit wins. How the two kinds compare is in the [README](../README.md#sync).
 
