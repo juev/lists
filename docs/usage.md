@@ -118,7 +118,7 @@ On macOS and Android, Test connection asks the server with the address, user nam
 
 Use the same kind and the same address on every device. After that sync needs no attention: a small icon shows the state, and an error does not block work. On Android sync also runs in the background every 15 minutes, and a change made on the phone is sent even if the app is closed right after.
 
-A phone that restricts background work puts these runs off. Settings → Sync → Background work shows whether Lists is restricted; tap it to let Lists run without battery restrictions. The app asks once by itself when sync is turned on. Do the same for the ntfy app if you use it, and on phones that have an "autostart" setting allow it for both.
+A phone that restricts background work puts these runs off. Settings → Sync → Background work shows whether Lists is restricted; tap it to let Lists run without battery restrictions. The app asks once by itself: when sync is turned on, or when it is opened with sync already on. Do the same for the ntfy app if you use it, and on phones that have an "autostart" setting allow it for both.
 
 ### Faster delivery
 
