@@ -15,6 +15,8 @@
 //! LISTS_SYNC_USER=…
 //! LISTS_SYNC_PASSWORD=…
 //! LISTS_SYNC_PATH=/path         for folder
+//! LISTS_PUSH_SERVER=https://…   ntfy server through which other devices ask this one to sync at once
+//! LISTS_PUSH_TOKEN=tk_…         access token for that server, when it requires sign-in
 //! ```
 
 use lists_core::SyncConfig;
@@ -66,6 +68,7 @@ fn main() {
         sync,
         sync_password: env("LISTS_SYNC_PASSWORD"),
         push_server: env("LISTS_PUSH_SERVER"),
+        push_token: env("LISTS_PUSH_TOKEN"),
     };
     match start(config) {
         Ok(running) => {
