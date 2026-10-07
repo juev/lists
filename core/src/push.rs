@@ -1,5 +1,5 @@
 //! A content-free nudge between devices: "something changed, sync now".
-//! Rules: S18–S21 in docs/specs/sync.md.
+//! Rules: S18–S23 and S27–S30 in docs/specs/sync.md.
 
 use std::io::{BufRead, BufReader};
 use std::time::{Duration, Instant};
@@ -13,6 +13,7 @@ use crate::store::Store;
 const ENDPOINT_KEY: &str = "push_endpoint";
 const SERVER_KEY: &str = "push_server";
 const TOPIC_KEY: &str = "push_topic";
+const SEND_SERVER_KEY: &str = "push_send_server";
 /// ntfy sends a keep-alive line every 45 seconds; silence longer than this is a dead connection.
 const SILENCE: Duration = Duration::from_secs(120);
 
@@ -20,12 +21,64 @@ fn is_http(url: &str) -> bool {
     url.starts_with("https://") || url.starts_with("http://")
 }
 
-/// Asks whoever listens at each address to sync. Best effort: an address that
-/// does not answer changes nothing for the sender.
-pub(crate) fn poke<'a>(urls: impl IntoIterator<Item = &'a str>) {
-    let agent = ureq::AgentBuilder::new().timeout(Duration::from_secs(5)).build();
-    for url in urls.into_iter().filter(|u| is_http(u)) {
-        let _ = agent.post(url).send_string("sync");
+/// Scheme, host and port, read the way the HTTP client reads them: an address
+/// that only looks like the own server must not get the token.
+fn origin(url: &str) -> Option<url::Origin> {
+    url::Url::parse(url).ok().map(|u| u.origin())
+}
+
+fn refused<T>(answer: &std::result::Result<T, ureq::Error>) -> bool {
+    matches!(answer, Err(ureq::Error::Status(401 | 403, _)))
+}
+
+fn server_address(server: Option<&str>) -> Result<Option<&str>> {
+    match server.map(|s| s.trim().trim_end_matches('/')).filter(|s| !s.is_empty()) {
+        Some(server) if is_http(server) => Ok(Some(server)),
+        Some(_) => Err(AppError::sync("the address must start with https:// or http://")),
+        None => Ok(None),
+    }
+}
+
+impl Store {
+    /// Asks whoever listens at each address to sync. Best effort: an address that
+    /// does not answer changes nothing for the sender.
+    pub(crate) fn poke<'a>(&self, urls: impl IntoIterator<Item = &'a str>) {
+        let agent = ureq::AgentBuilder::new().timeout(Duration::from_secs(5)).build();
+        let own = self.own_server();
+        let token = self.token();
+        let (mut passed, mut denied) = (false, false);
+        for url in urls.into_iter().filter(|u| is_http(u)) {
+            // S28: the token goes to the own server and nowhere else.
+            let at_home = own.is_some() && origin(url) == own;
+            let mut request = agent.post(url);
+            if let Some(token) = token.as_ref().filter(|_| at_home) {
+                request = request.set("Authorization", &format!("Bearer {token}"));
+            }
+            let answer = request.send_string("sync");
+            if at_home {
+                passed |= answer.is_ok();
+                denied |= refused(&answer);
+            }
+        }
+        if passed || denied {
+            self.refusals().1 = denied;
+        }
+    }
+
+    fn own_server(&self) -> Option<url::Origin> {
+        let server = match self.push_server() {
+            Ok(Some(server)) => Some(server),
+            _ => self.push_send_server().ok().flatten(),
+        };
+        server.as_deref().and_then(origin)
+    }
+
+    fn token(&self) -> Option<String> {
+        self.push_token.lock().unwrap_or_else(|p| p.into_inner()).clone()
+    }
+
+    fn refusals(&self) -> std::sync::MutexGuard<'_, (bool, bool)> {
+        self.push_refused.lock().unwrap_or_else(|p| p.into_inner())
     }
 }
 
@@ -50,17 +103,12 @@ impl Store {
     /// device picks a random topic once and publishes `<server>/<topic>` as
     /// its address; `wait_for_nudge` listens there.
     pub fn set_push_server(&self, server: Option<String>) -> Result<()> {
-        let Some(server) = server
-            .as_deref()
-            .map(|s| s.trim().trim_end_matches('/'))
-            .filter(|s| !s.is_empty())
-        else {
+        let Some(server) = server_address(server.as_deref())? else {
             db::meta_del(&self.lock().conn, SERVER_KEY)?;
+            *self.refusals() = (false, false);
             return self.set_push_endpoint(None);
         };
-        if !is_http(server) {
-            return Err(AppError::sync("the address must start with https:// or http://"));
-        }
+        *self.refusals() = (false, false);
         // Read first: a guard held across the match would deadlock the arms.
         let known = db::meta_get(&self.lock().conn, TOPIC_KEY)?;
         let topic = match known {
@@ -82,6 +130,37 @@ impl Store {
 
     pub fn push_server(&self) -> Result<Option<String>> {
         db::meta_get(&self.lock().conn, SERVER_KEY)
+    }
+
+    /// S29: the ntfy server the token belongs to on a device that takes
+    /// nudges some other way and so has no push server. Only sending uses it.
+    pub fn set_push_send_server(&self, server: Option<String>) -> Result<()> {
+        let server = server_address(server.as_deref())?;
+        *self.refusals() = (false, false);
+        let inner = self.lock();
+        match server {
+            Some(server) => db::meta_set(&inner.conn, SEND_SERVER_KEY, server),
+            None => db::meta_del(&inner.conn, SEND_SERVER_KEY),
+        }
+    }
+
+    pub fn push_send_server(&self) -> Result<Option<String>> {
+        db::meta_get(&self.lock().conn, SEND_SERVER_KEY)
+    }
+
+    /// S27: keeps the access token of the own ntfy server for this process
+    /// only, the way `set_sync_password` keeps the password.
+    pub fn set_push_token(&self, token: Option<String>) {
+        let token = token.map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
+        *self.push_token.lock().unwrap_or_else(|p| p.into_inner()) = token;
+        *self.refusals() = (false, false);
+    }
+
+    /// S30: whether the own server answered the last subscription or the last
+    /// nudge with 401 or 403: the token is wrong, missing or not allowed there.
+    pub fn push_refused(&self) -> bool {
+        let refusals = self.refusals();
+        refusals.0 || refusals.1
     }
 
     /// Blocks until another device asks this one to sync and returns `true`;
@@ -106,7 +185,17 @@ impl Store {
             .timeout_connect(Duration::from_secs(15))
             .timeout_read(SILENCE)
             .build();
-        let Ok(response) = agent.get(&format!("{listening_at}/json")).call() else {
+        let token = self.token();
+        let mut request = agent.get(&format!("{listening_at}/json"));
+        if let Some(token) = token.as_ref().filter(|_| origin(&listening_at) == self.own_server()) {
+            request = request.set("Authorization", &format!("Bearer {token}"));
+        }
+        let answer = request.call();
+        // S30: only an answer says anything about the token; a server that is away does not.
+        if answer.is_ok() || refused(&answer) {
+            self.refusals().0 = answer.is_err();
+        }
+        let Ok(response) = answer else {
             pause();
             return false;
         };
@@ -116,7 +205,7 @@ impl Store {
                 Ok(_) => {
                     // Any other line, a keep-alive among them, is the moment to
                     // notice that the setting changed.
-                    if self.push_endpoint().ok().flatten().as_ref() != Some(&listening_at) {
+                    if self.push_endpoint().ok().flatten().as_ref() != Some(&listening_at) || self.token() != token {
                         return false;
                     }
                 }

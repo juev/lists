@@ -29,6 +29,7 @@ sha2 = "0.10"
 thiserror = "2"
 uniffi = "=0.32.2"
 ureq = { version = "2.12", default-features = false, features = ["tls"] }
+url = "2"
 uuid = { version = "1", features = ["v5", "v7"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }
 
