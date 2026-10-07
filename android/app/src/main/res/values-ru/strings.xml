@@ -160,7 +160,8 @@
     <string name="push_no_distributor">Установите приложение UnifiedPush, например ntfy, и повторите.</string>
     <string name="push_server">Сервер уведомлений</string>
     <string name="push_token">Токен сервера уведомлений</string>
-    <string name="push_token_hint">Нужно, только если другие устройства слушают сервер ntfy, который требует входа: с его адресом и токеном доступа это устройство сможет просить их синхронизироваться. Токен уходит на этот сервер и больше никуда.</string>
+    <string name="push_sign_in">Сервер ntfy с входом</string>
+    <string name="push_token_hint">Этот сервер слушают другие устройства. С его адресом и токеном доступа это устройство сможет просить их синхронизироваться. Токен уходит на этот сервер и больше никуда.</string>
     <string name="push_refused">Сервер уведомлений отказал в доступе. Проверьте токен.</string>
     <string name="syncing">Идёт синхронизация…</string>
     <string name="close">Закрыть</string>
