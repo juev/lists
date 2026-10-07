@@ -655,6 +655,7 @@ dependencies = [
  "thiserror",
  "uniffi",
  "ureq",
+ "url",
  "uuid",
  "zip",
 ]

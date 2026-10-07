@@ -20,6 +20,7 @@ fn web(password: Option<&str>) -> Web {
         sync: SyncConfig::Off,
         sync_password: None,
         push_server: None,
+        push_token: None,
     })
     .unwrap();
     Web {

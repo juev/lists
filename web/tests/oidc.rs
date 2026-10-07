@@ -88,6 +88,7 @@ fn web(provider: &Provider, allow: &[&str]) -> Web {
         sync: SyncConfig::Off,
         sync_password: None,
         push_server: None,
+        push_token: None,
     })
     .unwrap();
     Web {
@@ -278,6 +279,7 @@ fn configuration_mistakes_stop_the_server_from_starting() {
         sync: SyncConfig::Off,
         sync_password: None,
         push_server: None,
+        push_token: None,
     };
     assert!(
         start(config("http://id.example.org", vec!["a@b.c".into()])).is_err(),

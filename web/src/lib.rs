@@ -50,6 +50,8 @@ pub struct Config {
     pub sync_password: Option<String>,
     /// ntfy server through which other devices ask this one to sync.
     pub push_server: Option<String>,
+    /// Access token for that server, when it requires sign-in (S27).
+    pub push_token: Option<String>,
 }
 
 struct App {
@@ -713,6 +715,7 @@ pub fn start(config: Config) -> Result<Running, Box<dyn std::error::Error>> {
     store.set_sync_config(config.sync)?;
     store.set_sync_password(config.sync_password);
     store.set_push_server(config.push_server)?;
+    store.set_push_token(config.push_token);
     let server =
         Arc::new(Server::http(&config.listen).map_err(|e| format!("cannot listen on {}: {e}", config.listen))?);
     let addr = server.server_addr().to_ip().ok_or("not an IP address")?;
@@ -749,9 +752,17 @@ pub fn start(config: Config) -> Result<Running, Box<dyn std::error::Error>> {
     // A sync folder is also watched for files brought in by another program.
     std::thread::spawn(move || {
         let mut idle = 0u32;
+        let mut refused = false;
         loop {
             std::thread::sleep(Duration::from_secs(2));
             idle += 2;
+            // S30: said once when it starts, not on every retry.
+            if app.store.push_refused() != refused {
+                refused = !refused;
+                if refused {
+                    eprintln!("lists-web: the push server refused access; check LISTS_PUSH_TOKEN");
+                }
+            }
             if app.dirty.swap(false, Ordering::Relaxed) || idle >= 60 || app.store.folder_changed() {
                 idle = 0;
                 // A failure is kept in the sync status, which the page shows.
