@@ -114,6 +114,8 @@ Open Settings → Sync and choose the kind:
 - **CalDAV**: address, user name and password. Lists become calendars, and tasks stay visible to other CalDAV apps.
 - **Folder** (macOS and the web server): a directory, for example one that another tool keeps in sync. Android does not offer it. Changes that the other tool brings into the folder are picked up within a few seconds.
 
+On macOS and Android, Test connection asks the server with the address, user name and password as typed, before anything is saved, and says whether it answered. For WebDAV it also says when the folder at the address does not exist yet and the first sync will create it. Saving does not require the test.
+
 Use the same kind and the same address on every device. After that sync needs no attention: a small icon shows the state, and an error does not block work. On Android sync also runs in the background every 15 minutes, and a change made on the phone is sent even if the app is closed right after.
 
 ### Faster delivery
