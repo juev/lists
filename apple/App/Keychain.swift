@@ -18,6 +18,9 @@ enum Keychain {
     /// One keychain item per server and user, so switching back finds the old password.
     static func account(url: String, user: String) -> String { "\(user)@\(url)" }
 
+    /// The access token of an ntfy server that requires sign-in (S27), one item per server.
+    static func pushAccount(server: String) -> String { "ntfy:\(server)" }
+
     static func load(account: String) -> String? {
         var request = query(account)
         request[kSecReturnData as String] = true
@@ -27,13 +30,17 @@ enum Keychain {
         return String(data: data, encoding: .utf8)
     }
 
-    static func save(_ password: String, account: String) throws {
+    static func delete(account: String) {
+        SecItemDelete(query(account) as CFDictionary)
+    }
+
+    static func save(_ password: String, account: String, label: String = "Lists WebDAV") throws {
         let data = Data(password.utf8)
         var status = SecItemUpdate(query(account) as CFDictionary, [kSecValueData as String: data] as CFDictionary)
         if status == errSecItemNotFound {
             var item = query(account)
             item[kSecValueData as String] = data
-            item[kSecAttrLabel as String] = "Lists WebDAV"
+            item[kSecAttrLabel as String] = label
             status = SecItemAdd(item as CFDictionary, nil)
         }
         guard status == errSecSuccess else {

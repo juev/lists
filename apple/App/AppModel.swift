@@ -163,6 +163,9 @@ final class AppModel {
                 store?.setSyncPassword(password: Keychain.load(account: Keychain.account(url: url, user: user)))
             default: break
             }
+            if let server = try? store?.pushServer() {
+                store?.setPushToken(token: Keychain.load(account: Keychain.pushAccount(server: server)))
+            }
         } catch {
             store = nil
             startupError = describe(error)
