@@ -50,6 +50,11 @@
     <string name="password">Пароль</string>
     <string name="webdav_hint">Для Nextcloud и подобных укажите пароль приложения. Данные на сервере не шифруются.</string>
     <string name="save_and_sync">Сохранить и синхронизировать</string>
+    <string name="test_connection">Проверить подключение</string>
+    <string name="testing_connection">Проверяю подключение…</string>
+    <string name="connected">Подключение есть.</string>
+    <string name="connected_will_create">Подключение есть. Папки ещё нет, её создаст первая синхронизация.</string>
+    <string name="no_connection">Подключения нет: %1$s</string>
     <string name="last_sync_failed">Последняя попытка не удалась: %1$s</string>
     <string name="synced_at">Синхронизировано: %1$s</string>
     <string name="trash">Корзина</string>
