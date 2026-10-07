@@ -72,6 +72,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
+import androidx.compose.material3.pulltorefresh.pullToRefresh
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.rememberSwipeToDismissBoxState
@@ -138,6 +141,9 @@ fun MainScreen(model: MainViewModel, onReminderSet: () -> Unit) {
     val drawer = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
+    val pull = rememberPullToRefreshState()
+    // Only a sync asked for by the pull shows the indicator; the ones that run by themselves stay quiet (R27).
+    var pulled by remember { mutableStateOf(false) }
     var editingList by remember { mutableStateOf<TaskList?>(null) }
     var creatingList by remember { mutableStateOf(false) }
     var editingFilter by remember { mutableStateOf<SavedFilter?>(null) }
@@ -221,7 +227,19 @@ fun MainScreen(model: MainViewModel, onReminderSet: () -> Unit) {
                 }
             },
         ) { padding ->
-            Box(Modifier.fillMaxSize().padding(padding).edgeSwipe { scope.launch { drawer.open() } }) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .pullToRefresh(isRefreshing = pulled, state = pull, enabled = state.sync.configured) {
+                        scope.launch {
+                            pulled = true
+                            Repo.sync()
+                            pulled = false
+                        }
+                    }
+                    .edgeSwipe { scope.launch { drawer.open() } },
+            ) {
                 if (state.loaded && state.sections.all { it.tasks.isEmpty() }) {
                     EmptyState(state.effectiveScope)
                 } else {
@@ -251,6 +269,7 @@ fun MainScreen(model: MainViewModel, onReminderSet: () -> Unit) {
                         }
                     }
                 }
+                PullToRefreshDefaults.Indicator(state = pull, isRefreshing = pulled, modifier = Modifier.align(Alignment.TopCenter))
             }
         }
     }
@@ -359,7 +378,12 @@ private fun EmptyState(scope: Scope) {
         is Scope.Search -> str(R.string.empty_search) to ""
         else -> str(R.string.empty_list) to str(R.string.empty_list_hint)
     }
-    Column(Modifier.fillMaxSize().padding(32.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
+    // Scrollable, so that the pull to sync has something to pull in an empty view (R67).
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(32.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
         Text(title, style = MaterialTheme.typography.titleMedium)
         if (text.isNotEmpty()) {
             Text(text, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 4.dp))
