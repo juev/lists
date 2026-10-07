@@ -13,6 +13,7 @@ import org.evsyukov.lists.dayOf
 import org.evsyukov.lists.displayName
 import org.evsyukov.lists.today
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collectLatest
@@ -51,6 +52,8 @@ data class UiState(
     val editing: Editing? = null,
     val sync: SyncStatus = SyncStatus(false, 0u, null, null),
     val notice: Notice? = null,
+    /** Minutes a completed task stays in its view; shared by all devices (R68). */
+    val keepDone: UInt = 5u,
     val loaded: Boolean = false,
 ) {
     val effectiveScope: Scope get() = search?.takeIf { it.isNotBlank() }?.let { Scope.Search(it) } ?: scope
@@ -102,6 +105,14 @@ class MainViewModel : ViewModel() {
 
     init {
         viewModelScope.launch { Repo.revision.collectLatest { reload() } }
+        // Rows kept after completion leave by the clock, not by a change (R68).
+        viewModelScope.launch {
+            while (true) {
+                delay(30_000)
+                val shown = _state.value
+                if (!shown.readOnly && shown.sections.any { section -> section.tasks.any { it.done != null } }) reload()
+            }
+        }
     }
 
     private suspend fun reload() {
@@ -128,6 +139,7 @@ class MainViewModel : ViewModel() {
                     sections = group(base, store.tasks(base.effectiveScope)),
                     editing = editingId?.let { id -> load(store, id) },
                     sync = store.syncStatus(),
+                    keepDone = store.keepDoneMinutes(),
                     loaded = true,
                 )
             }
@@ -221,8 +233,14 @@ class MainViewModel : ViewModel() {
 
     fun toggleDone(task: TaskItem) {
         if (task.done != null) return act { it.reopenTask(task.id) }
-        // A repeating task moves on instead of closing; reopening would not bring the date back.
-        val notice = if (task.repeat == null) Notice(str(R.string.done_notice)) { it.reopenTask(task.id) } else Notice(str(R.string.moved_to_next))
+        val notice = when {
+            // A repeating task moves on instead of closing; reopening would not bring the date back.
+            task.repeat != null -> Notice(str(R.string.moved_to_next))
+            // The task leaves at once, so the bar is the way back.
+            _state.value.keepDone == 0u -> Notice(str(R.string.done_notice)) { it.reopenTask(task.id) }
+            // It stays in view, and its mark takes it back (R68).
+            else -> null
+        }
         act(notice) { it.completeTask(task.id) }
     }
 

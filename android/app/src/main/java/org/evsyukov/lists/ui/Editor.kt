@@ -867,6 +867,7 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
         content = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 SettingRow(str(R.string.appearance), lookLabels[LookPrefs.choices.indexOf(LookPrefs.appearance(context))]) { choosing = "appearance" }
+                SettingRow(str(R.string.completed_leave), keepDoneLabel(state.keepDone)) { choosing = "keepDone" }
                 HorizontalDivider(Modifier.padding(vertical = 8.dp))
                 Text(str(R.string.notifications), style = MaterialTheme.typography.labelLarge)
                 SwitchRow(str(R.string.show_notifications), notifyOn) { notifyOn = it; saveNotify() }
@@ -1012,6 +1013,13 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
             leads = if (on) (leads + NotifyPrefs.leads[index]).distinct().sorted() else leads - NotifyPrefs.leads[index]
             saveNotify()
         }
+        "keepDone" -> {
+            // What R68 offers, and the value in force when another device set something else.
+            val values = (listOf(0u, 1u, 5u, 15u, 60u) + state.keepDone).distinct().sorted()
+            ChoiceDialog(str(R.string.completed_leave), values.map(::keepDoneLabel), values.indexOf(state.keepDone), { choosing = null }) {
+                model.act { store -> store.setKeepDoneMinutes(values[it]) }
+            }
+        }
         "newTaskList" -> {
             val lists = state.lists.filter { !it.archived && it.id != "inbox" }
             val values = listOf("inbox", "last") + lists.map { it.id }
@@ -1023,6 +1031,12 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
         "allDay" -> ChoiceDialog(str(R.string.due_on_day_setting), (listOf("") + NotifyPrefs.times).map(::timeLabel), (listOf("") + NotifyPrefs.times).indexOf(allDay), { choosing = null }) { allDay = (listOf("") + NotifyPrefs.times)[it]; saveNotify() }
         "summary" -> ChoiceDialog(str(R.string.summary_setting), (listOf("") + NotifyPrefs.times).map(::timeLabel), (listOf("") + NotifyPrefs.times).indexOf(summary), { choosing = null }) { summary = (listOf("") + NotifyPrefs.times)[it]; saveNotify() }
     }
+}
+
+private fun keepDoneLabel(minutes: UInt): String = when (minutes) {
+    0u -> str(R.string.leave_at_once)
+    60u -> str(R.string.leave_after_hour)
+    else -> str(R.string.leave_after_minutes, minutes.toInt())
 }
 
 @Composable

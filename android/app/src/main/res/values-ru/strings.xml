@@ -234,4 +234,8 @@
     <string name="appearance_system">Как в системе</string>
     <string name="appearance_light">Светлое</string>
     <string name="appearance_dark">Тёмное</string>
+    <string name="completed_leave">Выполненные пропадают</string>
+    <string name="leave_at_once">сразу</string>
+    <string name="leave_after_minutes">через %1$d мин</string>
+    <string name="leave_after_hour">через час</string>
 </resources>
