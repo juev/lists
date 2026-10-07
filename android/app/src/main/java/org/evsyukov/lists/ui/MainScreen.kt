@@ -4,6 +4,8 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -83,6 +85,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
@@ -112,6 +117,7 @@ import org.evsyukov.lists.priorities
 import org.evsyukov.lists.title
 import org.evsyukov.lists.today
 import kotlinx.coroutines.launch
+import kotlin.math.abs
 import uniffi.lists_core.Priority
 import uniffi.lists_core.QuickParse
 import uniffi.lists_core.SavedFilter
@@ -215,7 +221,7 @@ fun MainScreen(model: MainViewModel, onReminderSet: () -> Unit) {
                 }
             },
         ) { padding ->
-            Box(Modifier.fillMaxSize().padding(padding)) {
+            Box(Modifier.fillMaxSize().padding(padding).edgeSwipe { scope.launch { drawer.open() } }) {
                 if (state.loaded && state.sections.all { it.tasks.isEmpty() }) {
                     EmptyState(state.effectiveScope)
                 } else {
@@ -412,6 +418,38 @@ fun Pill(text: String, color: Color = MaterialTheme.colorScheme.primary) {
         maxLines = 1,
         modifier = Modifier.clip(CircleShape).background(color.copy(alpha = 0.12f)).padding(horizontal = 8.dp, vertical = 2.dp),
     )
+}
+
+/**
+ * R65: a swipe to the right that starts in the strip at the left edge opens
+ * the list panel. The rows would take it as "complete" otherwise, so the
+ * movement is watched before they see it and kept from them once it is a swipe.
+ * Taps, long presses, scrolling and swipes to the left pass through untouched.
+ */
+private fun Modifier.edgeSwipe(onSwipe: () -> Unit) = pointerInput(Unit) {
+    val strip = 56.dp.toPx()
+    awaitEachGesture {
+        val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+        if (down.position.x > strip) return@awaitEachGesture
+        var dx = 0f
+        var dy = 0f
+        var taken = false
+        while (true) {
+            val change = awaitPointerEvent(PointerEventPass.Initial).changes.firstOrNull { it.id == down.id } ?: break
+            if (!change.pressed) break
+            dx += change.positionChange().x
+            dy += change.positionChange().y
+            if (!taken) {
+                // The list scrolls: the gesture is not ours.
+                if (abs(dy) > viewConfiguration.touchSlop && abs(dy) > abs(dx)) break
+                if (dx > viewConfiguration.touchSlop) {
+                    taken = true
+                    onSwipe()
+                }
+            }
+            if (taken) change.consume()
+        }
+    }
 }
 
 /** Swipe right to complete, left to set the due date. Neither removes the row by itself. */
