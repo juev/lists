@@ -101,6 +101,7 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.evsyukov.lists.Background
@@ -988,6 +989,8 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
                     .onSuccess {
                         error = null
                         tested = null
+                        // With sync switched off nothing runs, so the main screen would keep its icon and the pull (R67).
+                        Repo.revision.update { it + 1 }
                         model.sync()
                         if (enabled) Background.askOnce(context)
                     }
