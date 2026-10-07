@@ -264,6 +264,8 @@ fn s25_clearing_completed_reaches_the_other_device_and_outlives_a_reopen() {
         a.complete_task(t.id.clone()).unwrap();
         ids.push(t.id);
     }
+    // Past the time a completed task stays among the open ones (R68).
+    a.set_now_for_tests(NOW);
     settle(&a, &b, &storage);
     assert_eq!(view(&b, Scope::Completed), ["свежая", "сентябрьская", "давняя"]);
 
@@ -651,6 +653,10 @@ fn devices_converge_whatever_the_order_of_edits_and_syncs() {
                 sync(d, &storage);
             }
         }
+        // What a view shows depends on the clock (R68): compare the devices at one and the same moment.
+        for d in &devices {
+            d.set_now_for_tests("2026-10-06T10:00");
+        }
         let reference = dump(&devices[0]);
         assert!(reference.len() > 5, "seed {seed}: the run produced data");
         for (i, d) in devices.iter().enumerate().skip(1) {
@@ -742,4 +748,27 @@ fn projects_and_saved_filters_sync_like_everything_else() {
     b.delete_filter(f.id).unwrap();
     settle(&b, &a, &storage);
     assert!(a.filters().unwrap().is_empty());
+}
+
+#[test]
+fn s32_the_shared_setting_merges_like_any_field_and_reaches_a_new_device() {
+    let storage = tempfile::tempdir().unwrap();
+    let (a, b) = (device(), device());
+    settle(&a, &b, &storage);
+
+    a.set_keep_done_minutes(15).unwrap();
+    b.set_now_for_tests("2026-10-05T10:01");
+    b.set_keep_done_minutes(0).unwrap();
+    settle(&a, &b, &storage);
+    assert_eq!((a.keep_done_minutes().unwrap(), b.keep_done_minutes().unwrap()), (0, 0));
+
+    let c = device();
+    sync(&c, &storage);
+    assert_eq!(c.keep_done_minutes().unwrap(), 0);
+
+    // What it means on the device that did not set it: completed there, gone at once here.
+    let t = add(&b, "задача");
+    b.complete_task(t.id).unwrap();
+    settle(&b, &a, &storage);
+    assert!(view(&a, Scope::Inbox).is_empty());
 }

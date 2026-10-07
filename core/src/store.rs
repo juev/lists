@@ -11,7 +11,9 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-use crate::db::{self, Change, Touched, KIND_ATTACHMENT, KIND_FILTER, KIND_LIST, KIND_TASK};
+use crate::db::{
+    self, Change, Touched, KIND_ATTACHMENT, KIND_FILTER, KIND_LIST, KIND_SETTINGS, KIND_TASK, SETTINGS_ID,
+};
 use crate::error::{AppError, Result};
 use crate::hlc::{Clock, DEVICE_ID_LEN};
 use crate::model::*;
@@ -137,6 +139,55 @@ const LIVE: &str = "t.eff_deleted = 0 AND t.log_of IS NULL";
 /// What the Completed view lists: finished top-level tasks and the records of finished repeats.
 const COMPLETED: &str = "t.eff_deleted = 0 AND t.done IS NOT NULL AND (t.eff_parent IS NULL OR t.log_of IS NOT NULL)";
 const NOT_ARCHIVED: &str = "t.eff_list NOT IN (SELECT id FROM lists WHERE archived = 1)";
+
+/// Minutes a completed task stays in its view when nothing else is set (R68).
+const KEEP_DONE_DEFAULT: u32 = 5;
+const KEEP_DONE_MAX: u32 = 24 * 60;
+
+fn keep_done(conn: &Connection) -> Result<u32> {
+    let stored: Option<String> = conn
+        .query_row(
+            "SELECT value FROM fields WHERE kind = ?1 AND id = ?2 AND field = 'keep_done'",
+            [KIND_SETTINGS, SETTINGS_ID],
+            |r| r.get(0),
+        )
+        .optional()?;
+    Ok(stored
+        .and_then(|v| v.parse::<u32>().ok())
+        .map_or(KEEP_DONE_DEFAULT, |m| m.min(KEEP_DONE_MAX)))
+}
+
+/// R68 as SQL: a task completed a moment ago still counts as open.
+struct Recent {
+    /// Open, or completed within the time the setting gives.
+    open: String,
+    /// Completed long enough ago to go where the completed ones go.
+    settled: String,
+}
+
+impl Recent {
+    fn at(conn: &Connection, now: NaiveDateTime) -> Result<Self> {
+        let minutes = keep_done(conn)?;
+        if minutes == 0 {
+            return Ok(Recent {
+                open: "t.done IS NULL".into(),
+                settled: "t.done IS NOT NULL".into(),
+            });
+        }
+        // `done` has no time zone and a minute's precision. The window has an end as well, so that a task
+        // completed where the clock is hours ahead does not stay for hours.
+        let span = chrono::Duration::minutes(i64::from(minutes));
+        let window = format!(
+            "t.done BETWEEN '{}' AND '{}'",
+            (now - span).format(MOMENT_FMT),
+            (now + span).format(MOMENT_FMT)
+        );
+        Ok(Recent {
+            open: format!("(t.done IS NULL OR {window})"),
+            settled: format!("(t.done IS NOT NULL AND NOT {window})"),
+        })
+    }
+}
 
 fn task_from_row(r: &Row) -> rusqlite::Result<TaskItem> {
     let repeat: Option<String> = r.get(9)?;
@@ -418,6 +469,23 @@ impl Store {
         self.list_field(id, "show_done", json!(show))
     }
 
+    /// Minutes a completed task stays where it was before it leaves the view; 0 removes it at once (R68).
+    pub fn keep_done_minutes(&self) -> Result<u32> {
+        keep_done(&self.lock().conn)
+    }
+
+    /// The setting is one for all devices and travels with sync.
+    pub fn set_keep_done_minutes(&self, minutes: u32) -> Result<()> {
+        self.write(|w| {
+            w.set(
+                KIND_SETTINGS,
+                SETTINGS_ID,
+                "keep_done",
+                json!(minutes.min(KEEP_DONE_MAX)),
+            )
+        })
+    }
+
     pub fn set_list_defaults(&self, id: String, priority: Priority, due_today: bool) -> Result<()> {
         self.write(|w| {
             get_list(w.tx, &id)?;
@@ -476,13 +544,15 @@ impl Store {
         let inner = self.lock();
         let today = inner.now().date().format(DATE_FMT).to_string();
         let conn = &inner.conn;
+        let recent = Recent::at(conn, inner.now())?;
+        let (open, settled) = (&recent.open, &recent.settled);
         match view {
-            Scope::Inbox => list_tasks(conn, INBOX_ID),
-            Scope::List { id } => list_tasks(conn, &id),
+            Scope::Inbox => list_tasks(conn, INBOX_ID, &recent),
+            Scope::List { id } => list_tasks(conn, &id, &recent),
             Scope::Today => query_tasks(
                 conn,
                 &format!(
-                    "WHERE {LIVE} AND {NOT_ARCHIVED} AND t.done IS NULL
+                    "WHERE {LIVE} AND {NOT_ARCHIVED} AND {open}
                        AND substr(coalesce(t.due, t.start), 1, 10) <= ?1
                        AND (t.start IS NULL OR substr(t.start, 1, 10) <= ?1)
                      ORDER BY coalesce(t.due, t.start), t.priority DESC, t.pos, t.id"
@@ -492,7 +562,7 @@ impl Store {
             Scope::Upcoming => query_tasks(
                 conn,
                 &format!(
-                    "WHERE {LIVE} AND {NOT_ARCHIVED} AND t.done IS NULL
+                    "WHERE {LIVE} AND {NOT_ARCHIVED} AND {open}
                        AND (substr(coalesce(t.due, t.start), 1, 10) > ?1
                             OR (t.start IS NOT NULL AND substr(t.start, 1, 10) > ?1))
                      ORDER BY coalesce(t.due, t.start), t.priority DESC, t.pos, t.id"
@@ -502,7 +572,7 @@ impl Store {
             Scope::All => query_tasks(
                 conn,
                 &format!(
-                    "WHERE {LIVE} AND {NOT_ARCHIVED} AND t.done IS NULL AND t.eff_parent IS NULL
+                    "WHERE {LIVE} AND {NOT_ARCHIVED} AND {open} AND t.eff_parent IS NULL
                      ORDER BY t.eff_list != 'inbox', (SELECT pos FROM lists WHERE id = t.eff_list), t.eff_list, t.pos, t.id"
                 ),
                 &[],
@@ -514,7 +584,7 @@ impl Store {
             Scope::Tag { name } => query_tasks(
                 conn,
                 &format!(
-                    "WHERE {LIVE} AND {NOT_ARCHIVED} AND t.done IS NULL
+                    "WHERE {LIVE} AND {NOT_ARCHIVED} AND {open}
                        AND EXISTS (SELECT 1 FROM task_tags g WHERE g.task_id = t.id AND g.tag = ?1)
                      ORDER BY t.priority DESC, coalesce(t.due, t.start) IS NULL, coalesce(t.due, t.start), t.pos, t.id"
                 ),
@@ -522,7 +592,7 @@ impl Store {
             ),
             Scope::Project { id } => query_tasks(
                 conn,
-                "WHERE t.eff_parent = ?1 AND t.deleted = 0 AND t.purged = 0 ORDER BY t.done IS NOT NULL, t.pos, t.id",
+                &format!("WHERE t.eff_parent = ?1 AND t.deleted = 0 AND t.purged = 0 ORDER BY {settled}, t.pos, t.id"),
                 &[&id],
             ),
             Scope::Filter { id } => {
@@ -530,7 +600,7 @@ impl Store {
                     .query_row("SELECT spec FROM filters WHERE id = ?1 AND deleted = 0", [&id], |r| r.get(0))
                     .optional()?
                     .ok_or_else(|| AppError::not_found(format!("filter {id}")))?;
-                filter_tasks(conn, &serde_json::from_str(&spec).unwrap_or_default(), &today)
+                filter_tasks(conn, &serde_json::from_str(&spec).unwrap_or_default(), &today, &recent)
             }
             Scope::Search { text } => {
                 // SQLite's LIKE folds case for ASCII only, so matching is done here.
@@ -778,10 +848,11 @@ impl Store {
         let rows: Vec<(String, String, String)> = stmt
             .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
             .collect::<rusqlite::Result<_>>()?;
+        let recent = Recent::at(&inner.conn, inner.now())?;
         rows.into_iter()
             .map(|(id, name, spec)| {
                 let spec: FilterSpec = serde_json::from_str(&spec).unwrap_or_default();
-                let open_count = filter_tasks(&inner.conn, &spec, &today)?
+                let open_count = filter_tasks(&inner.conn, &spec, &today, &recent)?
                     .iter()
                     .filter(|t| t.done.is_none())
                     .count() as u32;
@@ -799,7 +870,7 @@ impl Store {
     pub fn preview_filter(&self, spec: FilterSpec) -> Result<Vec<TaskItem>> {
         let inner = self.lock();
         let today = inner.now().date().format(DATE_FMT).to_string();
-        filter_tasks(&inner.conn, &spec, &today)
+        filter_tasks(&inner.conn, &spec, &today, &Recent::at(&inner.conn, inner.now())?)
     }
 
     pub fn create_filter(&self, name: String, spec: FilterSpec) -> Result<SavedFilter> {
@@ -1214,7 +1285,7 @@ pub(crate) fn complete_in(w: &mut Writer, id: &str) -> Result<TaskItem> {
     get_task(w.tx, id)
 }
 
-fn list_tasks(conn: &Connection, list_id: &str) -> Result<Vec<TaskItem>> {
+fn list_tasks(conn: &Connection, list_id: &str, recent: &Recent) -> Result<Vec<TaskItem>> {
     let list = get_list(conn, list_id)?;
     let order = match list.sort {
         SortMode::Manual => "t.pos, t.id",
@@ -1222,18 +1293,21 @@ fn list_tasks(conn: &Connection, list_id: &str) -> Result<Vec<TaskItem>> {
         SortMode::Priority => "t.priority DESC, t.pos, t.id",
         SortMode::Title => "t.title COLLATE NOCASE, t.pos, t.id",
     };
-    let done = if list.show_done { "" } else { "AND t.done IS NULL" };
+    let (open, settled) = (&recent.open, &recent.settled);
+    let done = if list.show_done {
+        String::new()
+    } else {
+        format!("AND {open}")
+    };
     query_tasks(
         conn,
-        &format!(
-            "WHERE {LIVE} AND t.eff_list = ?1 AND t.eff_parent IS NULL {done} ORDER BY t.done IS NOT NULL, {order}"
-        ),
+        &format!("WHERE {LIVE} AND t.eff_list = ?1 AND t.eff_parent IS NULL {done} ORDER BY {settled}, {order}"),
         &[list_id],
     )
 }
 
 /// Tasks a filter selects, subtasks included, dated ones first.
-fn filter_tasks(conn: &Connection, spec: &FilterSpec, today: &str) -> Result<Vec<TaskItem>> {
+fn filter_tasks(conn: &Connection, spec: &FilterSpec, today: &str, recent: &Recent) -> Result<Vec<TaskItem>> {
     let mut sql = format!("WHERE {LIVE} AND {NOT_ARCHIVED}");
     let mut args: Vec<String> = Vec::new();
     let arg = |value: String, args: &mut Vec<String>| {
@@ -1241,7 +1315,7 @@ fn filter_tasks(conn: &Connection, spec: &FilterSpec, today: &str) -> Result<Vec
         format!("?{}", args.len())
     };
     match spec.status {
-        FilterStatus::Open => sql.push_str(" AND t.done IS NULL"),
+        FilterStatus::Open => sql.push_str(&format!(" AND {}", recent.open)),
         FilterStatus::Done => sql.push_str(" AND t.done IS NOT NULL"),
         FilterStatus::All => {}
     }
@@ -1273,7 +1347,8 @@ fn filter_tasks(conn: &Connection, spec: &FilterSpec, today: &str) -> Result<Vec
         sql.push_str(&format!(" AND t.priority >= {}", spec.min_priority.as_i64()));
     }
     sql.push_str(&format!(
-        " ORDER BY t.done IS NOT NULL, {date} IS NULL, coalesce(t.due, t.start), t.priority DESC, t.pos, t.id"
+        " ORDER BY {}, {date} IS NULL, coalesce(t.due, t.start), t.priority DESC, t.pos, t.id",
+        recent.settled
     ));
     let refs: Vec<&str> = args.iter().map(String::as_str).collect();
     let mut tasks = query_tasks(conn, &sql, &refs)?;
