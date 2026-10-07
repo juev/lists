@@ -232,10 +232,14 @@ function scopeTitle() {
 const listName = id => { const l = state.overview.lists.find(l => l.id === id); return !l ? "" : l.id === "inbox" ? t("Inbox") : l.name; };
 const readOnly = () => state.search || ["completed", "trash"].includes(state.scope);
 
+let keptTimer;
 async function load() {
   const scope = state.search ? "search:" + state.search : state.scope;
   const [overview, tasks] = await Promise.all([api("/api/overview"), api("/api/tasks?scope=" + encodeURIComponent(scope))]);
   state.overview = overview; state.tasks = tasks;
+  // Kept rows leave by the clock, not by a change (R68): look again when the first one is due.
+  clearTimeout(keptTimer);
+  if (overview.keptFor != null) keptTimer = setTimeout(() => { if (!state.typing) load().catch(() => {}); }, overview.keptFor * 1000);
   writeHash();
   await Promise.all([...state.open].map(async id => {
     try { state.details[id] = await api("/api/task?id=" + encodeURIComponent(id)); } catch { state.open.delete(id); delete state.details[id]; }

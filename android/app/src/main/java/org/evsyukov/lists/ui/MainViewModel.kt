@@ -13,6 +13,7 @@ import org.evsyukov.lists.dayOf
 import org.evsyukov.lists.displayName
 import org.evsyukov.lists.today
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -103,16 +104,11 @@ class MainViewModel : ViewModel() {
     val state: StateFlow<UiState> = _state
     private var editingId: String? = null
 
+    /** Waits for the first of the kept completed tasks to be due to leave its view (R68). */
+    private var kept: Job? = null
+
     init {
         viewModelScope.launch { Repo.revision.collectLatest { reload() } }
-        // Rows kept after completion leave by the clock, not by a change (R68).
-        viewModelScope.launch {
-            while (true) {
-                delay(30_000)
-                val shown = _state.value
-                if (!shown.readOnly && shown.sections.any { section -> section.tasks.any { it.done != null } }) reload()
-            }
-        }
     }
 
     private suspend fun reload() {
@@ -146,6 +142,17 @@ class MainViewModel : ViewModel() {
         }
         next.onSuccess { fresh -> _state.update { fresh.copy(notice = it.notice, search = it.search) } }
             .onFailure { error -> _state.update { it.copy(notice = Notice(describe(error)), loaded = true) } }
+        // Kept rows leave by the clock, not by a change: look again when the first one is due.
+        val wait = withContext(Dispatchers.IO) { runCatching { Repo.store.secondsUntilKeptLeaves() }.getOrNull() }
+        kept?.cancel()
+        kept = wait?.let { seconds ->
+            viewModelScope.launch {
+                delay(seconds.toLong() * 1000)
+                // Not this job any more: the reload that follows must not cancel itself.
+                kept = null
+                reload()
+            }
+        }
     }
 
     private fun load(store: Store, id: String): Editing? = runCatching {

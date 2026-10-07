@@ -310,6 +310,7 @@ impl App {
             "counts": { "inbox": counts.inbox, "today": counts.today, "overdue": counts.overdue, "upcoming": counts.upcoming, "trash": counts.trash },
             "sync": { "configured": status.configured, "pending": status.pending, "lastOk": status.last_ok, "lastError": status.last_error },
             "keepDone": s.keep_done_minutes()?,
+            "keptFor": s.seconds_until_kept_leaves()?,
         }))
     }
 
