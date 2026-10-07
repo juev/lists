@@ -7,6 +7,7 @@ use base64::Engine;
 
 use super::remote::Remote;
 use crate::error::{AppError, Result};
+use crate::model::ConnectionCheck;
 
 const PROPFIND_BODY: &str = r#"<?xml version="1.0" encoding="utf-8"?><d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/></d:prop></d:propfind>"#;
 
@@ -51,6 +52,36 @@ impl WebDavRemote {
         match &self.auth {
             Some(auth) => request.set("Authorization", auth),
             None => request,
+        }
+    }
+
+    /// Asks whether sync could work here without writing anything (S26).
+    pub fn check(&self) -> Result<ConnectionCheck> {
+        if self.answers(&self.base)? {
+            return Ok(ConnectionCheck::Ready);
+        }
+        // Sync creates the last collection of the address itself, but not the ones above it.
+        let above = self.base.trim_end_matches('/').rsplit_once('/').map(|(up, _)| up);
+        match above {
+            Some(up) if !up.ends_with('/') && self.answers(&format!("{up}/"))? => Ok(ConnectionCheck::WillCreate),
+            _ => Err(AppError::sync("nothing is found at this address (HTTP 404)")),
+        }
+    }
+
+    /// Whether a collection exists at `url`; an error when the answer is not the one WebDAV gives.
+    fn answers(&self, url: &str) -> Result<bool> {
+        let result = self
+            .request("PROPFIND", url)
+            .set("Depth", "0")
+            .set("Content-Type", "application/xml")
+            .send_string(PROPFIND_BODY);
+        match status(result, "PROPFIND")? {
+            207 => Ok(true),
+            404 => Ok(false),
+            code @ (401 | 403) => Err(fail("PROPFIND", url, code)),
+            code => Err(AppError::sync(format!(
+                "the server does not answer as WebDAV (HTTP {code})"
+            ))),
         }
     }
 

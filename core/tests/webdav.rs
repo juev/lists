@@ -133,6 +133,88 @@ fn wrong_password_is_reported_and_loses_nothing() {
     assert!(a.sync_now().unwrap().pushed > 0);
 }
 
+fn check(url: &str, password: &str) -> Result<ConnectionCheck> {
+    check_sync_connection(
+        SyncConfig::WebDav {
+            url: url.into(),
+            user: "user".into(),
+        },
+        password.into(),
+    )
+}
+
+// S26
+#[test]
+fn connection_test_tells_a_ready_storage_from_one_the_first_sync_creates() {
+    let dav = start();
+    let seen = dav.requests(|| assert_eq!(check(&dav.url, "secret").unwrap(), ConnectionCheck::WillCreate));
+    assert!(seen.iter().all(|r| r.starts_with("PROPFIND ")), "{seen:?}");
+    assert!(!dav.root.path().join("dav/user").exists());
+
+    std::fs::create_dir(dav.root.path().join("dav/user")).unwrap();
+    let seen = dav.requests(|| assert_eq!(check(&dav.url, "secret").unwrap(), ConnectionCheck::Ready));
+    assert_eq!(seen, ["PROPFIND /dav/user/ depth=0"]);
+}
+
+// S26
+#[test]
+fn connection_test_names_what_is_wrong() {
+    let dav = start();
+    let err = check(&dav.url, "wrong").unwrap_err().to_string();
+    assert!(err.contains("401") && err.contains("password"), "{err}");
+
+    let err = check(&format!("{}/deeper/still", dav.url), "secret")
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("nothing is found"), "{err}");
+
+    // A server that knows nothing of WebDAV answers every method the same way.
+    let plain = Server::http("127.0.0.1:0").unwrap();
+    let port = plain.server_addr().to_ip().unwrap().port();
+    std::thread::spawn(move || {
+        for request in plain.incoming_requests() {
+            request
+                .respond(tiny_http::Response::from_string("<html></html>"))
+                .unwrap();
+        }
+    });
+    let err = check(&format!("http://127.0.0.1:{port}/files"), "secret")
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("does not answer as WebDAV"), "{err}");
+
+    // Nobody listens on a port that was just given back.
+    let free = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let err = check(&format!("http://127.0.0.1:{free}/files"), "secret")
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("PROPFIND"), "{err}");
+
+    assert!(check("ftp://example.org", "secret").is_err());
+}
+
+// S26
+#[test]
+fn connection_test_leaves_the_settings_of_the_device_alone() {
+    let dav = start();
+    let a = device();
+    connect(&a, &dav, "secret");
+    add(&a, "ждёт");
+    let pending = a.sync_status().unwrap().pending;
+
+    assert!(check(&dav.url, "wrong").is_err());
+    assert_eq!(check(&dav.url, "secret").unwrap(), ConnectionCheck::WillCreate);
+
+    assert_eq!(a.sync_status().unwrap().pending, pending);
+    assert!(!dav.storage().exists());
+    // The password the device holds is still the one it was given.
+    assert!(a.sync_now().unwrap().pushed > 0);
+}
+
 #[test]
 fn address_must_be_http() {
     let a = device();

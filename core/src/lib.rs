@@ -26,3 +26,4 @@ pub use markdown::{
 };
 pub use model::*;
 pub use store::{days_between, shift_date, Store};
+pub use sync::check_sync_connection;
