@@ -157,6 +157,10 @@
     <string name="local_only">Данные хранятся только на этом устройстве.</string>
     <string name="push_switch">Синхронизировать сразу после правки на другом устройстве</string>
     <string name="push_hint">Другие устройства просят это синхронизироваться через приложение UnifiedPush, например ntfy. Данные через него не идут.</string>
+    <string name="background_work">Работа в фоне</string>
+    <string name="background_restricted">Ограничена</string>
+    <string name="background_unrestricted">Без ограничений</string>
+    <string name="background_hint">Телефон, который ограничивает Lists, откладывает синхронизацию, пока приложение закрыто. То же нужно приложению UnifiedPush, а на части телефонов обоим ещё нужно разрешить автозапуск.</string>
     <string name="push_no_distributor">Установите приложение UnifiedPush, например ntfy, и повторите.</string>
     <string name="push_server">Сервер уведомлений</string>
     <string name="push_token">Токен сервера уведомлений</string>

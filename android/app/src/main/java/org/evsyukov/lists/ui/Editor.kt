@@ -103,6 +103,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.evsyukov.lists.Background
 import org.evsyukov.lists.Push
 import org.evsyukov.lists.Reminders
 import org.evsyukov.lists.R
@@ -826,7 +827,12 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
     var notifyOn by remember { mutableStateOf(NotifyPrefs.enabled(context)) }
     // R66: asked again on the way back from the system screen where the leave is given.
     var exactAlarms by remember { mutableStateOf(Reminders.exact(context)) }
-    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { exactAlarms = Reminders.exact(context) }
+    // S31: the same on the way back from the system dialog about the battery.
+    var unrestricted by remember { mutableStateOf(Background.unrestricted(context)) }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        exactAlarms = Reminders.exact(context)
+        unrestricted = Background.unrestricted(context)
+    }
     var leads by remember { mutableStateOf(NotifyPrefs.leads(context)) }
     var newTaskList by remember { mutableStateOf(EntryPrefs.newTaskList(context)) }
     var parse by remember { mutableStateOf(EntryPrefs.parse(context)) }
@@ -935,6 +941,7 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
                         } else if (activity != null) {
                             Push.enable(activity) { found ->
                                 push = found
+                                if (found) Background.askOnce(activity)
                                 error = if (found) null else noDistributor
                             }
                         }
@@ -949,6 +956,8 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
                             Text(str(R.string.push_refused), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                         }
                     }
+                    SettingRow(str(R.string.background_work), str(if (unrestricted) R.string.background_unrestricted else R.string.background_restricted)) { Background.open(context) }
+                    Text(str(R.string.background_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 } else {
                     Text(str(R.string.local_only), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
@@ -976,7 +985,12 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
                     Repo.store.setPushToken(pushToken.takeIf { sender })
                     pushRefused = false
                 }
-                    .onSuccess { error = null; tested = null; model.sync() }
+                    .onSuccess {
+                        error = null
+                        tested = null
+                        model.sync()
+                        if (enabled) Background.askOnce(context)
+                    }
                     .onFailure { error = describe(it) }
             }) { Text(str(R.string.save_and_sync)) }
         },
