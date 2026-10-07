@@ -140,6 +140,7 @@ const RU = {
   "Filter": "Фильтр", "Date": "Дата", "Any": "Любой", "The coming days": "Ближайшие дни", "No date": "Без даты", "Days": "Дней", "Priority at least": "Приоритет не ниже",
   "Status": "Состояние", "Open": "В работе", "Contains": "Содержит", "Save": "Сохранить", "Cancel": "Отмена", "Delete filter": "Удалить фильтр", "Edit": "Изменить",
   "all of these, separated by spaces": "все сразу, через пробел", "Next 7 days": "Ближайшие 7 дней", "High priority": "Высокий приоритет", "Any list unless some are checked": "Любой список, если ничего не отмечено",
+  "Completed tasks leave the view": "Выполненные пропадают", "at once": "сразу", "after an hour": "через час", "after": "через", "min": "мин",
   "Appearance": "Оформление", "Same as the system": "Как в системе", "Light": "Светлое", "Dark": "Тёмное"
 };
 const ru = (navigator.language || "en").toLowerCase().startsWith("ru");
@@ -274,7 +275,10 @@ function taskNode(x, origin) {
     e.stopPropagation();
     if (locked) return;
     if (x.done) return act("reopen", { id: x.id });
-    act("complete", { id: x.id }, t(x.repeat ? "Moved to the next occurrence" : "Task completed"), x.repeat ? null : () => act("reopen", { id: x.id }));
+    // A completed task stays in view and its mark takes it back (R68); the Undo bar is for when it leaves at once.
+    if (x.repeat) return act("complete", { id: x.id }, t("Moved to the next occurrence"));
+    if (state.overview.keepDone) return act("complete", { id: x.id });
+    act("complete", { id: x.id }, t("Task completed"), () => act("reopen", { id: x.id }));
   };
   const row = $("div", { class: "row", onclick: () => { open ? state.open.delete(x.id) : state.open.add(x.id); load(); } },
     $("button", { class: "check" + (x.done ? " done" : ""), "aria-label": x.done ? "reopen" : "complete", onclick: toggle }, x.done ? "✓" : ""),
@@ -498,6 +502,9 @@ function render() {
       $("label", { class: "nav", style: "color:var(--muted)" }, t("Appearance"),
         $("select", { id: "look", onchange: e => setLook(e.target.value) },
           [["system", "Same as the system"], ["light", "Light"], ["dark", "Dark"]].map(([v, n]) => $("option", { value: v, selected: look() === v }, t(n))))),
+      $("label", { class: "nav", style: "color:var(--muted)" }, t("Completed tasks leave the view"),
+        $("select", { id: "keep", onchange: e => act("setKeepDone", { value: Number(e.target.value) }) },
+          keepChoices(o.keepDone).map(([v, n]) => $("option", { value: v, selected: o.keepDone === v }, n)))),
       $("button", { class: "nav", style: "color:var(--muted)", onclick: () => importer.click() }, t("Import…")), importer,
       $("button", { class: "nav", style: "color:var(--muted)", onclick: () => api("/api/logout", { method: "POST", headers: { "X-Lists": "1" } }).then(showLogin) }, t("Sign out"))),
     $("div", { id: "shade", onclick: () => { state.drawer = false; render(); } }),
@@ -512,6 +519,12 @@ function render() {
         state.scope === "trash" && !empty ? $("div", { style: "text-align:right;padding:14px" }, $("button", { class: "link danger", onclick: () => confirm(t("Delete everything in the trash for good?")) && act("emptyTrash") }, t("Empty Trash"))) : null,
         state.scope === "completed" && !state.search && !empty ? $("div", { style: "text-align:right;padding:14px" }, clearCompleted()) : null),
       readOnly() || state.filterEdit || state.scope.startsWith("filter:") ? null : $("div", { id: "add" }, $("span", { style: "color:var(--muted)" }, "+"), add))));
+}
+
+// The times R68 offers, and the one in force when another device set something else.
+function keepChoices(current) {
+  const name = m => m === 0 ? t("at once") : m === 60 ? t("after an hour") : t("after") + " " + m + " " + t("min");
+  return [...new Set([0, 1, 5, 15, 60, current])].sort((a, b) => a - b).map(m => [m, name(m)]);
 }
 
 // Clearing cannot be undone, so each choice is confirmed (R46).

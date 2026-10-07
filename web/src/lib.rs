@@ -309,6 +309,7 @@ impl App {
             "filters": s.filters()?.iter().map(|f| json!({ "id": f.id, "name": f.name, "open": f.open_count, "spec": serde_json::to_value(&f.spec).unwrap_or(Value::Null) })).collect::<Vec<_>>(),
             "counts": { "inbox": counts.inbox, "today": counts.today, "overdue": counts.overdue, "upcoming": counts.upcoming, "trash": counts.trash },
             "sync": { "configured": status.configured, "pending": status.pending, "lastOk": status.last_ok, "lastError": status.last_error },
+            "keepDone": s.keep_done_minutes()?,
         }))
     }
 
@@ -402,6 +403,14 @@ impl App {
                 "setListShowDone" => s
                     .set_list_show_done(id()?, a.get("value").and_then(Value::as_bool).unwrap_or(false))
                     .map(|_| done)?,
+                "setKeepDone" => {
+                    let minutes = a
+                        .get("value")
+                        .and_then(Value::as_u64)
+                        .ok_or_else(|| AppError::invalid("value"))?;
+                    s.set_keep_done_minutes(u32::try_from(minutes).unwrap_or(u32::MAX))
+                        .map(|_| done)?
+                }
                 "deleteList" => s.delete_list(id()?).map(|_| done)?,
                 "setProject" => s
                     .set_project(id()?, a.get("value").and_then(Value::as_bool).unwrap_or(false))
