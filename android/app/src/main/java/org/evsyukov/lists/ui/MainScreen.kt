@@ -27,7 +27,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.List
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.CalendarMonth
-import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.CheckBox
+import androidx.compose.material.icons.outlined.CheckBoxOutlineBlank
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.CloudDone
 import androidx.compose.material.icons.outlined.CloudOff
@@ -39,7 +40,6 @@ import androidx.compose.material.icons.outlined.Inbox
 import androidx.compose.material.icons.outlined.Inventory2
 import androidx.compose.material.icons.outlined.Layers
 import androidx.compose.material.icons.outlined.Menu
-import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.StarOutline
@@ -478,7 +478,7 @@ private fun SwipeRow(task: TaskItem, state: UiState, onToggle: () -> Unit, onOpe
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = if (toEnd) Arrangement.Start else Arrangement.End,
             ) {
-                Icon(if (toEnd) Icons.Outlined.CheckCircle else Icons.Outlined.CalendarMonth, null)
+                Icon(if (toEnd) Icons.Outlined.CheckBox else Icons.Outlined.CalendarMonth, null)
             }
         },
     ) {
@@ -505,7 +505,7 @@ fun TaskRow(task: TaskItem, state: UiState, onToggle: () -> Unit, onOpen: () -> 
     ) {
         IconButton(onClick = onToggle, enabled = !task.deleted && !task.isLog) {
             Icon(
-                if (done) Icons.Outlined.CheckCircle else Icons.Outlined.RadioButtonUnchecked,
+                if (done) Icons.Outlined.CheckBox else Icons.Outlined.CheckBoxOutlineBlank,
                 contentDescription = if (done) str(R.string.reopen) else str(R.string.complete),
                 tint = if (done) MaterialTheme.colorScheme.onSurfaceVariant else state.list(task.listId)?.tint() ?: MaterialTheme.colorScheme.primary,
             )
@@ -633,7 +633,7 @@ private fun Drawer(
             DrawerItem(str(R.string.today), Icons.Outlined.StarOutline, state.counts.today, state.scope == Scope.Today, alert = state.counts.overdue > 0u) { onSelect(Scope.Today) }
             DrawerItem(str(R.string.upcoming), Icons.Outlined.CalendarMonth, state.counts.upcoming, state.scope == Scope.Upcoming) { onSelect(Scope.Upcoming) }
             DrawerItem(str(R.string.all), Icons.Outlined.Layers, 0u, state.scope == Scope.All) { onSelect(Scope.All) }
-            DrawerItem(str(R.string.completed), Icons.Outlined.CheckCircle, 0u, state.scope == Scope.Completed) { onSelect(Scope.Completed) }
+            DrawerItem(str(R.string.completed), Icons.Outlined.CheckBox, 0u, state.scope == Scope.Completed) { onSelect(Scope.Completed) }
             if (state.counts.trash > 0u) {
                 DrawerItem(str(R.string.trash), Icons.Outlined.Delete, state.counts.trash, state.scope == Scope.Trash) { onSelect(Scope.Trash) }
             }

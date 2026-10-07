@@ -36,10 +36,10 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Add
-import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.CheckBox
+import androidx.compose.material.icons.outlined.CheckBoxOutlineBlank
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.MoreVert
-import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.AssistChip
@@ -213,7 +213,7 @@ fun EditorSheet(editing: Editing, state: UiState, model: MainViewModel, onRemind
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 4.dp, end = 4.dp)) {
                 IconButton(onClick = { model.toggleDone(task) }, enabled = !locked) {
                     Icon(
-                        if (task.done != null) Icons.Outlined.CheckCircle else Icons.Outlined.RadioButtonUnchecked,
+                        if (task.done != null) Icons.Outlined.CheckBox else Icons.Outlined.CheckBoxOutlineBlank,
                         if (task.done != null) str(R.string.reopen) else str(R.string.complete),
                         tint = state.list(task.listId)?.tint() ?: MaterialTheme.colorScheme.primary,
                     )
