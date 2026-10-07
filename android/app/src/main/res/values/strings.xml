@@ -235,4 +235,8 @@
     <string name="appearance_system">Same as the system</string>
     <string name="appearance_light">Light</string>
     <string name="appearance_dark">Dark</string>
+    <string name="completed_leave">Completed tasks leave the view</string>
+    <string name="leave_at_once">at once</string>
+    <string name="leave_after_minutes">after %1$d min</string>
+    <string name="leave_after_hour">after an hour</string>
 </resources>
