@@ -503,3 +503,28 @@ fn icons_are_served_before_login() {
         assert_eq!(status(ureq::get(&format!("{}{src}", web.base)).call()), 200, "{src}");
     }
 }
+
+#[test]
+fn a_completed_task_stays_in_view_until_the_setting_says_otherwise() {
+    let web = web(Some("secret"));
+    let cookie = login(&web, "secret").unwrap();
+    assert_eq!(get(&web, &cookie, "/api/overview")["keepDone"], 5);
+
+    let task = call(
+        &web,
+        &cookie,
+        json!({ "op": "quickAdd", "text": "полить цветы", "scope": "inbox" }),
+    );
+    call(&web, &cookie, json!({ "op": "complete", "id": task["id"] }));
+    let inbox = get(&web, &cookie, "/api/tasks?scope=inbox");
+    assert_eq!(inbox.as_array().unwrap().len(), 1, "R68: still in its view");
+    assert!(inbox[0]["done"].is_string());
+    assert_eq!(get(&web, &cookie, "/api/overview")["counts"]["inbox"], 0);
+
+    call(&web, &cookie, json!({ "op": "setKeepDone", "value": 0 }));
+    assert_eq!(get(&web, &cookie, "/api/overview")["keepDone"], 0);
+    assert!(get(&web, &cookie, "/api/tasks?scope=inbox")
+        .as_array()
+        .unwrap()
+        .is_empty());
+}

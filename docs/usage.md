@@ -53,7 +53,7 @@ Notes are read as Markdown and styled while you type; there is no separate previ
 
 In the web interface a note is shown formatted until you click it; the click opens the plain text for editing, and leaving the field saves it. Checkboxes are not toggled there. Quick entry on Android and the share sheets keep a plain text field.
 
-A completed task does not leave its view at once: it stays where it was, struck through and dimmed, for the time chosen in Settings → "Keep completed tasks in view" (at once, 1, 5, 15 minutes or an hour; 5 minutes unless changed), and a tap on its mark during that time reopens it. The setting is shared by all devices and syncs; over CalDAV it does not travel, so there it is set on each device.
+A completed task does not leave its view at once: it stays where it was, struck through and dimmed, for the time chosen in Settings → "Completed tasks leave the view" (at once, after 1, 5, 15 minutes or an hour; after 5 minutes unless changed; in the web interface the choice is at the bottom of the sidebar), and a tap on its mark during that time reopens it. The setting is shared by all devices and syncs; over CalDAV it does not travel, so there it is set on each device.
 
 Deleting can be undone: ⌘Z on macOS, the Undo bar on Android. Completing is undone with ⌘Z on macOS or by tapping the mark again; the Undo bar after completing appears only when completed tasks leave at once. Only emptying the trash and clearing Completed ask for confirmation: both remove tasks for good. Clearing takes finished tasks with their subtasks and the records of finished repeats; open tasks and the trash stay as they are. Over CalDAV the cleared tasks end up in the trash of the other devices instead of disappearing there.
 
