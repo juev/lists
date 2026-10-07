@@ -50,7 +50,7 @@ struct DraftEditor: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
-                Image(systemName: "circle").font(AppFont.style(.title3)).foregroundStyle(.secondary)
+                Image(systemName: "square").font(AppFont.style(.title3)).foregroundStyle(.secondary)
                 TextField(L("New task"), text: $draft.title)
                     .textFieldStyle(.plain)
                     .font(AppFont.style(.body))

@@ -99,7 +99,7 @@ struct Sidebar: View {
                 row(.upcoming, L("Upcoming"), "calendar", count: model.counts.upcoming)
                 row(.all, L("All"), "square.stack", count: 0)
                 if model.showCompletedView {
-                    row(.completed, L("Completed"), "checkmark.circle", count: 0)
+                    row(.completed, L("Completed"), "checkmark.square", count: 0)
                 }
                 if model.counts.trash > 0 {
                     row(.trash, L("Trash"), "trash", count: model.counts.trash)
