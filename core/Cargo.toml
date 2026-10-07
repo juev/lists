@@ -1,6 +1,6 @@
 [package]
 name = "lists-core"
-version = "0.1.0-rc.3"
+version = "0.1.0-rc.4"
 edition = "2021"
 license = "MIT"
 description = "Shared core of the Lists to-do app: storage, merge, sync, recurrence"
