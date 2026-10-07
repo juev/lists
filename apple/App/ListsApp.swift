@@ -225,6 +225,8 @@ struct SettingsView: View {
     @State private var password = ""
     @State private var folder = ""
     @State private var pushServer = ""
+    @State private var pushToken = ""
+    @State private var pushRefused = false
     @State private var message: String?
     @State private var testing = false
 
@@ -343,6 +345,13 @@ struct SettingsView: View {
                     TextField(L("Push server"), text: $pushServer, prompt: Text("https://ntfy.sh"))
                     Text(L("Optional. Through an ntfy server other devices ask this Mac to sync at once. No data passes through it."))
                         .font(AppFont.style(.caption)).foregroundStyle(.secondary)
+                    SecureField(L("Push token"), text: $pushToken, prompt: Text("tk_…"))
+                    Text(L("Only for an ntfy server that requires sign-in. The token is sent to this server and to no other."))
+                        .font(AppFont.style(.caption)).foregroundStyle(.secondary)
+                    if pushRefused {
+                        Text(L("The push server refused access. Check the push token."))
+                            .font(AppFont.style(.caption)).foregroundStyle(.secondary)
+                    }
                 }
                 HStack {
                     Button(L("Save and sync"), action: save)
@@ -360,6 +369,13 @@ struct SettingsView: View {
         .formStyle(.grouped)
         .frame(width: 520)
         .onAppear(perform: load)
+        // S30: the subscription is retried in the background, so the answer comes later than the save.
+        .task {
+            while !Task.isCancelled {
+                pushRefused = model.store?.pushRefused() ?? false
+                try? await Task.sleep(for: .seconds(2))
+            }
+        }
     }
 
     private var status: String? {
@@ -371,6 +387,7 @@ struct SettingsView: View {
 
     private func load() {
         pushServer = (try? model.store?.pushServer()) ?? ""
+        pushToken = pushServer.isEmpty ? "" : Keychain.load(account: Keychain.pushAccount(server: pushServer)) ?? ""
         guard let config = try? model.store?.syncConfig() else { return }
         switch config {
         case .off: kind = .off
@@ -421,6 +438,24 @@ struct SettingsView: View {
         do {
             try store.setSyncConfig(config: config)
             try store.setPushServer(server: kind == .off ? nil : pushServer)
+            // The core keeps the address without the trailing slash; the token is filed under that.
+            if let server = try store.pushServer() {
+                let token = pushToken.trimmingCharacters(in: .whitespacesAndNewlines)
+                let account = Keychain.pushAccount(server: server)
+                if token.isEmpty {
+                    Keychain.delete(account: account)
+                } else {
+                    do {
+                        try Keychain.save(token, account: account, label: "Lists push token")
+                    } catch {
+                        message = L("The push token could not be saved in the system keychain: %@", error.localizedDescription)
+                    }
+                }
+                store.setPushToken(token: token)
+            } else {
+                store.setPushToken(token: nil)
+            }
+            pushRefused = false
             if kind == .webdav || kind == .caldav {
                 do {
                     try Keychain.save(password, account: Keychain.account(url: url, user: user))
