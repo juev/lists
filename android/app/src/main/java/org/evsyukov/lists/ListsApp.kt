@@ -253,8 +253,14 @@ object Reminders {
     private const val PREFS = "reminders"
     private const val KEY = "ids"
 
+    /** R66: always before Android 12, by the user's leave since. */
+    fun exact(context: Context): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
+            context.getSystemService(AlarmManager::class.java)?.canScheduleExactAlarms() == true
+
     fun refresh(context: Context) {
         val alarms = context.getSystemService(AlarmManager::class.java) ?: return
+        val exact = exact(context)
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         for (id in prefs.getStringSet(KEY, emptySet()).orEmpty()) {
             alarms.cancel(pending(context, id, "", ""))
@@ -267,8 +273,10 @@ object Reminders {
                 NotificationKind.SUMMARY -> context.getString(R.string.app_name) to str(R.string.summary_body, item.count.toString())
                 else -> item.title to item.due?.let { str(R.string.due_at, dateLabel(it).lowercase()) }.orEmpty()
             }
-            // Inexact on purpose: exact alarms need a special permission a to-do list should not ask for.
-            alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pending(context, item.taskId ?: item.key, title, body))
+            val alarm = pending(context, item.taskId ?: item.key, title, body)
+            // Without the permission the system may deliver the alarm late, within a window of up to an hour.
+            if (exact) alarms.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, alarm)
+            else alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, alarm)
             scheduled += item.taskId ?: item.key
         }
         prefs.edit().putStringSet(KEY, scheduled).apply()
@@ -315,10 +323,12 @@ class ReminderReceiver : BroadcastReceiver() {
     }
 }
 
-/** Alarms do not survive a reboot. */
+/** Alarms do not survive a reboot, and they are set anew when the leave for exact ones is given (R66). */
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action == Intent.ACTION_BOOT_COMPLETED) {
+        if (intent.action == Intent.ACTION_BOOT_COMPLETED ||
+            intent.action == AlarmManager.ACTION_SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED
+        ) {
             val result = goAsync()
             Repo.scope.launch {
                 Reminders.refresh(context.applicationContext)

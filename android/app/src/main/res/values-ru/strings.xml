@@ -207,6 +207,9 @@
     <string name="imported">Импорт из %1$s: списков — %2$s, задач — %3$s, вложений — %4$s.</string>
     <string name="notifications">Уведомления</string>
     <string name="show_notifications">Показывать уведомления</string>
+    <string name="exact_alarms">Напоминания могут опаздывать</string>
+    <string name="allow">Разрешить</string>
+    <string name="exact_alarms_hint">Пока для Lists не разрешены «Будильники и напоминания», система может показать напоминание позже назначенного, вплоть до часа.</string>
     <string name="due_at_time_setting">Задача со сроком по времени</string>
     <string name="due_on_day_setting">Задача со сроком на день</string>
     <string name="summary_setting">Сводка дня</string>
