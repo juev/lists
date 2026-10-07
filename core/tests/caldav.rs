@@ -778,6 +778,36 @@ fn wrong_password_and_bad_address_are_reported() {
     assert!(a.sync_now().unwrap().pushed > 0);
 }
 
+// C26
+#[test]
+fn connection_test_finds_the_calendars_and_writes_nothing() {
+    let dav = start();
+    let check = |url: &str, password: &str| {
+        check_sync_connection(
+            SyncConfig::CalDav {
+                url: url.into(),
+                user: "user".into(),
+            },
+            password.into(),
+        )
+    };
+    let seen = dav.requests(|| assert_eq!(check(&dav.url, "secret").unwrap(), ConnectionCheck::Ready));
+    assert!(seen.iter().all(|r| r.starts_with("PROPFIND ")), "{seen:?}");
+    assert_eq!(std::fs::read_dir(dav.home()).unwrap().count(), 0);
+
+    let err = check(&dav.url, "wrong").unwrap_err().to_string();
+    assert!(err.contains("401"), "{err}");
+    let err = check(&format!("{}/missing", dav.url), "secret")
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("nothing is found"), "{err}");
+
+    // The address is the server itself; it names the collection of calendars.
+    std::fs::write(dav.root.path().join(".home"), "/cal/").unwrap();
+    let root = dav.url.trim_end_matches("/cal");
+    assert_eq!(check(root, "secret").unwrap(), ConnectionCheck::Ready);
+}
+
 #[test]
 fn switching_from_the_log_to_caldav_carries_everything_over() {
     let dav = start();

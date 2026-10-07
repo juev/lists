@@ -275,6 +275,15 @@ pub struct QuickParse {
     pub list_name: Option<String>,
 }
 
+/// What a test of sync settings found when the storage can be reached (S26).
+#[derive(Debug, Clone, Copy, PartialEq, uniffi::Enum)]
+pub enum ConnectionCheck {
+    /// The storage answers at the address.
+    Ready,
+    /// The address does not exist yet, the level above it does: the first sync creates it.
+    WillCreate,
+}
+
 #[derive(Debug, Clone, PartialEq, uniffi::Enum)]
 pub enum SyncConfig {
     Off,

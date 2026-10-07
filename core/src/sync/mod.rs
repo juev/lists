@@ -22,7 +22,7 @@ use sha2::{Digest, Sha256};
 
 use crate::db::{self, is_sha256, Change, Touched};
 use crate::error::{AppError, Result};
-use crate::model::{SyncConfig, SyncReport, SyncStatus};
+use crate::model::{ConnectionCheck, SyncConfig, SyncReport, SyncStatus};
 use crate::store::{hex, Store};
 use remote::{DirRemote, Remote};
 use webdav::WebDavRemote;
@@ -525,6 +525,21 @@ fn change_from_row(r: &rusqlite::Row) -> rusqlite::Result<Change> {
         value: serde_json::from_str(&value).unwrap_or(serde_json::Value::Null),
         stamp: r.get(4)?,
     })
+}
+
+/// Tests sync settings before they are saved: asks the storage at `config`
+/// with `password` and writes nothing, neither there nor here (S26, C26).
+#[uniffi::export]
+pub fn check_sync_connection(config: SyncConfig, password: String) -> Result<ConnectionCheck> {
+    match config {
+        SyncConfig::WebDav { url, user } => WebDavRemote::new(&url, &user, &password)?.check(),
+        SyncConfig::CalDav { url, user } => {
+            crate::caldav::client::Client::check(&url, &user, &password).map(|()| ConnectionCheck::Ready)
+        }
+        SyncConfig::Off | SyncConfig::Folder { .. } => {
+            Err(AppError::invalid("only WebDAV and CalDAV settings can be tested"))
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize)]

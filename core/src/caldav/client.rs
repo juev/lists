@@ -195,6 +195,14 @@ impl Client {
         Ok(client)
     }
 
+    /// Asks whether sync could work here without writing anything (C26).
+    pub fn check(url: &str, user: &str, password: &str) -> Result<()> {
+        match Client::connect(url, user, password)?.calendars()? {
+            Some(_) => Ok(()),
+            None => Err(AppError::sync("nothing is found at this address (HTTP 404)")),
+        }
+    }
+
     fn request(&self, method: &str, path: &str) -> ureq::Request {
         let request = self.agent.request(method, &format!("{}{}", self.origin, path));
         match &self.auth {
