@@ -193,7 +193,7 @@ By default the apps look the way the system does, and follow it when it switches
 
 ## Gestures on Android
 
-Swipe right to complete, swipe left to set the due date; a swipe to the right that starts at the left edge of the screen opens the panel with the lists instead. Long-press for the menu: due date, priority, move to list, add subtask, duplicate, delete.
+Swipe right to complete, swipe left to set the due date; a swipe to the right that starts at the left edge of the screen opens the panel with the lists instead. Pull down at the top of a list to sync right away; this works once sync is set up. Long-press for the menu: due date, priority, move to list, add subtask, duplicate, delete.
 
 ## Import
 
