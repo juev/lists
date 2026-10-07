@@ -6,6 +6,7 @@ import android.content.ContextWrapper
 import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -95,12 +96,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.FileProvider
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.evsyukov.lists.Push
+import org.evsyukov.lists.Reminders
 import org.evsyukov.lists.R
 import org.evsyukov.lists.str
 import org.evsyukov.lists.ordinal
@@ -820,6 +824,9 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
         }
     }
     var notifyOn by remember { mutableStateOf(NotifyPrefs.enabled(context)) }
+    // R66: asked again on the way back from the system screen where the leave is given.
+    var exactAlarms by remember { mutableStateOf(Reminders.exact(context)) }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { exactAlarms = Reminders.exact(context) }
     var leads by remember { mutableStateOf(NotifyPrefs.leads(context)) }
     var newTaskList by remember { mutableStateOf(EntryPrefs.newTaskList(context)) }
     var parse by remember { mutableStateOf(EntryPrefs.parse(context)) }
@@ -863,6 +870,12 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
                     ) { choosing = "lead" }
                     SettingRow(str(R.string.due_on_day_setting), timeLabel(allDay)) { choosing = "allDay" }
                     SettingRow(str(R.string.summary_setting), timeLabel(summary)) { choosing = "summary" }
+                    if (!exactAlarms && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                        SettingRow(str(R.string.exact_alarms), str(R.string.allow)) {
+                            context.startActivity(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.parse("package:${context.packageName}")))
+                        }
+                        Text(str(R.string.exact_alarms_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
                 HorizontalDivider(Modifier.padding(vertical = 8.dp))
                 Text(str(R.string.new_tasks_setting), style = MaterialTheme.typography.labelLarge)
