@@ -154,6 +154,8 @@ final class AppModel {
 
     @ObservationIgnored private var syncDebounce: DispatchWorkItem?
     @ObservationIgnored private var timer: Timer?
+    /// Fires when the first of the kept completed tasks is due to leave its view (R68).
+    @ObservationIgnored private var keptTimer: Timer?
     @ObservationIgnored private let folderWatcher = FolderWatcher()
     @ObservationIgnored weak var undoManager: UndoManager?
 
@@ -184,10 +186,7 @@ final class AppModel {
             MainActor.assumeIsolated { self?.reload(); self?.syncNow() }
         }
         timer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated {
-                self?.dropKeptRows()
-                self?.syncNow()
-            }
+            MainActor.assumeIsolated { self?.syncNow() }
         }
         watchSyncFolder()
         listenForNudges()
@@ -273,11 +272,6 @@ final class AppModel {
         }
     }
 
-    /// Rows kept after completion leave by the clock, not by a change (R68).
-    private func dropKeptRows() {
-        if sections.contains(where: { $0.tasks.contains { $0.done != nil } }) { reload() }
-    }
-
     func setKeepDone(_ minutes: UInt32) {
         perform { try $0.setKeepDoneMinutes(minutes: minutes) }
     }
@@ -290,6 +284,13 @@ final class AppModel {
             counts = try store.counts()
             syncStatus = try store.syncStatus()
             keepDone = try store.keepDoneMinutes()
+            // Kept rows leave by the clock, not by a change: look again when the first one is due.
+            keptTimer?.invalidate()
+            keptTimer = try store.secondsUntilKeptLeaves().map { seconds in
+                Timer.scheduledTimer(withTimeInterval: TimeInterval(seconds), repeats: false) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.reload() }
+                }
+            }
             if case .list(let id) = scope, list(id) == nil { scope = .inbox }
             if case .tag(let name) = scope, !tags.contains(where: { $0.name == name }) { scope = .inbox }
             projects = try store.projects()

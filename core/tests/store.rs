@@ -1174,3 +1174,31 @@ fn r68_a_repeating_task_moves_on_and_a_far_clock_does_not_keep_a_task() {
     d.set_now_for_tests("2026-10-05T10:01");
     assert!(view(&d, Scope::Today).is_empty());
 }
+
+#[test]
+fn r68_the_time_runs_to_the_second_and_the_store_tells_when_it_ends() {
+    let d = device();
+    d.set_keep_done_minutes(1).unwrap();
+    assert_eq!(d.seconds_until_kept_leaves().unwrap(), None, "nothing is kept");
+    due_today(&d, "а");
+    let b = due_today(&d, "б");
+
+    d.set_now_for_tests("2026-10-05T10:00:40");
+    d.complete_task(b.id).unwrap();
+    d.set_now_for_tests("2026-10-05T10:01:10");
+    assert_eq!(view(&d, Scope::Today), ["а", "б"]);
+    assert_eq!(d.seconds_until_kept_leaves().unwrap(), Some(31));
+
+    d.set_now_for_tests("2026-10-05T10:01:39");
+    assert_eq!(view(&d, Scope::Today), ["а", "б"], "a second before the minute is over");
+    d.set_now_for_tests("2026-10-05T10:01:41");
+    assert_eq!(view(&d, Scope::Today), ["а"], "a second after");
+    assert_eq!(d.seconds_until_kept_leaves().unwrap(), None);
+
+    d.set_keep_done_minutes(0).unwrap();
+    assert_eq!(
+        d.seconds_until_kept_leaves().unwrap(),
+        None,
+        "at once: nothing to wait for"
+    );
+}

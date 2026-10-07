@@ -97,12 +97,17 @@ impl Inner {
         self.now.unwrap_or_else(|| chrono::Local::now().naive_local())
     }
 
-    pub fn write<T>(&mut self, f: impl FnOnce(&mut Writer) -> Result<T>) -> Result<T> {
-        let now = self.now();
-        let now_ms = match self.now {
+    /// The clock of the stamps: milliseconds, the same on every device whatever its time zone.
+    pub fn now_ms(&self) -> u64 {
+        match self.now {
             Some(fixed) => fixed.and_utc().timestamp_millis().max(0) as u64,
             None => chrono::Utc::now().timestamp_millis().max(0) as u64,
-        };
+        }
+    }
+
+    pub fn write<T>(&mut self, f: impl FnOnce(&mut Writer) -> Result<T>) -> Result<T> {
+        let now = self.now();
+        let now_ms = self.now_ms();
         let tx = self
             .conn
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -166,27 +171,44 @@ struct Recent {
 }
 
 impl Recent {
-    fn at(conn: &Connection, now: NaiveDateTime) -> Result<Self> {
-        let minutes = keep_done(conn)?;
-        if minutes == 0 {
+    fn at(inner: &Inner) -> Result<Self> {
+        let Some(window) = kept_window(inner)? else {
             return Ok(Recent {
                 open: "t.done IS NULL".into(),
                 settled: "t.done IS NOT NULL".into(),
             });
-        }
-        // `done` has no time zone and a minute's precision. The window has an end as well, so that a task
-        // completed where the clock is hours ahead does not stay for hours.
-        let span = chrono::Duration::minutes(i64::from(minutes));
-        let window = format!(
-            "t.done BETWEEN '{}' AND '{}'",
-            (now - span).format(MOMENT_FMT),
-            (now + span).format(MOMENT_FMT)
-        );
+        };
         Ok(Recent {
             open: format!("(t.done IS NULL OR {window})"),
             settled: format!("(t.done IS NOT NULL AND NOT {window})"),
         })
     }
+}
+
+/// How long the setting keeps a completed task, in the milliseconds of the stamps.
+fn kept_span_ms(conn: &Connection) -> Result<u64> {
+    Ok(u64::from(keep_done(conn)?) * 60_000)
+}
+
+/// SQL that is true for a task completed within the time the setting gives; none when it gives no time.
+///
+/// The time counts from the stamp of `done`: it has the precision the setting needs and no time zone.
+/// The value of `done` has to agree with it to the minute, so that tasks whose completion was only
+/// recorded now (an import, a calendar read for the first time) are not taken for just completed.
+fn kept_window(inner: &Inner) -> Result<Option<String>> {
+    let span_ms = kept_span_ms(&inner.conn)?;
+    if span_ms == 0 {
+        return Ok(None);
+    }
+    let (now, now_ms) = (inner.now(), inner.now_ms());
+    let slack = chrono::Duration::milliseconds(span_ms as i64) + chrono::Duration::minutes(1);
+    Ok(Some(format!(
+        "(substr(t.done_stamp, 1, 12) BETWEEN '{:012x}' AND '{:012x}' AND t.done BETWEEN '{}' AND '{}')",
+        now_ms.saturating_sub(span_ms),
+        now_ms + span_ms,
+        (now - slack).format(MOMENT_FMT),
+        (now + slack).format(MOMENT_FMT)
+    )))
 }
 
 fn task_from_row(r: &Row) -> rusqlite::Result<TaskItem> {
@@ -352,7 +374,10 @@ impl Store {
     /// Pins "now" so tests can reason about dates.
     #[doc(hidden)]
     pub fn set_now_for_tests(&self, now: &str) {
-        self.lock().now = NaiveDateTime::parse_from_str(now, MOMENT_FMT).ok();
+        // Seconds are optional: most tests reason in minutes.
+        self.lock().now = NaiveDateTime::parse_from_str(now, "%Y-%m-%dT%H:%M:%S")
+            .or_else(|_| NaiveDateTime::parse_from_str(now, MOMENT_FMT))
+            .ok();
     }
 
     #[doc(hidden)]
@@ -474,6 +499,26 @@ impl Store {
         keep_done(&self.lock().conn)
     }
 
+    /// Seconds until the first of the kept tasks leaves its view; none when no task is kept.
+    /// A screen that shows tasks looks again after that long (R68).
+    pub fn seconds_until_kept_leaves(&self) -> Result<Option<u32>> {
+        let inner = self.lock();
+        let Some(window) = kept_window(&inner)? else {
+            return Ok(None);
+        };
+        let first: Option<String> = inner.conn.query_row(
+            &format!("SELECT min(substr(t.done_stamp, 1, 12)) FROM tasks t WHERE {LIVE} AND {window}"),
+            [],
+            |r| r.get(0),
+        )?;
+        let Some(done_ms) = first.and_then(|hex| u64::from_str_radix(&hex, 16).ok()) else {
+            return Ok(None);
+        };
+        // One more second: the task is still kept at the last millisecond of its time.
+        let left_ms = (done_ms + kept_span_ms(&inner.conn)?).saturating_sub(inner.now_ms());
+        Ok(Some((left_ms / 1000 + 1) as u32))
+    }
+
     /// The setting is one for all devices and travels with sync.
     pub fn set_keep_done_minutes(&self, minutes: u32) -> Result<()> {
         self.write(|w| {
@@ -544,7 +589,7 @@ impl Store {
         let inner = self.lock();
         let today = inner.now().date().format(DATE_FMT).to_string();
         let conn = &inner.conn;
-        let recent = Recent::at(conn, inner.now())?;
+        let recent = Recent::at(&inner)?;
         let (open, settled) = (&recent.open, &recent.settled);
         match view {
             Scope::Inbox => list_tasks(conn, INBOX_ID, &recent),
@@ -848,7 +893,7 @@ impl Store {
         let rows: Vec<(String, String, String)> = stmt
             .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
             .collect::<rusqlite::Result<_>>()?;
-        let recent = Recent::at(&inner.conn, inner.now())?;
+        let recent = Recent::at(&inner)?;
         rows.into_iter()
             .map(|(id, name, spec)| {
                 let spec: FilterSpec = serde_json::from_str(&spec).unwrap_or_default();
@@ -870,7 +915,7 @@ impl Store {
     pub fn preview_filter(&self, spec: FilterSpec) -> Result<Vec<TaskItem>> {
         let inner = self.lock();
         let today = inner.now().date().format(DATE_FMT).to_string();
-        filter_tasks(&inner.conn, &spec, &today, &Recent::at(&inner.conn, inner.now())?)
+        filter_tasks(&inner.conn, &spec, &today, &Recent::at(&inner)?)
     }
 
     pub fn create_filter(&self, name: String, spec: FilterSpec) -> Result<SavedFilter> {

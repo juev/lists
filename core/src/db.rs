@@ -24,7 +24,7 @@ pub const SETTINGS_ID: &str = "app";
 
 /// Bumped whenever a derived table changes shape: the tables are then dropped
 /// and rebuilt from `fields`, which never changes shape.
-const DERIVED_VERSION: &str = "2";
+const DERIVED_VERSION: &str = "3";
 
 const MAX_KEY_LEN: usize = 200;
 
@@ -81,6 +81,8 @@ const DERIVED_SCHEMA: &str = "
             remind TEXT,
             pos TEXT NOT NULL DEFAULT '',
             done TEXT,
+            -- when `done` was written: the first twelve digits are milliseconds (R68)
+            done_stamp TEXT NOT NULL DEFAULT '',
             deleted INTEGER NOT NULL DEFAULT 0,
             purged INTEGER NOT NULL DEFAULT 0,
             log_of TEXT,
@@ -334,14 +336,14 @@ fn materialize_task(conn: &Connection, id: &str) -> Result<()> {
     // Derived columns survive the rewrite; rebuild_tree corrects them afterwards.
     conn.execute(
         "INSERT INTO tasks
-         (id, list_id, parent_id, parent_stamp, title, notes, start, due, priority, repeat, remind, pos, done, deleted, purged, log_of, project)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
+         (id, list_id, parent_id, parent_stamp, title, notes, start, due, priority, repeat, remind, pos, done, deleted, purged, log_of, project, done_stamp)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)
          ON CONFLICT (id) DO UPDATE SET
             list_id = excluded.list_id, parent_id = excluded.parent_id, parent_stamp = excluded.parent_stamp,
             title = excluded.title, notes = excluded.notes, start = excluded.start, due = excluded.due,
             priority = excluded.priority, repeat = excluded.repeat, remind = excluded.remind, pos = excluded.pos,
             done = excluded.done, deleted = excluded.deleted, purged = excluded.purged, log_of = excluded.log_of,
-            project = excluded.project",
+            project = excluded.project, done_stamp = excluded.done_stamp",
         params![
             id,
             r.text("list").unwrap_or_else(|| INBOX_ID.into()),
@@ -360,6 +362,7 @@ fn materialize_task(conn: &Connection, id: &str) -> Result<()> {
             r.flag("purged"),
             r.text("log_of"),
             r.flag("project"),
+            r.stamp("done"),
         ],
     )?;
     conn.execute("DELETE FROM task_tags WHERE task_id = ?1", [id])?;

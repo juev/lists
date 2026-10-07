@@ -519,10 +519,17 @@ fn a_completed_task_stays_in_view_until_the_setting_says_otherwise() {
     let inbox = get(&web, &cookie, "/api/tasks?scope=inbox");
     assert_eq!(inbox.as_array().unwrap().len(), 1, "R68: still in its view");
     assert!(inbox[0]["done"].is_string());
-    assert_eq!(get(&web, &cookie, "/api/overview")["counts"]["inbox"], 0);
+    let overview = get(&web, &cookie, "/api/overview");
+    assert_eq!(overview["counts"]["inbox"], 0);
+    let left = overview["keptFor"]
+        .as_u64()
+        .expect("the page is told when to look again");
+    assert!((1..=301).contains(&left), "within the five minutes: {left}");
 
     call(&web, &cookie, json!({ "op": "setKeepDone", "value": 0 }));
-    assert_eq!(get(&web, &cookie, "/api/overview")["keepDone"], 0);
+    let overview = get(&web, &cookie, "/api/overview");
+    assert_eq!(overview["keepDone"], 0);
+    assert!(overview["keptFor"].is_null());
     assert!(get(&web, &cookie, "/api/tasks?scope=inbox")
         .as_array()
         .unwrap()
