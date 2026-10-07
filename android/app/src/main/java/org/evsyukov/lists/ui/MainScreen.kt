@@ -95,6 +95,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.toColorInt
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -368,12 +369,16 @@ private fun EmptyState(scope: Scope) {
 @Composable
 private fun NewTaskSheet(state: UiState, onAdd: (TaskDraft) -> Unit, onDismiss: () -> Unit) {
     val context = LocalContext.current
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+    // No width limit: expanded, the card takes the whole screen (R64).
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        sheetMaxWidth = Dp.Unspecified,
+    ) {
         NewTaskCard(
             lists = state.lists.filter { !it.archived },
             listId = remember { state.newTaskListId() },
             parse = EntryPrefs.parse(context),
-            onCancel = onDismiss,
             onSubmit = onAdd,
             modifier = Modifier.navigationBarsPadding().padding(start = 8.dp, end = 8.dp, bottom = 8.dp),
             keepOpen = true,
