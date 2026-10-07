@@ -11,8 +11,8 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
 /**
- * The WebDAV password, encrypted with a key that never leaves the Android
- * Keystore. Only the ciphertext is written to the app's preferences; the core
+ * The WebDAV password and the access token of the push server, encrypted with
+ * a key that never leaves the Android Keystore. Only the ciphertext is written to the app's preferences; the core
  * gets the password in memory after the store is opened.
  */
 object Secrets {
@@ -20,6 +20,9 @@ object Secrets {
     private const val ALIAS = "lists.webdav"
     private const val PREFS = "secrets"
     private const val VALUE = "webdav"
+
+    /** Where the access token of the ntfy server is kept (S27). */
+    const val PUSH_TOKEN = "push_token"
 
     private fun key(): SecretKey {
         val store = KeyStore.getInstance(KEYSTORE).apply { load(null) }
@@ -31,21 +34,21 @@ object Secrets {
         return KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, KEYSTORE).apply { init(spec) }.generateKey()
     }
 
-    fun save(context: Context, password: String?) {
+    fun save(context: Context, password: String?, name: String = VALUE) {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         if (password.isNullOrEmpty()) {
-            prefs.edit().remove(VALUE).apply()
+            prefs.edit().remove(name).apply()
             return
         }
         val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, key()) }
         val sealed = cipher.iv + cipher.doFinal(password.toByteArray())
         // The 12-byte nonce chosen by the keystore goes in front of the ciphertext.
-        prefs.edit().putString(VALUE, Base64.encodeToString(sealed, Base64.NO_WRAP)).apply()
+        prefs.edit().putString(name, Base64.encodeToString(sealed, Base64.NO_WRAP)).apply()
     }
 
     /** Null when nothing is stored or the key is gone (for example after a restore to another device). */
-    fun load(context: Context): String? = runCatching {
-        val stored = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(VALUE, null) ?: return null
+    fun load(context: Context, name: String = VALUE): String? = runCatching {
+        val stored = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(name, null) ?: return null
         val sealed = Base64.decode(stored, Base64.NO_WRAP)
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, sealed, 0, 12))
