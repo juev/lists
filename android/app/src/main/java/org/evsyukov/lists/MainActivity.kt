@@ -27,6 +27,7 @@ import org.evsyukov.lists.ui.MainScreen
 import org.evsyukov.lists.ui.MainViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import uniffi.lists_core.SyncConfig
 
 /** [bars] is set by a screen that draws under the system bars: their icons then follow the look of the app. */
 @Composable
@@ -65,6 +66,10 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent { AppTheme(bars = true) { MainScreen(model, onReminderSet = ::ensureNotifications) } }
         openFromIntent(intent)
+        // S31: who had sync on before the request existed is asked here, once.
+        if (savedInstanceState == null && runCatching { Repo.store.syncConfig() !is SyncConfig.Off }.getOrDefault(false)) {
+            Background.askOnce(this)
+        }
 
         // Sync when the app comes forward and once a minute while it stays there.
         lifecycleScope.launch {
