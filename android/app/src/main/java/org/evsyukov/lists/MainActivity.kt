@@ -2,6 +2,7 @@ package org.evsyukov.lists
 
 import android.app.Activity
 import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -63,6 +64,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // R77: the portrait lock of the manifest is for phones; Android 16 lifts it on a wide display itself.
+        if (resources.configuration.smallestScreenWidthDp >= 600) {
+            requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        }
         enableEdgeToEdge()
         setContent { AppTheme(bars = true) { MainScreen(model, onReminderSet = ::ensureNotifications) } }
         openFromIntent(intent)
