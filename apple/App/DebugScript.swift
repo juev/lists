@@ -41,6 +41,9 @@ import UserNotifications
 /// a hidden app shows no popovers; key presses then go to the open popover first, as they do when it has the keyboard),
 /// `wont` (closes the selected task as "won't do"; `task` prints the state of the selected task), `go:completed`, `go:wontdo`, `go:today`, `go:#tag` and `go:List name` (switch to those views),
 /// `completedview:on` and `completedview:off` (flip the setting that offers the Completed view), `scope` (prints the current view),
+/// `calendarevents` (prints the setting of R78, the access the system gave, and how many calendars are listed and hidden; nothing is asked of the system),
+/// `events:14:30=Bank,-=Birthday,09:00=Standup,y=Trip` (puts those events through the order of the block in place of the calendars of the system:
+/// `-` is an all-day event, `y` one that began yesterday) and `events` alone print whether the block is on show and its lines,
 /// `keepdone:5` (sets for how many seconds a completed task stays in view), `keepdone:day` (until the end of the day) and `keepdone` alone (prints it),
 /// `sound:Glass` (chooses the sound of notifications without playing it, `sound:` the standard one; `sound` alone leaves the choice as it is) prints the choice,
 /// whether a notification gets the standard sound, where the copy for the notification centre is and the sounds on offer; no notification is scheduled,
@@ -211,6 +214,24 @@ enum DebugScript {
                     default: model.scope = model.lists.first { $0.name == argument }.map { .list(id: $0.id) } ?? .inbox
                     }
                 case "completedview": AppModel.shared.showCompletedView = argument != "off"
+                case "calendarevents":
+                    let model = AppModel.shared
+                    print("debug: calendar events \(model.showCalendarEvents ? "on" : "off"), access \(SystemCalendars.shared.access), calendars \(model.eventCalendars.count), hidden \(model.hiddenCalendars.count)")
+                case "events":
+                    let model = AppModel.shared
+                    if !argument.isEmpty {
+                        let dayStart = Calendar.current.startOfDay(for: Date())
+                        let raw = argument.split(separator: ",").enumerated().map { index, item in
+                            let parts = item.split(separator: "=", maxSplits: 1).map(String.init)
+                            let clock = parts[0].split(separator: ":").compactMap { Int($0) }
+                            let start = parts[0] == "y" ? dayStart.addingTimeInterval(-7200)
+                                : dayStart.addingTimeInterval(TimeInterval((clock.first ?? 0) * 3600 + (clock.count > 1 ? clock[1] : 0) * 60))
+                            return RawEvent(id: "\(index)", title: parts.count > 1 ? parts[1] : "", start: start, allDay: parts[0] == "-", color: .blue)
+                        }
+                        model.dayEvents = DayEvents.arrange(raw, dayStart: dayStart)
+                    }
+                    let lines = model.dayEvents.map { [$0.time, $0.title].compactMap { $0 }.joined(separator: " ") }
+                    print("debug: events \(model.eventsShown ? "shown" : "not shown") \(lines)")
                 case "keepdone":
                     if argument == "day" { AppModel.shared.setKeepDone(.endOfDay) }
                     else if let seconds = UInt32(argument) { AppModel.shared.setKeepDone(.seconds(seconds: seconds)) }

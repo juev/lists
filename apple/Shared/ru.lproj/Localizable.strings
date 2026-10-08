@@ -257,6 +257,10 @@
 "Tasks matching now: %@" = "Сейчас подходит задач: %@";
 "Sidebar" = "Боковая панель";
 "Show Completed in the sidebar" = "Показывать «Выполненные» в боковой панели";
+"Calendar events" = "События календаря";
+"Show calendar events in Today" = "Показывать события календаря в «Сегодня»";
+"Lists has no access to the calendars. Open System Settings…" = "У Lists нет доступа к календарям. Открыть Системные настройки…";
+"Events are read from the calendars of this Mac and are shown above the tasks. They are not synced, and this setting applies to this Mac only." = "События читаются из календарей этого Mac и показаны над задачами. Они не синхронизируются, и настройка действует только на этом Mac.";
 "Appearance" = "Оформление";
 "Same as the system" = "Как в системе";
 "Light" = "Светлое";

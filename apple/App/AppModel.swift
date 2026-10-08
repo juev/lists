@@ -1,4 +1,5 @@
 import AppKit
+import EventKit
 import Foundation
 import Observation
 
@@ -133,6 +134,43 @@ final class AppModel {
         }
     }
 
+    // Calendar events in Today (R78); settings of this Mac, not synced.
+    /// Off until asked for: the system is asked for the calendars when this is turned on, not before.
+    var showCalendarEvents: Bool = UserDefaults.standard.bool(forKey: "calendarEvents") {
+        didSet {
+            guard showCalendarEvents != oldValue else { return }
+            UserDefaults.standard.set(showCalendarEvents, forKey: "calendarEvents")
+            if showCalendarEvents, SystemCalendars.shared.access == .unasked {
+                SystemCalendars.shared.ask { [weak self] in self?.reloadEvents() }
+            }
+            reloadEvents()
+        }
+    }
+    /// The calendars whose mark was taken off; a calendar that appears later is shown.
+    var hiddenCalendars: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "calendarEventsHidden") ?? []) {
+        didSet {
+            UserDefaults.standard.set(hiddenCalendars.sorted(), forKey: "calendarEventsHidden")
+            reloadEvents()
+        }
+    }
+    var dayEvents: [DayEvent] = []
+    private(set) var eventCalendars: [EventCalendar] = []
+    private(set) var calendarAccess = SystemCalendars.Access.unasked
+    /// The block stands in Today only, and only while there is an event to show.
+    var eventsShown: Bool { effectiveScope == .today && !dayEvents.isEmpty }
+
+    func reloadEvents() {
+        let calendars = SystemCalendars.shared
+        calendarAccess = calendars.access
+        guard showCalendarEvents, calendarAccess == .granted else {
+            dayEvents = []
+            eventCalendars = []
+            return
+        }
+        eventCalendars = calendars.calendars()
+        dayEvents = calendars.today(hidden: hiddenCalendars)
+    }
+
     /// Whether dates, priority, tags and a list are picked out of the typed title.
     var parseQuickText: Bool = UserDefaults.standard.object(forKey: "parseQuickText") == nil || UserDefaults.standard.bool(forKey: "parseQuickText") {
         didSet { UserDefaults.standard.set(parseQuickText, forKey: "parseQuickText") }
@@ -193,8 +231,15 @@ final class AppModel {
         NotificationCenter.default.addObserver(
             forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.reload(); self?.syncNow() }
+            MainActor.assumeIsolated { self?.reload(); self?.reloadEvents(); self?.syncNow() }
         }
+        // R78: the block follows the calendars of the system and the change of the day.
+        for name in [Notification.Name.EKEventStoreChanged, .NSCalendarDayChanged] {
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.reloadEvents() }
+            }
+        }
+        reloadEvents()
         timer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.syncNow() }
         }
