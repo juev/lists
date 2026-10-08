@@ -9,6 +9,8 @@ import android.provider.CalendarContract
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.time.Instant
 import java.time.LocalDate
@@ -105,7 +107,10 @@ object SystemCalendars {
     fun granted(context: Context) =
         context.checkSelfPermission(Manifest.permission.READ_CALENDAR) == PackageManager.PERMISSION_GRANTED
 
-    suspend fun refresh(context: Context) {
+    /** One reading at a time: the answer to an earlier request must not arrive after a later one. */
+    private val reading = Mutex()
+
+    suspend fun refresh(context: Context) = reading.withLock {
         val app = context.applicationContext
         val readable = EventPrefs.enabled(app) && granted(app)
         _readable.value = readable
