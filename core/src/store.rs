@@ -134,10 +134,11 @@ const TASK_COLUMNS: &str = "
     t.title, t.notes, t.start, t.due, t.priority, t.repeat, t.remind, t.done, t.deleted,
     t.log_of IS NOT NULL,
     t.project,
-    (SELECT count(*) FROM tasks c WHERE c.eff_parent = t.id AND c.deleted = 0 AND c.purged = 0),
-    (SELECT count(*) FROM tasks c WHERE c.eff_parent = t.id AND c.deleted = 0 AND c.purged = 0 AND c.done IS NOT NULL),
+    (SELECT count(*) FROM tasks c WHERE c.eff_parent = t.id AND c.deleted = 0 AND c.purged = 0 AND c.wont = 0),
+    (SELECT count(*) FROM tasks c WHERE c.eff_parent = t.id AND c.deleted = 0 AND c.purged = 0 AND c.wont = 0 AND c.done IS NOT NULL),
     (SELECT count(*) FROM attachments a WHERE a.task_id = t.id AND a.deleted = 0),
-    (SELECT group_concat(tag, char(31)) FROM (SELECT tag FROM task_tags WHERE task_id = t.id ORDER BY tag))";
+    (SELECT group_concat(tag, char(31)) FROM (SELECT tag FROM task_tags WHERE task_id = t.id ORDER BY tag)),
+    t.wont";
 
 /// Visible, not a completion record.
 const LIVE: &str = "t.eff_deleted = 0 AND t.log_of IS NULL";
@@ -227,6 +228,7 @@ fn task_from_row(r: &Row) -> rusqlite::Result<TaskItem> {
         repeat: repeat.and_then(|s| serde_json::from_str(&s).ok()),
         remind: r.get(10)?,
         done: r.get(11)?,
+        wont: r.get(19)?,
         deleted: r.get(12)?,
         is_log: r.get(13)?,
         is_project: r.get(14)?,
@@ -378,6 +380,12 @@ impl Store {
         self.lock().now = NaiveDateTime::parse_from_str(now, "%Y-%m-%dT%H:%M:%S")
             .or_else(|_| NaiveDateTime::parse_from_str(now, MOMENT_FMT))
             .ok();
+    }
+
+    /// Writes one register of a task the way a version with other rules would.
+    #[doc(hidden)]
+    pub fn set_task_field_for_tests(&self, id: &str, field: &str, value: Value) {
+        self.write(|w| w.task(id, field, value)).unwrap();
     }
 
     #[doc(hidden)]
@@ -624,6 +632,9 @@ impl Store {
             ),
             Scope::Completed => {
                 query_tasks(conn, &format!("WHERE {COMPLETED} ORDER BY t.done DESC, t.id"), &[])
+            }
+            Scope::WontDo => {
+                query_tasks(conn, &format!("WHERE {COMPLETED} AND t.wont = 1 ORDER BY t.done DESC, t.id"), &[])
             }
             Scope::Trash => query_tasks(conn, "WHERE t.deleted = 1 AND t.purged = 0 ORDER BY t.title, t.id", &[]),
             Scope::Tag { name } => query_tasks(
@@ -1078,7 +1089,13 @@ impl Store {
     /// Completes the task and its open subtasks. A repeating task moves to
     /// its next occurrence instead and leaves a record in Completed.
     pub fn complete_task(&self, id: String) -> Result<TaskItem> {
-        self.write(|w| complete_in(w, &id))
+        self.write(|w| complete_in(w, &id, false))
+    }
+
+    /// Closes the task and its open subtasks as "won't do" (R69). A repeating
+    /// task skips the occurrence: it moves on and leaves a "won't do" record.
+    pub fn wont_do_task(&self, id: String) -> Result<TaskItem> {
+        self.write(|w| complete_in(w, &id, true))
     }
 
     pub fn reopen_task(&self, id: String) -> Result<()> {
@@ -1086,7 +1103,7 @@ impl Store {
             if get_task(w.tx, &id)?.is_log {
                 return Err(AppError::invalid("a completed occurrence cannot be reopened"));
             }
-            w.task(&id, "done", Value::Null)
+            reopen_in(w, &id)
         })
     }
 
@@ -1261,8 +1278,42 @@ impl Store {
     }
 }
 
-/// Completes a task inside a write transaction: see `Store::complete_task`.
-pub(crate) fn complete_in(w: &mut Writer, id: &str) -> Result<TaskItem> {
+/// Whether the `wont` register of a task holds a moment, whatever `done` says.
+fn has_wont(conn: &Connection, id: &str) -> Result<bool> {
+    let value: Option<String> = conn
+        .query_row(
+            "SELECT value FROM fields WHERE kind = ?1 AND id = ?2 AND field = 'wont'",
+            params![KIND_TASK, id],
+            |r| r.get(0),
+        )
+        .optional()?;
+    Ok(value.is_some_and(|v| v != "null"))
+}
+
+/// Writes the closing moment of one task. A leftover `wont` is cleared on
+/// completion, so that it cannot match the new moment (S33).
+fn close(w: &mut Writer, id: &str, moment: &str, wont: bool) -> Result<()> {
+    w.task(id, "done", json!(moment))?;
+    if wont {
+        w.task(id, "wont", json!(moment))?;
+    } else if has_wont(w.tx, id)? {
+        w.task(id, "wont", Value::Null)?;
+    }
+    Ok(())
+}
+
+/// Returns a closed task to work, whichever way it was closed.
+pub(crate) fn reopen_in(w: &mut Writer, id: &str) -> Result<()> {
+    w.task(id, "done", Value::Null)?;
+    if has_wont(w.tx, id)? {
+        w.task(id, "wont", Value::Null)?;
+    }
+    Ok(())
+}
+
+/// Closes a task inside a write transaction, as completed or as "won't do":
+/// see `Store::complete_task` and `Store::wont_do_task`.
+pub(crate) fn complete_in(w: &mut Writer, id: &str, wont: bool) -> Result<TaskItem> {
     let task = get_task(w.tx, id)?;
     if task.done.is_some() {
         return Ok(task);
@@ -1287,7 +1338,8 @@ pub(crate) fn complete_in(w: &mut Writer, id: &str) -> Result<TaskItem> {
             w.task(&log_id, "list", json!(task.list_id))?;
             w.task(&log_id, "priority", json!(task.priority.as_i64()))?;
             w.task(&log_id, "due", opt(task.due.clone()))?;
-            w.task(&log_id, "done", json!(w.moment()))?;
+            let moment = w.moment();
+            close(w, &log_id, &moment, wont)?;
             w.task(&log_id, "log_of", json!(id))?;
 
             let delta = (next - from).num_days();
@@ -1311,17 +1363,17 @@ pub(crate) fn complete_in(w: &mut Writer, id: &str) -> Result<TaskItem> {
                 w.task(id, "repeat", serde_json::to_value(rule)?)?;
             }
             for sub in subtree {
-                w.task(&sub, "done", Value::Null)?;
+                reopen_in(w, &sub)?;
             }
         }
         _ => {
             let moment = w.moment();
-            w.task(id, "done", json!(moment))?;
+            close(w, id, &moment, wont)?;
             for sub in subtree {
                 let open: bool =
                     w.tx.query_row("SELECT done IS NULL FROM tasks WHERE id = ?1", [&sub], |r| r.get(0))?;
                 if open {
-                    w.task(&sub, "done", json!(moment))?;
+                    close(w, &sub, &moment, wont)?;
                 }
             }
         }
@@ -1361,7 +1413,8 @@ fn filter_tasks(conn: &Connection, spec: &FilterSpec, today: &str, recent: &Rece
     };
     match spec.status {
         FilterStatus::Open => sql.push_str(&format!(" AND {}", recent.open)),
-        FilterStatus::Done => sql.push_str(" AND t.done IS NOT NULL"),
+        FilterStatus::Done => sql.push_str(" AND t.done IS NOT NULL AND t.wont = 0"),
+        FilterStatus::Wont => sql.push_str(" AND t.wont = 1"),
         FilterStatus::All => {}
     }
     let date = "substr(coalesce(t.due, t.start), 1, 10)";

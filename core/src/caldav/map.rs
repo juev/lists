@@ -74,6 +74,8 @@ pub struct Standard {
     /// Canonical RRULE text, `None` when the task does not repeat.
     pub rrule: Option<String>,
     pub done: bool,
+    /// Closed as "won't do" (C27); `done` is then true as well.
+    pub wont: bool,
     pub parent: Option<String>,
 }
 
@@ -102,6 +104,7 @@ impl Standard {
                 .collect(),
             rrule: repeat.as_ref().map(to_rrule),
             done: state.text("done").is_some(),
+            wont: state.text("done").is_some() && state.text("wont") == state.text("done"),
             parent: state.text("parent").map(str::to_string),
         }
     }
@@ -133,6 +136,9 @@ pub fn read(calendar: &Component) -> Option<Remote> {
     let status_done = todo
         .get("STATUS")
         .is_some_and(|p| p.value.eq_ignore_ascii_case("COMPLETED"));
+    let cancelled = todo
+        .get("STATUS")
+        .is_some_and(|p| p.value.trim().eq_ignore_ascii_case("CANCELLED"));
     let completed = todo.get("COMPLETED").and_then(moment_from_ical);
     let standard = Standard {
         title: text("SUMMARY").trim().to_string(),
@@ -156,7 +162,8 @@ pub fn read(calendar: &Component) -> Option<Remote> {
             .filter(|t| !t.is_empty())
             .collect(),
         rrule: repeat.as_ref().map(to_rrule),
-        done: status_done || completed.is_some(),
+        done: status_done || cancelled || completed.is_some(),
+        wont: cancelled,
         parent: todo
             .all("RELATED-TO")
             .find(|p| p.param("RELTYPE").is_none_or(|t| t.eq_ignore_ascii_case("PARENT")))
@@ -240,13 +247,17 @@ pub fn render(
     todo.set(
         Some(Prop::new(
             "STATUS",
-            if standard.done { "COMPLETED" } else { "NEEDS-ACTION" },
+            match (standard.done, standard.wont) {
+                (true, true) => "CANCELLED",
+                (true, false) => "COMPLETED",
+                _ => "NEEDS-ACTION",
+            },
         )),
         "STATUS",
     );
     todo.set(done.map(|d| Prop::new("COMPLETED", local_to_utc_stamp(d))), "COMPLETED");
     todo.set(
-        standard.done.then(|| Prop::new("PERCENT-COMPLETE", "100")),
+        (standard.done && !standard.wont).then(|| Prop::new("PERCENT-COMPLETE", "100")),
         "PERCENT-COMPLETE",
     );
     todo.props

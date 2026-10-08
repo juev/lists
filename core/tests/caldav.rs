@@ -1552,3 +1552,92 @@ fn c14_removal_seen_in_a_run_that_failed_later_is_not_forgotten() {
         assert_eq!(a.task(office.id).unwrap().title, "office elsewhere");
     }
 }
+
+fn status(dav: &Dav, id: &str, to: &'static str, completed: Option<&'static str>) {
+    dav.edit(id, move |lines| {
+        lines
+            .into_iter()
+            .filter(|l| completed.is_none() || !l.starts_with("COMPLETED:"))
+            .flat_map(|l| {
+                if l.starts_with("STATUS:") {
+                    let mut out = vec![format!("STATUS:{to}")];
+                    out.extend(completed.filter(|c| !c.is_empty()).map(|c| format!("COMPLETED:{c}")));
+                    out
+                } else {
+                    vec![l]
+                }
+            })
+            .collect()
+    });
+}
+
+#[test]
+fn c27_wont_do_is_written_as_cancelled_and_reaches_the_other_device() {
+    let dav = start();
+    let (a, b) = pair(&dav);
+    let t = add(&a, "брошенная");
+    a.wont_do_task(t.id.clone()).unwrap();
+    settle(&a, &b);
+
+    let object = dav.read(&t.id);
+    assert!(object.contains("STATUS:CANCELLED"), "{object}");
+    assert!(
+        object.contains("COMPLETED:"),
+        "kept for versions that read no CANCELLED"
+    );
+    assert!(!object.contains("PERCENT-COMPLETE"));
+    assert!(b.task(t.id.clone()).unwrap().wont);
+
+    b.reopen_task(t.id.clone()).unwrap();
+    settle(&b, &a);
+    assert!(dav.read(&t.id).contains("STATUS:NEEDS-ACTION"));
+    let got = a.task(t.id).unwrap();
+    assert!(got.done.is_none() && !got.wont);
+}
+
+#[test]
+fn c27_cancelled_by_another_client_closes_the_task_as_wont_do() {
+    let dav = start();
+    let (a, b) = pair(&dav);
+    let plain = add(&a, "разовая");
+    let rep = add(&a, "зарядка");
+    a.set_due(rep.id.clone(), Some("2026-10-05".into())).unwrap();
+    a.set_repeat(rep.id.clone(), Some(daily())).unwrap();
+    settle(&a, &b);
+
+    status(&dav, &plain.id, "CANCELLED", None);
+    status(&dav, &rep.id, "CANCELLED", None);
+    a.sync_now().unwrap();
+    assert!(a.task(plain.id.clone()).unwrap().wont);
+    let got = a.task(rep.id.clone()).unwrap();
+    assert!(got.done.is_none(), "the repeating task moves on (C11)");
+    assert_eq!(got.due.as_deref(), Some("2026-10-06"));
+    let log = a.tasks(Scope::WontDo).unwrap();
+    assert_eq!(
+        log.iter().filter(|t| t.is_log).count(),
+        1,
+        "the skipped occurrence is recorded"
+    );
+    b.sync_now().unwrap();
+    assert!(b.task(plain.id.clone()).unwrap().wont);
+
+    // COMPLETED left as it was: written by a version that does not know the outcome.
+    status(&dav, &plain.id, "COMPLETED", None);
+    a.sync_now().unwrap();
+    assert!(a.task(plain.id.clone()).unwrap().wont, "not an edit");
+
+    // A new completion time: another client completed the task.
+    status(&dav, &plain.id, "COMPLETED", Some("20261006T080000Z"));
+    a.sync_now().unwrap();
+    let got = a.task(plain.id.clone()).unwrap();
+    assert!(got.done.is_some() && !got.wont);
+
+    status(&dav, &plain.id, "CANCELLED", None);
+    a.sync_now().unwrap();
+    assert!(a.task(plain.id.clone()).unwrap().wont, "and cancelled it again");
+
+    status(&dav, &plain.id, "NEEDS-ACTION", Some(""));
+    a.sync_now().unwrap();
+    let got = a.task(plain.id).unwrap();
+    assert!(got.done.is_none() && !got.wont);
+}
