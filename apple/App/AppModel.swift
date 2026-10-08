@@ -372,8 +372,10 @@ final class AppModel {
         switch effectiveScope {
         case .today:
             let today = Moment.today()
-            let overdue = tasks.filter { Moment.day($0.due ?? $0.start ?? today) < today }
-            let rest = tasks.filter { Moment.day($0.due ?? $0.start ?? today) >= today }
+            // R84: overdue is a due date that has passed. A start date in the past only makes the task available.
+            let isOverdue: (TaskItem) -> Bool = { task in task.due.map { Moment.day($0) < today } ?? false }
+            let overdue = tasks.filter(isOverdue)
+            let rest = tasks.filter { !isOverdue($0) }
             if overdue.isEmpty { return [TaskSection(id: "today", title: nil, tasks: rest)] }
             return [
                 TaskSection(id: "overdue", title: L("Overdue"), tasks: overdue),

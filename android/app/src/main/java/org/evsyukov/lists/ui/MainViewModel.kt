@@ -11,7 +11,7 @@ import org.evsyukov.lists.dateLabel
 import org.evsyukov.lists.dayHeading
 import org.evsyukov.lists.dayOf
 import org.evsyukov.lists.displayName
-import org.evsyukov.lists.today
+import org.evsyukov.lists.dueDayPassed
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -163,8 +163,7 @@ class MainViewModel : ViewModel() {
 
     private fun group(state: UiState, tasks: List<TaskItem>): List<TaskSection> = when (state.effectiveScope) {
         Scope.Today -> {
-            val now = today()
-            val (overdue, rest) = tasks.partition { dayOf(it.due ?: it.start ?: now) < now }
+            val (overdue, rest) = tasks.partition { dueDayPassed(it.due) }
             if (overdue.isEmpty()) listOf(TaskSection("today", null, rest))
             else listOf(TaskSection("overdue", str(R.string.overdue), overdue), TaskSection("today", str(R.string.today), rest)).filter { it.tasks.isNotEmpty() }
         }
