@@ -43,7 +43,7 @@ On Android the title, the note, a subtask and the name of a list or a filter sta
 
 On macOS Return on the selected row, or a double click, opens its card with the cursor at the end of the title, and Esc closes the card and hands the keyboard back to the list with the same row selected. Esc closes the card of the selected row as well when the list has the keyboard, after a click on the chevron or inside the card. The chevron at the end of a row only opens and closes the card. One card is open at a time. Opening another task, or moving to another row with a click or the arrow keys, closes the open card and keeps what was typed in it. A task stays open while one of its subtasks is selected or open. The card of a new task closes an open task, and opening a task closes the card of a new one the way Esc does.
 
-On macOS ⌘N, or the "+" button at the top right of the window, opens the card of a new task right in the list with every field at hand: title, notes, start date, due date, repeat, priority, tags, list and files. Return in the title creates the task. Esc creates it when it has a title and drops an empty card.
+On macOS ⌘N, or the "+" button at the top right of the window, opens the card of a new task right in the list with every field at hand: title, notes, start date, due date, repeat, priority, tags, list and files. Return in the title creates the task, and so does ⌘Return from any field of the card. Esc cancels: the card closes and nothing is created. What is set stands at the left of the row of fields as a chip with its value; what is not set stands at the right as an icon.
 
 Files get into a card on macOS in three ways: the paperclip button, dropping them on the card, and ⌘V with files or an image on the clipboard. This works in the card of a new task, in the quick-entry window and in an open task. ⌘V with text on the clipboard pastes the text as usual.
 
@@ -103,7 +103,7 @@ Dates are understood in English and in Russian. Example: `buy milk tomorrow 18:3
 
 Settings → New tasks (Settings in the drawer on Android) chooses the list a task goes to when neither the line nor the view names one: Inbox, the list used last, or a fixed list.
 
-The quick-entry window starts the note with the clipboard: copy a link or a piece of text, open the window, and it is already in the note while the cursor waits in the title. This applies to the window opened with the global shortcut on macOS and from the launcher shortcut or the tile on Android; Share and the text-selection menu bring their own text. Each copy is used once, so opening the window again gives an empty note. Only text of up to 2000 characters is taken; files, images, longer text and what a password manager marks as hidden are left alone. The button next to the note removes the text in one go until you edit it. Settings → New tasks → "Start the note with the clipboard in quick entry" turns this off, and the clipboard is then not read at all. The setting belongs to the device and does not sync. Android 12 and later show their own notice when an app reads the clipboard; it appears once per copy.
+In the quick-entry window on macOS a strip at the bottom shows the list the task goes to and holds Cancel and Save. The quick-entry window starts the note with the clipboard: copy a link or a piece of text, open the window, and it is already in the note while the cursor waits in the title. On macOS that text is shown as a block of at most three lines marked "From the clipboard", with a button that removes it; a click on the block opens it as an ordinary note. This applies to the window opened with the global shortcut on macOS and from the launcher shortcut or the tile on Android; Share and the text-selection menu bring their own text. Each copy is used once, so opening the window again gives an empty note. Only text of up to 2000 characters is taken; files, images, longer text and what a password manager marks as hidden are left alone. The button next to the note removes the text in one go until you edit it. Settings → New tasks → "Start the note with the clipboard in quick entry" turns this off, and the clipboard is then not read at all. The setting belongs to the device and does not sync. Android 12 and later show their own notice when an app reads the clipboard; it appears once per copy.
 
 Where the entry field is:
 
@@ -207,6 +207,8 @@ If access was refused, the settings say so in a line that opens the system setti
 | ⌥Tab | a tab character in the notes |
 | Space or Return on a chip | what a click on it does: its date, repeat or tag popover, its menu, or the removal of a tag |
 | Esc | close the open popover of a chip; without one, close the open card and go back to the list |
+| Esc in the card of a new task | cancel: close the card without creating the task |
+| ⌘Return in the card of a new task | create the task from any field |
 | Space or ⌘Enter | complete |
 | ⌘T | due today |
 | ⌘] and ⌘[ | make a subtask, move a level up |
