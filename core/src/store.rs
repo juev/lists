@@ -415,6 +415,33 @@ fn clean_tag(tag: &str) -> String {
     tag.trim().trim_start_matches('#').to_lowercase()
 }
 
+/// The type of a file by its first bytes, as (MIME type, extension), for a name that does not tell it (R85).
+/// Only types that are told apart for certain: an archive may be a document, so it stays unknown.
+pub(crate) fn sniff_type(head: &[u8]) -> Option<(&'static str, &'static str)> {
+    let brand = |b: &[u8]| head.len() >= 12 && &head[4..8] == b"ftyp" && &head[8..12] == b;
+    if head.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        Some(("image/jpeg", "jpg"))
+    } else if head.starts_with(b"\x89PNG\r\n\x1a\n") {
+        Some(("image/png", "png"))
+    } else if head.starts_with(b"GIF87a") || head.starts_with(b"GIF89a") {
+        Some(("image/gif", "gif"))
+    } else if head.starts_with(b"%PDF-") {
+        Some(("application/pdf", "pdf"))
+    } else if head.len() >= 12 && head.starts_with(b"RIFF") && &head[8..12] == b"WEBP" {
+        Some(("image/webp", "webp"))
+    } else if brand(b"heic") || brand(b"heix") || brand(b"mif1") || brand(b"msf1") {
+        Some(("image/heic", "heic"))
+    } else if brand(b"qt  ") {
+        Some(("video/quicktime", "mov"))
+    } else if brand(b"M4A ") {
+        Some(("audio/mp4", "m4a"))
+    } else if brand(b"isom") || brand(b"mp41") || brand(b"mp42") {
+        Some(("video/mp4", "mp4"))
+    } else {
+        None
+    }
+}
+
 pub(crate) fn guess_mime(name: &str) -> &'static str {
     let ext = name
         .rsplit_once('.')
@@ -436,9 +463,11 @@ pub(crate) fn guess_mime(name: &str) -> &'static str {
         "m4a" => "audio/mp4",
         "mp4" => "video/mp4",
         "mov" => "video/quicktime",
-        _ => "application/octet-stream",
+        _ => UNKNOWN_MIME,
     }
 }
+
+const UNKNOWN_MIME: &str = "application/octet-stream";
 
 impl Store {
     pub(crate) fn lock(&self) -> MutexGuard<'_, Inner> {
@@ -1309,11 +1338,26 @@ impl Store {
             let sha256: String = r.get(5)?;
             let path = self.blob_path(&sha256);
             let present = db::is_sha256(&sha256) && path.exists();
+            let (mut name, mut mime): (String, String) = (r.get(2)?, r.get(3)?);
+            // R85: a name that tells no type is helped by the content, when the content is here.
+            // Nothing is written back: the registers keep what the file came with.
+            if present && guess_mime(&name) == UNKNOWN_MIME {
+                let mut head = [0u8; 16];
+                let read = std::fs::File::open(&path)
+                    .and_then(|mut f| std::io::Read::read(&mut f, &mut head))
+                    .unwrap_or(0);
+                if let Some((sniffed, ext)) = sniff_type(&head[..read]) {
+                    mime = sniffed.to_string();
+                    if !name.contains('.') {
+                        name = format!("{name}.{ext}");
+                    }
+                }
+            }
             Ok(Attachment {
                 id: r.get(0)?,
                 task_id: r.get(1)?,
-                name: r.get(2)?,
-                mime: r.get(3)?,
+                name,
+                mime,
                 size: r.get(4)?,
                 local_path: present.then(|| path.to_string_lossy().into_owned()),
                 sha256,

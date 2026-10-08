@@ -1450,3 +1450,56 @@ fn r69_r46_clearing_completed_removes_both_outcomes() {
     assert!(view(&d, Scope::Completed).is_empty());
     assert!(view(&d, Scope::WontDo).is_empty());
 }
+
+/// Attaches a file with that name and content and returns the attachment as the views get it.
+fn shown_attachment(d: &Device, name: &str, content: &[u8]) -> Attachment {
+    let task = add(&d.store, name);
+    let src = tempfile::tempdir().unwrap();
+    let file = src.path().join(name);
+    std::fs::write(&file, content).unwrap();
+    d.add_attachment(task.id.clone(), file.to_string_lossy().into_owned(), None)
+        .unwrap();
+    d.attachments(task.id).unwrap().remove(0)
+}
+
+#[test]
+fn r85_a_name_without_a_type_takes_the_type_of_the_content() {
+    let d = device();
+    let jpeg = shown_attachment(&d, "Image", &[0xFF, 0xD8, 0xFF, 0xE0, 0, 16, b'J', b'F', b'I', b'F']);
+    assert_eq!((jpeg.name.as_str(), jpeg.mime.as_str()), ("Image.jpg", "image/jpeg"));
+    let pdf = shown_attachment(&d, "Scan", b"%PDF-1.7 and the rest");
+    assert_eq!((pdf.name.as_str(), pdf.mime.as_str()), ("Scan.pdf", "application/pdf"));
+    let png = shown_attachment(&d, "shot", b"\x89PNG\r\n\x1a\n0000");
+    assert_eq!((png.name.as_str(), png.mime.as_str()), ("shot.png", "image/png"));
+}
+
+#[test]
+fn r85_a_name_that_tells_the_type_and_content_that_tells_none_are_left_alone() {
+    let d = device();
+    // The name decides when it can, whatever the bytes are.
+    let named = shown_attachment(&d, "notes.txt", &[0xFF, 0xD8, 0xFF, 0xE0]);
+    assert_eq!((named.name.as_str(), named.mime.as_str()), ("notes.txt", "text/plain"));
+    // Unknown bytes under an unknown name stay what they were.
+    let unknown = shown_attachment(&d, "blob", b"nothing known here");
+    assert_eq!(
+        (unknown.name.as_str(), unknown.mime.as_str()),
+        ("blob", "application/octet-stream")
+    );
+    // An extension that tells nothing is kept; only the type is learnt from the content.
+    let odd = shown_attachment(&d, "export.dat", b"GIF89a....");
+    assert_eq!((odd.name.as_str(), odd.mime.as_str()), ("export.dat", "image/gif"));
+}
+
+#[test]
+fn r85_the_registers_keep_the_name_the_file_came_with() {
+    let d = device();
+    let shown = shown_attachment(&d, "Image", &[0xFF, 0xD8, 0xFF, 0xE0]);
+    assert_eq!(shown.name, "Image.jpg");
+    // Without the content the name is what was stored: nothing was written back.
+    std::fs::remove_file(shown.local_path.unwrap()).unwrap();
+    let bare = d.attachments(shown.task_id).unwrap().remove(0);
+    assert_eq!(
+        (bare.name.as_str(), bare.mime.as_str()),
+        ("Image", "application/octet-stream")
+    );
+}

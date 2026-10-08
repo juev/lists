@@ -244,10 +244,13 @@ fn parse_2do(archive: &Path, work: &Path) -> Result<Parsed> {
                 continue;
             }
             let path = work.join("2DoBackupPayload/Attachments").join(&relative);
+            // 2Do keeps the extension apart from the name: a photo is "Image" with "jpg" beside it (I8).
             let name = if name.is_empty() {
                 format!("attachment.{ext}")
-            } else {
+            } else if ext.is_empty() || name.to_lowercase().ends_with(&format!(".{}", ext.to_lowercase())) {
                 name
+            } else {
+                format!("{name}.{ext}")
             };
             if path.is_file() {
                 files.entry(task).or_default().push((name, path));
