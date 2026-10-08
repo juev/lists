@@ -376,7 +376,7 @@ struct TaskTitleField: View {
             .textFieldStyle(.plain)
             .font(AppFont.style(.body))
             .focused($focused)
-            .onSubmit(commit)
+            .onSubmit { commit() }
             // Pasted text of several lines becomes one line: a title has no line breaks.
             .onChange(of: title) { _, new in
                 if new.contains(where: \.isNewline) { title = Self.oneLine(new) }
@@ -388,10 +388,10 @@ struct TaskTitleField: View {
             .onChange(of: model.titleFocus) { _, _ in takeKeyboard() }
             .onChange(of: task.title) { _, new in if !focused { title = new } }
             .onChange(of: focused) { _, now in if !now { commit() } }
-            .onDisappear(perform: commit)
+            .onDisappear { commit() }
             // R83: quitting does not take the keyboard from the title, and neither does another app coming forward.
-            .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in commit() }
-            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in commit() }
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in commit(leaving: false) }
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in commit(leaving: false) }
     }
 
     /// Takes the keyboard when the card was opened for typing, with the caret after the title.
@@ -409,11 +409,16 @@ struct TaskTitleField: View {
         }
     }
 
-    private func commit() {
+    /// Saves the title. An emptied title goes back to what it was only when the field is left:
+    /// the app stepping back for a moment does not undo what is being typed.
+    private func commit(leaving: Bool = true) {
         let value = title.trimmingCharacters(in: .whitespacesAndNewlines)
         // A title that came with line breaks is shown without them; showing it is not an edit.
         guard value != task.title, value != Self.oneLine(task.title) else { return }
-        if value.isEmpty { title = task.title; return }
+        if value.isEmpty {
+            if leaving { title = task.title }
+            return
+        }
         model.perform { try $0.setTitle(id: task.id, title: value) }
     }
 
