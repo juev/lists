@@ -5,6 +5,10 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.LocalContentColor
@@ -322,6 +326,19 @@ fun MarkdownField(
     val current by rememberUpdatedState(view)
     val transformation = remember(view) { VisualTransformation { TransformedText(view.shown, view.mapping) } }
 
+    // The line being typed stays in view (R81): a note taller than the room above the keyboard grows under it
+    // otherwise, and what is typed is not seen until the keyboard is gone. Asked again while the keyboard
+    // slides in, because the room shrinks then.
+    val bringer = remember { BringIntoViewRequester() }
+    val keyboard = WindowInsets.ime.getBottom(density)
+    LaunchedEffect(field.selection, textLayout, focused, keyboard) {
+        val result = textLayout ?: return@LaunchedEffect
+        if (!focused) return@LaunchedEffect
+        val at = view.mapping.originalToTransformed(field.selection.end).coerceIn(0, result.layoutInput.text.length)
+        val cursor = result.getCursorRect(at)
+        bringer.bringIntoView(cursor.copy(top = cursor.top - cursor.height, bottom = cursor.bottom + cursor.height))
+    }
+
     BasicTextField(
         value = field,
         onValueChange = { next -> field = continued(field, next) ?: next },
@@ -342,7 +359,7 @@ fun MarkdownField(
                 value = field.text,
                 innerTextField = {
                     Box(
-                        Modifier.pointerInput(key, enabled) {
+                        Modifier.bringIntoViewRequester(bringer).pointerInput(key, enabled) {
                             if (!enabled) return@pointerInput
                             awaitEachGesture {
                                 val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
