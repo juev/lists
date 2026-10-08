@@ -29,7 +29,7 @@ apple-run: apple
 
 android:
 	./scripts/build-android.sh
-	cd android && ./gradlew --quiet assembleDebug
+	cd android && ./gradlew --quiet testDebugUnitTest assembleDebug
 
 android-install: android
 	$(ANDROID_HOME)/platform-tools/adb install -r android/app/build/outputs/apk/debug/app-debug.apk
