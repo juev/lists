@@ -934,6 +934,9 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
                     ) { choosing = "lead" }
                     SettingRow(str(R.string.due_on_day_setting), timeLabel(allDay)) { choosing = "allDay" }
                     SettingRow(str(R.string.summary_setting), timeLabel(summary)) { choosing = "summary" }
+                    SettingRow(str(R.string.notification_sound), str(R.string.choose)) {
+                        context.startActivity(Reminders.channelSettings(context))
+                    }
                     if (!exactAlarms && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
                         SettingRow(str(R.string.exact_alarms), str(R.string.allow)) {
                             context.startActivity(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.parse("package:${context.packageName}")))

@@ -221,6 +221,8 @@
     <string name="due_at_time_setting">Задача со сроком по времени</string>
     <string name="due_on_day_setting">Задача со сроком на день</string>
     <string name="summary_setting">Сводка дня</string>
+    <string name="notification_sound">Звук</string>
+    <string name="choose">Выбрать</string>
     <string name="at_due_time">В момент срока</string>
     <string name="min_before">За %1$s мин</string>
     <string name="day_before">За день</string>
