@@ -36,6 +36,8 @@ struct MainWindow: View {
                 .withoutToolbarTitle()
                 .toolbarBackground(.hidden, for: .windowToolbar)
                 .toolbar {
+                    // Without a title nothing pushes the buttons to the right edge; this does (R80).
+                    ToolbarItem(placement: .primaryAction) { Spacer() }
                     ToolbarItem(placement: .primaryAction) {
                         Button { model.startDraft() } label: { Image(systemName: "plus") }
                             .help(L("New task"))
