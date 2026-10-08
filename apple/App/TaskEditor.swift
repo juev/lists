@@ -61,6 +61,9 @@ struct TaskEditor: View {
         }
         .reportsCard(task.id, chip: chip, file: attachments.first { $0.id == focusedFile }?.name, popover: popover.map { "\($0)" })
         .onDisappear(perform: commitNotes)
+        // R83: quitting does not take the keyboard from the note, and neither does another app coming forward.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in commitNotes() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in commitNotes() }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
             if case .success(let urls) = result { attach(urls) }
         }
@@ -386,6 +389,9 @@ struct TaskTitleField: View {
             .onChange(of: task.title) { _, new in if !focused { title = new } }
             .onChange(of: focused) { _, now in if !now { commit() } }
             .onDisappear(perform: commit)
+            // R83: quitting does not take the keyboard from the title, and neither does another app coming forward.
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in commit() }
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in commit() }
     }
 
     /// Takes the keyboard when the card was opened for typing, with the caret after the title.
