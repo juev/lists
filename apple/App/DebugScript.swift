@@ -2,6 +2,7 @@
 import AppKit
 import Quartz
 import SwiftUI
+import UserNotifications
 
 /// Drives the app from inside for checks that need key presses: macOS lets no
 /// outside process send them without the Accessibility permission. Debug
@@ -41,6 +42,8 @@ import SwiftUI
 /// `wont` (closes the selected task as "won't do"; `task` prints the state of the selected task), `go:completed`, `go:wontdo`, `go:today`, `go:#tag` and `go:List name` (switch to those views),
 /// `completedview:on` and `completedview:off` (flip the setting that offers the Completed view), `scope` (prints the current view),
 /// `keepdone:5` (sets for how many seconds a completed task stays in view), `keepdone:day` (until the end of the day) and `keepdone` alone (prints it),
+/// `sound:Glass` (chooses the sound of notifications without playing it, `sound:` the standard one; `sound` alone leaves the choice as it is) prints the choice,
+/// whether a notification gets the standard sound, where the copy for the notification centre is and the sounds on offer; no notification is scheduled,
 /// `appearance:dark`, `appearance:light` and `appearance:system` (choose the look the way Settings does),
 /// `appearance` alone prints the choice and the look each window of the app has, the quick-entry panel among them,
 /// `menu:Title` (prints whether the menu bar item with that title is enabled),
@@ -215,6 +218,12 @@ enum DebugScript {
                     case .endOfDay: print("debug: keep done day")
                     case .seconds(let seconds): print("debug: keep done \(seconds)")
                     }
+                case "sound":
+                    if step.contains(":") { AppModel.shared.notifySoundName = argument }
+                    let chosen = AppModel.shared.notifySoundName
+                    let sound = NotifySound.notification(chosen)
+                    let copy = NotifySound.copy(of: chosen).map { FileManager.default.fileExists(atPath: $0.path) ? $0.path : "none" } ?? "no group"
+                    print("debug: sound \(chosen.isEmpty ? "standard" : chosen), on \(AppModel.shared.notifySound), plays \(AppModel.shared.notifySoundChoice ?? "nothing"), standard \(sound == .default), copy \(copy), offered \(NotifySound.names)")
                 case "appearance":
                     if step.contains(":") {
                         AppModel.shared.appearance = argument

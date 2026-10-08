@@ -288,6 +288,8 @@
 "At %@" = "В %@";
 "Summary of the day" = "Сводка дня";
 "Play a sound" = "Со звуком";
+"Sound" = "Звук";
+"Standard" = "Стандартный";
 "A reminder set on a task is always shown. These settings apply to this Mac only." = "Напоминание, заданное у задачи, показывается всегда. Эти настройки действуют только на этом Mac.";
 "Default list" = "Список по умолчанию";
 "Last used list" = "Последний использованный";
