@@ -171,6 +171,23 @@ A reminder set on a task itself replaces the one derived from its due date. The 
 
 On Android 13 and newer a notification arrives at its minute only when "Alarms & reminders" is allowed for Lists. Until then the notification settings show "Reminders may come late": tap it and allow. Without it the system may deliver a notification up to an hour late.
 
+## Calendar events in Today
+
+Today can show the events of the day from the calendars of the device, in a muted block above the tasks. It is off until you turn it on, each device has its own setting, and it does not sync:
+
+- macOS: Settings → Calendar events → "Show calendar events in Today";
+- Android: Settings → Calendar events → "Show calendar events in Today".
+
+Turning it on is when the system asks to let Lists read the calendars; nothing is asked before that. The system gives access to all calendars at once. The list under the switch chooses which of them are shown: take the mark off a calendar to leave its events out. A calendar added later is shown until its mark is taken off.
+
+An event is one line: a bar in the colour of its calendar, the start time and the title. All-day events have no time and come first; timed events follow by their start. An event that began before today has no time either. An event that is over stays until the end of the day.
+
+Events are not tasks: they have no mark, cannot be completed, edited or moved, and are not counted in Today or found by search. On Android a tap opens the event in the calendar app. On macOS a click opens Calendar; it cannot be opened on a particular event.
+
+Events are only read, and only on the device. Lists does not store them, change them or send them anywhere: they are not part of sync and never reach the sync server or the web interface. The web interface, Upcoming and the other views show no events.
+
+If access was refused, the settings say so in a line that opens the system settings: Privacy & Security → Calendars on macOS, the permissions of Lists on Android.
+
 ## Keyboard on macOS
 
 | Keys | Action |
