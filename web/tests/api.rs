@@ -187,19 +187,27 @@ fn a_task_from_quick_entry_to_the_trash() {
     assert_eq!(overview["lists"][1]["open"], 1);
     assert_eq!(overview["tags"][0]["name"], "квартал");
 
-    // Typed into Today without a date: it is due today.
+    // R75: the view gives a new task neither a date nor a tag.
     let quick = call(
         &web,
         &cookie,
-        json!({ "op": "quickAdd", "text": "позвонить", "scope": "today", "today": "2026-10-05" }),
+        json!({ "op": "quickAdd", "text": "позвонить", "scope": "today" }),
     );
-    assert_eq!(quick["due"], "2026-10-05");
+    assert!(quick["due"].is_null());
 
     call(&web, &cookie, json!({ "op": "delete", "id": id }));
     assert_eq!(
         get(&web, &cookie, "/api/tasks?scope=trash").as_array().unwrap().len(),
         1
     );
+    assert_eq!(call(&web, &cookie, json!({ "op": "emptyTrash" }))["removed"], 1);
+    let tagged = call(
+        &web,
+        &cookie,
+        json!({ "op": "quickAdd", "text": "написать", "scope": "tag:квартал" }),
+    );
+    assert_eq!(tagged["tags"], json!([]));
+    call(&web, &cookie, json!({ "op": "delete", "id": tagged["id"] }));
     assert_eq!(call(&web, &cookie, json!({ "op": "emptyTrash" }))["removed"], 1);
 
     let completed = |web: &Web| {

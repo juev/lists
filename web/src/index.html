@@ -497,7 +497,7 @@ function render() {
     alert([`${r.source}: ${t("Lists")} ${r.lists}, ${t("tasks")} ${r.tasks}, ${t("attachments")} ${r.attachments}`, ...r.notes].join("\n\n"));
     load();
   } });
-  const add = $("input", { type: "text", placeholder: t("New task"), enterkeyhint: "done", onkeydown: async e => { if (e.key === "Enter" && e.target.value.trim()) { const text = e.target.value; e.target.value = ""; await act("quickAdd", { text, scope: state.scope, today: today() }); document.querySelector("#add input").focus(); } } });
+  const add = $("input", { type: "text", placeholder: t("New task"), enterkeyhint: "done", onkeydown: async e => { if (e.key === "Enter" && e.target.value.trim()) { const text = e.target.value; e.target.value = ""; await act("quickAdd", { text, scope: state.scope }); document.querySelector("#add input").focus(); } } });
   root.replaceChildren($("div", { id: "app", class: state.drawer ? "drawer" : "" },
     $("nav", { id: "side" },
       nav("inbox", t("Inbox"), c.inbox), nav("today", t("Today"), c.today, { bad: c.overdue > 0 }), nav("upcoming", t("Upcoming"), c.upcoming),

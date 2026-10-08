@@ -330,15 +330,8 @@ impl App {
                             &s.quick_add_under(text_arg(a, "text")?, project.to_string())?,
                         ));
                     }
-                    let task = s.quick_add(text_arg(a, "text")?, list)?;
-                    // Same rule as in the apps: what is typed into Today belongs to today.
-                    if scope == "today" && task.due.is_none() {
-                        s.set_due(task.id.clone(), optional(a, "today"))?;
-                    }
-                    if let Some(tag) = scope.strip_prefix("tag:") {
-                        s.add_tag(task.id.clone(), tag.to_string())?;
-                    }
-                    task_json(&s.task(task.id)?)
+                    // The view gives a task its list and nothing else (R75).
+                    task_json(&s.quick_add(text_arg(a, "text")?, list)?)
                 }
                 "addSubtask" => task_json(&s.create_task(NewTask {
                     title: text_arg(a, "title")?,
