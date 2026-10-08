@@ -535,3 +535,40 @@ fn a_completed_task_stays_in_view_until_the_setting_says_otherwise() {
         .unwrap()
         .is_empty());
 }
+
+#[test]
+fn r69_a_task_is_closed_as_wont_do_and_listed_in_its_view() {
+    let web = web(Some("secret"));
+    let cookie = login(&web, "secret").unwrap();
+    call(&web, &cookie, json!({ "op": "setKeepDone", "value": 0 }));
+    let add = |text: &str| {
+        call(
+            &web,
+            &cookie,
+            json!({ "op": "quickAdd", "text": text, "scope": "inbox" }),
+        )
+    };
+    let (done, wont) = (add("выполнена"), add("не буду"));
+    call(&web, &cookie, json!({ "op": "complete", "id": done["id"] }));
+    let closed = call(&web, &cookie, json!({ "op": "wontDo", "id": wont["id"] }));
+    assert_eq!(closed["wont"], true);
+    assert!(closed["done"].is_string());
+
+    let titles = |scope: &str| -> Vec<String> {
+        get(&web, &cookie, &format!("/api/tasks?scope={scope}"))
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["title"].as_str().unwrap().to_string())
+            .collect()
+    };
+    assert!(titles("inbox").is_empty());
+    assert_eq!(titles("wontdo"), ["не буду"]);
+    assert_eq!(titles("completed").len(), 2, "the log holds both outcomes");
+
+    call(&web, &cookie, json!({ "op": "reopen", "id": wont["id"] }));
+    assert_eq!(titles("inbox"), ["не буду"]);
+    assert!(titles("wontdo").is_empty());
+    let back = get(&web, &cookie, "/api/tasks?scope=inbox");
+    assert_eq!(back[0]["wont"], false);
+}

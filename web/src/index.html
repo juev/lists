@@ -119,7 +119,7 @@ try { const look = localStorage.getItem("appearance"); if (look === "light" || l
 <script>
 "use strict";
 const RU = {
-  "Inbox": "Входящие", "Today": "Сегодня", "Upcoming": "Предстоящие", "All": "Все", "Completed": "Выполненные", "Trash": "Корзина",
+  "Inbox": "Входящие", "Today": "Сегодня", "Upcoming": "Предстоящие", "All": "Все", "Completed": "Выполненные", "Won't do": "Не буду делать", "Trash": "Корзина",
   "Lists": "Списки", "Tags": "Теги", "New list": "Новый список", "List name": "Название списка", "Search": "Поиск", "New task": "Новая задача",
   "Overdue": "Просрочено", "Tomorrow": "Завтра", "Yesterday": "Вчера", "Title": "Название", "Notes": "Заметка", "Due": "Срок", "Start": "Начало",
   "Reminder": "Напоминание", "Priority": "Приоритет", "No priority": "Без приоритета", "Low": "Низкий", "Medium": "Средний", "High": "Высокий",
@@ -227,10 +227,10 @@ function scopeTitle() {
   if (s.startsWith("tag:")) return "#" + s.slice(4);
   if (s.startsWith("project:")) { const p = state.overview.projects.find(p => "project:" + p.id === s); return p ? p.title : t("Projects"); }
   if (s.startsWith("filter:")) { const f = state.overview.filters.find(f => "filter:" + f.id === s); return f ? f.name : t("Filter"); }
-  return t({ inbox: "Inbox", today: "Today", upcoming: "Upcoming", all: "All", completed: "Completed", trash: "Trash" }[s]);
+  return t({ inbox: "Inbox", today: "Today", upcoming: "Upcoming", all: "All", completed: "Completed", wontdo: "Won't do", trash: "Trash" }[s]);
 }
 const listName = id => { const l = state.overview.lists.find(l => l.id === id); return !l ? "" : l.id === "inbox" ? t("Inbox") : l.name; };
-const readOnly = () => state.search || ["completed", "trash"].includes(state.scope);
+const readOnly = () => state.search || ["completed", "wontdo", "trash"].includes(state.scope);
 
 let keptTimer;
 async function load() {
@@ -257,7 +257,7 @@ function sections() {
   }
   if (s === "upcoming") return runs(x => dayOf(x.due || x.start), k => { const d = parseDay(k).toLocaleDateString(locale, { weekday: "long", day: "numeric", month: "long" }); return k === plus(1) ? `${t("Tomorrow")} · ${d}` : d; });
   if (s === "all") return runs(x => x.list, listName);
-  if (s === "completed") return runs(x => dayOf(x.done), dateLabel);
+  if (s === "completed" || s === "wontdo") return runs(x => dayOf(x.done), dateLabel);
   return [{ key: "all", tasks }];
 }
 
@@ -273,6 +273,13 @@ function summary(x, origin) {
   return out.length ? $("div", { class: "meta" }, out) : null;
 }
 
+// Closes a task as "won't do" (R69); what follows is the same as after completing it.
+function wontDo(x) {
+  if (x.repeat) return act("wontDo", { id: x.id }, t("Moved to the next occurrence"));
+  if (state.overview.keepDone) return act("wontDo", { id: x.id });
+  act("wontDo", { id: x.id }, t("Won't do"), () => act("reopen", { id: x.id }));
+}
+
 function taskNode(x, origin) {
   const open = state.open.has(x.id), locked = x.deleted || x.log;
   const toggle = e => {
@@ -285,7 +292,7 @@ function taskNode(x, origin) {
     act("complete", { id: x.id }, t("Task completed"), () => act("reopen", { id: x.id }));
   };
   const row = $("div", { class: "row", onclick: () => { open ? state.open.delete(x.id) : state.open.add(x.id); load(); } },
-    $("button", { class: "check" + (x.done ? " done" : ""), "aria-label": x.done ? "reopen" : "complete", onclick: toggle }, x.done ? "✓" : ""),
+    $("button", { class: "check" + (x.done ? " done" : ""), "aria-label": x.done ? "reopen" : "complete", onclick: toggle }, x.wont ? "✕" : x.done ? "✓" : ""),
     $("div", { class: "title" },
       // An open task shows its title once, as the editable field below.
       open && !locked ? $("div", { class: "meta" }, x.priority ? $("span", { class: "prio" }, marks(x.priority)) : "", listName(x.list)) :
@@ -419,6 +426,7 @@ function editor(d) {
       $("div", { class: "chips" },
         $("button", { class: "link", onclick: () => file.click() }, t("Attach file")), file, $("span", { class: "chip" }, move),
         $("button", { class: "link", onclick: () => act("duplicate", { id }) }, t("Duplicate")),
+        x.done ? null : $("button", { class: "link", onclick: () => wontDo(x) }, t("Won't do")),
         x.parent ? null : $("button", { class: "link", onclick: () => act("setProject", { id, value: !x.project }) }, t(x.project ? "Turn back into a task" : "Make it a project")),
         $("button", { class: "link danger", onclick: () => { state.open.delete(id); act("delete", { id }, t("Deleted"), () => act("restore", { id })); } }, t("Delete")))),
     $("div", { class: "sub" }, d.subtasks.map(s => taskNode(s, false)), $("div", { class: "row" }, $("span", { class: "check", style: "border-style:dashed" }), sub)));
@@ -447,7 +455,7 @@ function filterForm(f) {
   const lists = state.overview.lists.filter(l => !l.archived).map(l => { const box = $("input", { type: "checkbox", value: l.id, checked: (spec.list_ids || []).includes(l.id) }); return $("label", { class: "chip" }, box, listName(l.id)); });
   const tags = $("input", { type: "text", value: (spec.tags || []).join(" "), placeholder: t("all of these, separated by spaces") });
   const prio = $("select", {}, [["none", "Any"], ["low", "Low"], ["medium", "Medium"], ["high", "High"]].map(([v, n]) => $("option", { value: v, selected: (spec.min_priority || "none") === v }, t(n))));
-  const status = $("select", {}, [["open", "Open"], ["done", "Completed"], ["all", "All"]].map(([v, n]) => $("option", { value: v, selected: (spec.status || "open") === v }, t(n))));
+  const status = $("select", {}, [["open", "Open"], ["done", "Completed"], ["wont", "Won't do"], ["all", "All"]].map(([v, n]) => $("option", { value: v, selected: (spec.status || "open") === v }, t(n))));
   const text = $("input", { type: "text", value: spec.text || "" });
   const preset = (label, set) => $("button", { class: "chip", onclick: () => { name.value = t(label); set(); } }, t(label));
   const read = () => ({
@@ -477,7 +485,7 @@ function filterForm(f) {
 
 function render() {
   if (state.typing) return; // never rebuild the page under the user's cursor
-  const o = state.overview, c = o.counts, secs = sections(), origin = state.search || ["today", "upcoming", "completed", "trash"].includes(state.scope) || state.scope.startsWith("tag:") || state.scope.startsWith("filter:");
+  const o = state.overview, c = o.counts, secs = sections(), origin = state.search || ["today", "upcoming", "completed", "wontdo", "trash"].includes(state.scope) || state.scope.startsWith("tag:") || state.scope.startsWith("filter:");
   const empty = secs.every(s => !s.tasks.length);
   const current = state.scope.startsWith("list:") ? o.lists.find(l => "list:" + l.id === state.scope) : state.scope === "inbox" ? o.lists.find(l => l.id === "inbox") : null;
   const syncText = !o.sync.configured ? "" : o.sync.lastError ? t("Sync failed") : o.sync.pending ? `${o.sync.pending} ${t("waiting")}` : t("Synced");
@@ -493,7 +501,7 @@ function render() {
   root.replaceChildren($("div", { id: "app", class: state.drawer ? "drawer" : "" },
     $("nav", { id: "side" },
       nav("inbox", t("Inbox"), c.inbox), nav("today", t("Today"), c.today, { bad: c.overdue > 0 }), nav("upcoming", t("Upcoming"), c.upcoming),
-      nav("all", t("All")), nav("completed", t("Completed")), c.trash ? nav("trash", t("Trash"), c.trash) : null,
+      nav("all", t("All")), nav("completed", t("Completed")), nav("wontdo", t("Won't do")), c.trash ? nav("trash", t("Trash"), c.trash) : null,
       $("div", { class: "side-title" }, t("Lists")),
       o.lists.filter(l => l.id !== "inbox" && !l.archived).map(l => nav("list:" + l.id, l.name, l.open, { color: l.color })),
       $("button", { class: "nav", style: "color:var(--muted)", onclick: () => { const name = prompt(t("List name")); if (name && name.trim()) call("createList", { name: name.trim() }).then(l => { state.scope = "list:" + l.id; load(); }); } }, "+ " + t("New list")),
