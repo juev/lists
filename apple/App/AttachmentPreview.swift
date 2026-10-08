@@ -75,6 +75,78 @@ enum AttachmentFiles {
     }
 }
 
+/// What the pointer does over a file of a card (R86): a click opens it, a drag takes it out of the app
+/// under its own name, a right click opens its menu. An AppKit view: inside a list row SwiftUI gives
+/// the drag and the context menu to the row, so the file gets neither from `onDrag` or `contextMenu`.
+struct FilePointer: NSViewRepresentable {
+    let url: () -> URL?
+    let choices: () -> [MenuChoice]
+    let click: () -> Void
+
+    func makeNSView(context: Context) -> FilePointerView { FilePointerView() }
+
+    func updateNSView(_ view: FilePointerView, context: Context) {
+        view.url = url
+        view.choices = choices
+        view.click = click
+    }
+}
+
+final class FilePointerView: NSView, NSDraggingSource {
+    var url: () -> URL? = { nil }
+    var choices: () -> [MenuChoice] = { [] }
+    var click: () -> Void = {}
+    private var pressed: NSPoint?
+    private var actions: [() -> Void] = []
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func mouseDown(with event: NSEvent) { pressed = event.locationInWindow }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let start = pressed else { return }
+        let now = event.locationInWindow
+        // A press that moves this far is a drag, not a click.
+        guard hypot(now.x - start.x, now.y - start.y) > 4, let url = url() else { return }
+        pressed = nil
+        let item = NSDraggingItem(pasteboardWriter: url as NSURL)
+        let at = convert(now, from: nil)
+        item.setDraggingFrame(NSRect(x: at.x - 16, y: at.y - 16, width: 32, height: 32), contents: NSWorkspace.shared.icon(forFile: url.path))
+        beginDraggingSession(with: [item], event: event, source: self)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard pressed != nil else { return }
+        pressed = nil
+        click()
+    }
+
+    func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation { .copy }
+
+    override func menu(for event: NSEvent) -> NSMenu? { fileMenu() }
+
+    /// The menu of the file, built from the same choices as its menu button.
+    func fileMenu() -> NSMenu {
+        let menu = NSMenu()
+        let all = choices()
+        actions = all.map(\.action)
+        for (index, choice) in all.enumerated() {
+            let item = NSMenuItem(title: choice.title, action: #selector(run(_:)), keyEquivalent: "")
+            item.target = self
+            item.tag = index
+            menu.addItem(item)
+        }
+        return menu
+    }
+
+    /// A click that did not move, the way the pointer makes it.
+    func clicked() { click() }
+
+    @objc private func run(_ item: NSMenuItem) {
+        if actions.indices.contains(item.tag) { actions[item.tag]() }
+    }
+}
+
 /// The icon of an attachment row: a thumbnail for an image, a symbol for the rest.
 struct AttachmentIcon: View {
     let file: Attachment
