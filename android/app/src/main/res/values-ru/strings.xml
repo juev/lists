@@ -239,6 +239,8 @@
     <string name="leave_at_once">сразу</string>
     <string name="leave_after_minutes">через %1$d мин</string>
     <string name="leave_after_hour">через час</string>
+    <string name="leave_after_seconds">через %1$d с</string>
+    <string name="leave_at_end_of_day">в конце дня</string>
     <string name="wont_do">Не буду делать</string>
     <string name="wont_do_notice">Отмечено «не буду делать»</string>
     <string name="empty_wont_do">Нет задач «не буду делать»</string>

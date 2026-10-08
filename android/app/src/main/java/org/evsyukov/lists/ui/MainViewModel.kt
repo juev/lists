@@ -24,6 +24,7 @@ import kotlinx.coroutines.withContext
 import uniffi.lists_core.Attachment
 import uniffi.lists_core.Counts
 import uniffi.lists_core.AppException
+import uniffi.lists_core.KeepDone
 import uniffi.lists_core.NewTask
 import uniffi.lists_core.SavedFilter
 import uniffi.lists_core.Scope
@@ -53,8 +54,8 @@ data class UiState(
     val editing: Editing? = null,
     val sync: SyncStatus = SyncStatus(false, 0u, null, null),
     val notice: Notice? = null,
-    /** Minutes a completed task stays in its view; shared by all devices (R68). */
-    val keepDone: UInt = 5u,
+    /** How long a completed task stays in its view; shared by all devices (R68). */
+    val keepDone: KeepDone = KeepDone.Seconds(5u),
     val loaded: Boolean = false,
 ) {
     val effectiveScope: Scope get() = search?.takeIf { it.isNotBlank() }?.let { Scope.Search(it) } ?: scope
@@ -136,7 +137,7 @@ class MainViewModel : ViewModel() {
                     sections = group(base, store.tasks(base.effectiveScope)),
                     editing = editingId?.let { id -> load(store, id) },
                     sync = store.syncStatus(),
-                    keepDone = store.keepDoneMinutes(),
+                    keepDone = store.keepDone(),
                     loaded = true,
                 )
             }
@@ -238,7 +239,7 @@ class MainViewModel : ViewModel() {
             // A repeating task moves on instead of closing; reopening would not bring the date back.
             task.repeat != null -> Notice(str(R.string.moved_to_next))
             // The task leaves at once, so the bar is the way back.
-            _state.value.keepDone == 0u -> Notice(str(R.string.done_notice)) { it.reopenTask(task.id) }
+            _state.value.keepDone == KeepDone.Seconds(0u) -> Notice(str(R.string.done_notice)) { it.reopenTask(task.id) }
             // It stays in view, and its mark takes it back (R68).
             else -> null
         }
@@ -250,7 +251,7 @@ class MainViewModel : ViewModel() {
         if (task.done != null) return
         val notice = when {
             task.repeat != null -> Notice(str(R.string.moved_to_next))
-            _state.value.keepDone == 0u -> Notice(str(R.string.wont_do_notice)) { it.reopenTask(task.id) }
+            _state.value.keepDone == KeepDone.Seconds(0u) -> Notice(str(R.string.wont_do_notice)) { it.reopenTask(task.id) }
             else -> null
         }
         act(notice) { it.wontDoTask(task.id) }

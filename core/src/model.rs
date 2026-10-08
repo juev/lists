@@ -2,6 +2,15 @@ use serde::{Deserialize, Serialize};
 
 pub const INBOX_ID: &str = "inbox";
 
+/// How long a completed task stays in its view (R68).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, uniffi::Enum)]
+pub enum KeepDone {
+    /// This many seconds from the completion; none removes the task at once.
+    Seconds { seconds: u32 },
+    /// Until the day of the completion is over on the clock of this device.
+    EndOfDay,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, uniffi::Enum)]
 #[serde(rename_all = "lowercase")]
 pub enum Priority {

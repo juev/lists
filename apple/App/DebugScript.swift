@@ -39,7 +39,7 @@ import SwiftUI
 /// a hidden app shows no popovers; key presses then go to the open popover first, as they do when it has the keyboard),
 /// `wont` (closes the selected task as "won't do"; `task` prints the state of the selected task), `go:completed`, `go:wontdo`, `go:today`, `go:#tag` and `go:List name` (switch to those views),
 /// `completedview:on` and `completedview:off` (flip the setting that offers the Completed view), `scope` (prints the current view),
-/// `keepdone:5` (sets for how many minutes a completed task stays in view) and `keepdone` alone (prints it),
+/// `keepdone:5` (sets for how many seconds a completed task stays in view), `keepdone:day` (until the end of the day) and `keepdone` alone (prints it),
 /// `appearance:dark`, `appearance:light` and `appearance:system` (choose the look the way Settings does),
 /// `appearance` alone prints the choice and the look each window of the app has, the quick-entry panel among them,
 /// `menu:Title` (prints whether the menu bar item with that title is enabled),
@@ -206,8 +206,12 @@ enum DebugScript {
                     }
                 case "completedview": AppModel.shared.showCompletedView = argument != "off"
                 case "keepdone":
-                    if let minutes = UInt32(argument) { AppModel.shared.setKeepDone(minutes) }
-                    print("debug: keep done \(AppModel.shared.keepDone)")
+                    if argument == "day" { AppModel.shared.setKeepDone(.endOfDay) }
+                    else if let seconds = UInt32(argument) { AppModel.shared.setKeepDone(.seconds(seconds: seconds)) }
+                    switch AppModel.shared.keepDone {
+                    case .endOfDay: print("debug: keep done day")
+                    case .seconds(let seconds): print("debug: keep done \(seconds)")
+                    }
                 case "appearance":
                     if step.contains(":") {
                         AppModel.shared.appearance = argument

@@ -140,7 +140,7 @@ const RU = {
   "Filter": "Фильтр", "Date": "Дата", "Any": "Любой", "The coming days": "Ближайшие дни", "No date": "Без даты", "Days": "Дней", "Priority at least": "Приоритет не ниже",
   "Status": "Состояние", "Open": "В работе", "Contains": "Содержит", "Save": "Сохранить", "Cancel": "Отмена", "Delete filter": "Удалить фильтр", "Edit": "Изменить",
   "all of these, separated by spaces": "все сразу, через пробел", "Next 7 days": "Ближайшие 7 дней", "High priority": "Высокий приоритет", "Any list unless some are checked": "Любой список, если ничего не отмечено",
-  "Completed tasks leave the view": "Выполненные пропадают", "at once": "сразу", "after an hour": "через час", "after": "через", "min": "мин",
+  "Completed tasks leave the view": "Выполненные пропадают", "at once": "сразу", "after an hour": "через час", "after": "через", "min": "мин", "s": "с", "at the end of the day": "в конце дня",
   "Appearance": "Оформление", "Same as the system": "Как в системе", "Light": "Светлое", "Dark": "Тёмное"
 };
 const ru = (navigator.language || "en").toLowerCase().startsWith("ru");
@@ -515,7 +515,7 @@ function render() {
         $("select", { id: "look", onchange: e => setLook(e.target.value) },
           [["system", "Same as the system"], ["light", "Light"], ["dark", "Dark"]].map(([v, n]) => $("option", { value: v, selected: look() === v }, t(n))))),
       $("label", { class: "nav", style: "color:var(--muted)" }, t("Completed tasks leave the view"),
-        $("select", { id: "keep", onchange: e => act("setKeepDone", { value: Number(e.target.value) }) },
+        $("select", { id: "keep", onchange: e => act("setKeepDone", { value: e.target.value === "day" ? "day" : Number(e.target.value) }) },
           keepChoices(o.keepDone).map(([v, n]) => $("option", { value: v, selected: o.keepDone === v }, n)))),
       $("button", { class: "nav", style: "color:var(--muted)", onclick: () => importer.click() }, t("Import…")), importer,
       $("button", { class: "nav", style: "color:var(--muted)", onclick: () => api("/api/logout", { method: "POST", headers: { "X-Lists": "1" } }).then(showLogin) }, t("Sign out"))),
@@ -535,8 +535,11 @@ function render() {
 
 // The times R68 offers, and the one in force when another device set something else.
 function keepChoices(current) {
-  const name = m => m === 0 ? t("at once") : m === 60 ? t("after an hour") : t("after") + " " + m + " " + t("min");
-  return [...new Set([0, 1, 5, 15, 60, current])].sort((a, b) => a - b).map(m => [m, name(m)]);
+  // Seconds, or "day"; a whole number of minutes is what an earlier version offered.
+  const name = s => s === "day" ? t("at the end of the day") : s === 0 ? t("at once") : s === 3600 ? t("after an hour")
+    : t("after") + " " + (s % 60 ? s + " " + t("s") : s / 60 + " " + t("min"));
+  const seconds = [...new Set([0, 5, 15, current])].filter(s => s !== "day").sort((a, b) => a - b);
+  return [...seconds, "day"].map(s => [s, name(s)]);
 }
 
 // Clearing cannot be undone, so each choice is confirmed (R46).

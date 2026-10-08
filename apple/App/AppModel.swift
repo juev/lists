@@ -29,7 +29,7 @@ final class AppModel {
     var search = "" { didSet { if search != oldValue { reload() } } }
     var sections: [TaskSection] = []
     /// Minutes a completed task stays in its view; shared by all devices (R68).
-    private(set) var keepDone: UInt32 = 5
+    private(set) var keepDone: KeepDone = .seconds(seconds: 5)
     var children: [String: [TaskItem]] = [:]
     var expanded: Set<String> = []
     /// Expanded tasks whose subtasks are on show; they stay folded until asked for.
@@ -275,8 +275,8 @@ final class AppModel {
         }
     }
 
-    func setKeepDone(_ minutes: UInt32) {
-        perform { try $0.setKeepDoneMinutes(minutes: minutes) }
+    func setKeepDone(_ keep: KeepDone) {
+        perform { try $0.setKeepDone(keep: keep) }
     }
 
     func reload() {
@@ -286,7 +286,7 @@ final class AppModel {
             tags = try store.tags()
             counts = try store.counts()
             syncStatus = try store.syncStatus()
-            keepDone = try store.keepDoneMinutes()
+            keepDone = try store.keepDone()
             // Kept rows leave by the clock, not by a change: look again when the first one is due.
             keptTimer?.invalidate()
             keptTimer = try store.secondsUntilKeptLeaves().map { seconds in
