@@ -111,11 +111,14 @@ impl Inner {
         let utc = match self.now {
             // The clock of the tests has no time zone.
             Some(_) => local.and_utc().timestamp_millis(),
-            // An hour the clocks skip has no moment of its own: take it as if they had not moved.
-            None => chrono::Local
-                .from_local_datetime(&local)
-                .earliest()
-                .map_or_else(|| local.and_utc().timestamp_millis(), |t| t.timestamp_millis()),
+            // An hour the clocks skip has no moment of its own: the day then starts where that hour ends.
+            None => [0, 1]
+                .into_iter()
+                .find_map(|hours| {
+                    let shifted = local + chrono::Duration::hours(hours);
+                    chrono::Local.from_local_datetime(&shifted).earliest()
+                })
+                .map_or_else(|| chrono::Utc::now().timestamp_millis(), |t| t.timestamp_millis()),
         };
         utc.max(0) as u64
     }
