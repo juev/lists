@@ -23,10 +23,20 @@ struct TaskListView: View {
             if let error = model.startupError {
                 ContentUnavailableView(L("The database could not be opened"), systemImage: "exclamationmark.triangle", description: Text(error))
             } else if model.sections.allSatisfy(\.tasks.isEmpty) {
+                // R78: the events of the day are shown on a day without tasks as well.
+                if model.eventsShown {
+                    EventsBlock(events: model.dayEvents)
+                        .padding(.horizontal, 12)
+                        .padding(.top, 10)
+                }
                 emptyState
             } else {
                 ScrollViewReader { proxy in
                     List {
+                        if model.eventsShown {
+                            EventsBlock(events: model.dayEvents)
+                                .listRowSeparator(.hidden)
+                        }
                         ForEach(model.visibleSections) { section in
                             if let title = section.title {
                                 Section(title) { rows(section) }

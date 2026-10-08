@@ -273,6 +273,32 @@ struct SettingsView: View {
                 @Bindable var model = model
                 Toggle(L("Show Completed in the sidebar"), isOn: $model.showCompletedView)
             }
+            Section(L("Calendar events")) {
+                @Bindable var model = model
+                Toggle(L("Show calendar events in Today"), isOn: $model.showCalendarEvents)
+                if model.showCalendarEvents {
+                    if model.calendarAccess == .denied {
+                        Button(L("Lists has no access to the calendars. Open System Settings…")) {
+                            SystemCalendars.shared.openPrivacySettings()
+                        }
+                    }
+                    // R78: the system gives all the calendars at once, the choice among them is made here.
+                    ForEach(model.eventCalendars) { calendar in
+                        Toggle(isOn: Binding(
+                            get: { !model.hiddenCalendars.contains(calendar.id) },
+                            set: { if $0 { model.hiddenCalendars.remove(calendar.id) } else { model.hiddenCalendars.insert(calendar.id) } })) {
+                            HStack(spacing: 6) {
+                                Circle().fill(calendar.color).frame(width: 8, height: 8)
+                                Text(calendar.title)
+                                Text(calendar.source).foregroundStyle(.secondary)
+                            }
+                        }
+                        .toggleStyle(.checkbox)
+                    }
+                }
+                Text(L("Events are read from the calendars of this Mac and are shown above the tasks. They are not synced, and this setting applies to this Mac only."))
+                    .font(AppFont.style(.caption)).foregroundStyle(.secondary)
+            }
             Section(L("Completed tasks")) {
                 // What R68 offers, and the value in force when another device set something else.
                 Picker(L("Leave the view"), selection: Binding(get: { model.keepDone }, set: { model.setKeepDone($0) })) {
