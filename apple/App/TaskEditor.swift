@@ -268,6 +268,19 @@ struct TaskEditor: View {
                     Text(caption(file))
                         .font(AppFont.style(.caption))
                         .foregroundStyle(.tertiary)
+                    if file.localPath != nil {
+                        // What can be done with the file, where a click finds it: a right click here belongs to the row of the task.
+                        Menu {
+                            fileActions(file)
+                        } label: {
+                            Image(systemName: "ellipsis.circle").foregroundStyle(.secondary)
+                        }
+                        .menuStyle(.button)
+                        .buttonStyle(.plain)
+                        .menuIndicator(.hidden)
+                        .fixedSize()
+                        .help(L("File actions"))
+                    }
                     Button {
                         model.perform { try $0.removeAttachment(id: file.id) }
                         load()
@@ -291,19 +304,7 @@ struct TaskEditor: View {
                     return .handled
                 }
                 .contextMenu {
-                    if file.localPath != nil {
-                        Button(L("Quick Look")) { show(file) }
-                        Button(L("Open in Default App")) {
-                            if let url = AttachmentFiles.named(file) { NSWorkspace.shared.open(url) }
-                        }
-                        Divider()
-                        Button(L("Save As…")) {
-                            AttachmentFiles.saveAs(file) { reason in
-                                model.alertIsError = true
-                                model.alert = reason
-                            }
-                        }
-                    }
+                    if file.localPath != nil { fileActions(file) }
                 }
                 // R86: the file leaves the card by a drag as well, under its own name.
                 .onDrag {
@@ -318,6 +319,22 @@ struct TaskEditor: View {
             open(attachments[index])
         }
         #endif
+    }
+
+    /// The actions of a file that is on this device: the same in its menu button and in its context menu (R54, R86).
+    @ViewBuilder
+    private func fileActions(_ file: Attachment) -> some View {
+        Button(L("Quick Look")) { show(file) }
+        Button(L("Open in Default App")) {
+            if let url = AttachmentFiles.named(file) { NSWorkspace.shared.open(url) }
+        }
+        Divider()
+        Button(L("Save As…")) {
+            AttachmentFiles.saveAs(file) { reason in
+                model.alertIsError = true
+                model.alert = reason
+            }
+        }
     }
 
     private func caption(_ file: Attachment) -> String {

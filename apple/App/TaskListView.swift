@@ -212,7 +212,8 @@ struct TaskRow: View {
 
     var body: some View {
         let content = VStack(alignment: .leading, spacing: 6) {
-            header
+            // The menu of the task belongs to its row, not to the open card: there a file has a menu of its own.
+            header.contextMenu { menu }
             if isExpanded {
                 Divider().padding(.leading, 34)
                 TaskEditor(task: task)
@@ -222,7 +223,6 @@ struct TaskRow: View {
         }
         // Rows set the font themselves: a List does not hand its environment font to them.
         .font(AppFont.style(.body))
-        .contextMenu { menu }
         if isExpanded {
             content
                 .onExitCommand { model.closeCard(task.id) }
