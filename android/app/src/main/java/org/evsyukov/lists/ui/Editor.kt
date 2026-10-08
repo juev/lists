@@ -142,6 +142,7 @@ import uniffi.lists_core.ConnectionCheck
 import uniffi.lists_core.DueWindow
 import uniffi.lists_core.FilterSpec
 import uniffi.lists_core.FilterStatus
+import uniffi.lists_core.KeepDone
 import uniffi.lists_core.SavedFilter
 import uniffi.lists_core.Freq
 import uniffi.lists_core.Priority
@@ -1042,9 +1043,9 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
         }
         "keepDone" -> {
             // What R68 offers, and the value in force when another device set something else.
-            val values = (listOf(0u, 1u, 5u, 15u, 60u) + state.keepDone).distinct().sorted()
+            val values = keepDoneChoices(state.keepDone)
             ChoiceDialog(str(R.string.completed_leave), values.map(::keepDoneLabel), values.indexOf(state.keepDone), { choosing = null }) {
-                model.act { store -> store.setKeepDoneMinutes(values[it]) }
+                model.act { store -> store.setKeepDone(values[it]) }
             }
         }
         "newTaskList" -> {
@@ -1060,10 +1061,20 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
     }
 }
 
-private fun keepDoneLabel(minutes: UInt): String = when (minutes) {
-    0u -> str(R.string.leave_at_once)
-    60u -> str(R.string.leave_after_hour)
-    else -> str(R.string.leave_after_minutes, minutes.toInt())
+internal fun keepDoneChoices(current: KeepDone): List<KeepDone> {
+    val seconds = (listOf(0u, 5u, 15u) + listOfNotNull((current as? KeepDone.Seconds)?.seconds)).distinct().sorted()
+    return seconds.map { KeepDone.Seconds(it) } + KeepDone.EndOfDay
+}
+
+/** A whole number of minutes is what an earlier version offered. */
+private fun keepDoneLabel(keep: KeepDone): String = when (keep) {
+    KeepDone.EndOfDay -> str(R.string.leave_at_end_of_day)
+    is KeepDone.Seconds -> when {
+        keep.seconds == 0u -> str(R.string.leave_at_once)
+        keep.seconds == 3600u -> str(R.string.leave_after_hour)
+        keep.seconds % 60u == 0u -> str(R.string.leave_after_minutes, (keep.seconds / 60u).toInt())
+        else -> str(R.string.leave_after_seconds, keep.seconds.toInt())
+    }
 }
 
 @Composable

@@ -212,6 +212,23 @@ struct SettingsView: View {
     private static let times = ["07:00", "08:00", "09:00", "10:00", "12:00", "18:00", "20:00"]
     private static let leads = [0, 5, 15, 30, 60, 120, 1440]
 
+    private static func keepChoices(_ current: KeepDone) -> [KeepDone] {
+        var seconds: Set<UInt32> = [0, 5, 15]
+        if case .seconds(let own) = current { seconds.insert(own) }
+        return seconds.sorted().map { .seconds(seconds: $0) } + [.endOfDay]
+    }
+
+    /// A whole number of minutes is what an earlier version offered.
+    private static func keepTitle(_ keep: KeepDone) -> String {
+        switch keep {
+        case .endOfDay: return L("at the end of the day")
+        case .seconds(0): return L("at once")
+        case .seconds(3600): return L("after an hour")
+        case .seconds(let s) where s % 60 == 0: return L("after %d min", Int(s / 60))
+        case .seconds(let s): return L("after %d s", Int(s))
+        }
+    }
+
     private static func leadTitle(_ minutes: Int) -> String {
         switch minutes {
         case 0: return L("At the due time")
@@ -259,9 +276,8 @@ struct SettingsView: View {
             Section(L("Completed tasks")) {
                 // What R68 offers, and the value in force when another device set something else.
                 Picker(L("Leave the view"), selection: Binding(get: { model.keepDone }, set: { model.setKeepDone($0) })) {
-                    ForEach(Set<UInt32>([0, 1, 5, 15, 60, model.keepDone]).sorted(), id: \.self) { minutes in
-                        Text(minutes == 0 ? L("at once") : minutes == 60 ? L("after an hour") : L("after %d min", Int(minutes)))
-                            .tag(minutes)
+                    ForEach(Self.keepChoices(model.keepDone), id: \.self) { keep in
+                        Text(Self.keepTitle(keep)).tag(keep)
                     }
                 }
             }

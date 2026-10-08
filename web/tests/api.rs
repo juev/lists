@@ -516,7 +516,7 @@ fn icons_are_served_before_login() {
 fn a_completed_task_stays_in_view_until_the_setting_says_otherwise() {
     let web = web(Some("secret"));
     let cookie = login(&web, "secret").unwrap();
-    assert_eq!(get(&web, &cookie, "/api/overview")["keepDone"], 5);
+    assert_eq!(get(&web, &cookie, "/api/overview")["keepDone"], 5, "seconds");
 
     let task = call(
         &web,
@@ -532,7 +532,19 @@ fn a_completed_task_stays_in_view_until_the_setting_says_otherwise() {
     let left = overview["keptFor"]
         .as_u64()
         .expect("the page is told when to look again");
-    assert!((1..=301).contains(&left), "within the five minutes: {left}");
+    assert!((1..=6).contains(&left), "within the five seconds: {left}");
+
+    call(&web, &cookie, json!({ "op": "setKeepDone", "value": "day" }));
+    let overview = get(&web, &cookie, "/api/overview");
+    assert_eq!(overview["keepDone"], "day");
+    assert!(overview["keptFor"].as_u64().is_some_and(|left| left <= 86_400));
+    assert_eq!(
+        get(&web, &cookie, "/api/tasks?scope=inbox").as_array().unwrap().len(),
+        1,
+        "completed today: still in its view"
+    );
+    call(&web, &cookie, json!({ "op": "setKeepDone", "value": 15 }));
+    assert_eq!(get(&web, &cookie, "/api/overview")["keepDone"], 15);
 
     call(&web, &cookie, json!({ "op": "setKeepDone", "value": 0 }));
     let overview = get(&web, &cookie, "/api/overview");

@@ -240,6 +240,8 @@
     <string name="leave_at_once">at once</string>
     <string name="leave_after_minutes">after %1$d min</string>
     <string name="leave_after_hour">after an hour</string>
+    <string name="leave_after_seconds">after %1$d s</string>
+    <string name="leave_at_end_of_day">at the end of the day</string>
     <string name="wont_do">Won\'t do</string>
     <string name="wont_do_notice">Marked \"won\'t do\"</string>
     <string name="empty_wont_do">No tasks marked \"won\'t do\"</string>

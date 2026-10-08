@@ -1035,7 +1035,11 @@ fn due_today(d: &Device, title: &str) -> TaskItem {
 #[test]
 fn r68_a_completed_task_stays_in_place_for_the_set_time() {
     let d = device();
-    assert_eq!(d.keep_done_minutes().unwrap(), 5, "five minutes unless set");
+    assert_eq!(
+        d.keep_done().unwrap(),
+        KeepDone::Seconds { seconds: 5 },
+        "five seconds unless set"
+    );
     due_today(&d, "а");
     let b = due_today(&d, "б");
     due_today(&d, "в");
@@ -1043,7 +1047,7 @@ fn r68_a_completed_task_stays_in_place_for_the_set_time() {
     let tag = || Scope::Tag { name: "дом".into() };
 
     d.complete_task(b.id.clone()).unwrap();
-    d.set_now_for_tests("2026-10-05T10:04");
+    d.set_now_for_tests("2026-10-05T10:00:04");
     for scope in [Scope::Today, Scope::Inbox, Scope::All] {
         let tasks = d.tasks(scope.clone()).unwrap();
         assert_eq!(titles(&tasks), ["а", "б", "в"], "{scope:?}: where it was");
@@ -1054,10 +1058,10 @@ fn r68_a_completed_task_stays_in_place_for_the_set_time() {
     assert_eq!((counts.today, counts.inbox), (2, 2), "not counted as open");
     assert_eq!(d.tags().unwrap().len(), 0, "nor under its tag");
 
-    // Completed at 10:00, kept through 10:05: the minute is all that is stored.
-    d.set_now_for_tests("2026-10-05T10:05");
+    // Completed at 10:00:00, kept through 10:00:05.
+    d.set_now_for_tests("2026-10-05T10:00:05");
     assert_eq!(view(&d, Scope::Today), ["а", "б", "в"]);
-    d.set_now_for_tests("2026-10-05T10:06");
+    d.set_now_for_tests("2026-10-05T10:00:06");
     for scope in [Scope::Today, Scope::Inbox, Scope::All] {
         assert_eq!(view(&d, scope.clone()), ["а", "в"], "{scope:?}: gone after the time");
     }
@@ -1085,11 +1089,11 @@ fn r68_the_time_is_a_setting_and_zero_removes_at_once() {
     let b = due_today(&d, "б");
     d.complete_task(b.id).unwrap();
 
-    d.set_keep_done_minutes(0).unwrap();
-    assert_eq!(d.keep_done_minutes().unwrap(), 0);
+    d.set_keep_done(KeepDone::Seconds { seconds: 0 }).unwrap();
+    assert_eq!(d.keep_done().unwrap(), KeepDone::Seconds { seconds: 0 });
     assert_eq!(view(&d, Scope::Today), ["а"], "at once");
 
-    d.set_keep_done_minutes(60).unwrap();
+    d.set_keep_done(KeepDone::Seconds { seconds: 3600 }).unwrap();
     d.set_now_for_tests("2026-10-05T10:59");
     assert_eq!(
         view(&d, Scope::Today),
@@ -1099,8 +1103,90 @@ fn r68_the_time_is_a_setting_and_zero_removes_at_once() {
     d.set_now_for_tests("2026-10-05T11:01");
     assert_eq!(view(&d, Scope::Today), ["а"]);
 
-    d.set_keep_done_minutes(100_000).unwrap();
-    assert_eq!(d.keep_done_minutes().unwrap(), 1440, "a day at most");
+    d.set_keep_done(KeepDone::Seconds { seconds: 6_000_000 }).unwrap();
+    assert_eq!(
+        d.keep_done().unwrap(),
+        KeepDone::Seconds { seconds: 86_400 },
+        "a day at most"
+    );
+    for choice in [
+        KeepDone::Seconds { seconds: 5 },
+        KeepDone::Seconds { seconds: 15 },
+        KeepDone::EndOfDay,
+    ] {
+        d.set_keep_done(choice).unwrap();
+        assert_eq!(d.keep_done().unwrap(), choice);
+    }
+}
+
+#[test]
+fn r68_until_the_end_of_the_day_keeps_what_was_completed_today_until_midnight() {
+    let d = device();
+    // The stamps of a device never go back, so the earlier day comes first.
+    d.set_now_for_tests("2026-10-04T23:50");
+    d.set_keep_done(KeepDone::EndOfDay).unwrap();
+    add(&d, "а");
+    let yesterday = add(&d, "вчера");
+    let b = add(&d, "б");
+    d.complete_task(yesterday.id).unwrap();
+    assert_eq!(view(&d, Scope::Inbox), ["а", "вчера", "б"], "kept on its own day");
+
+    d.set_now_for_tests("2026-10-05T10:00");
+    assert_eq!(view(&d, Scope::Inbox), ["а", "б"], "that day is over");
+    assert_eq!(d.seconds_until_kept_leaves().unwrap(), None);
+    d.complete_task(b.id).unwrap();
+    assert_eq!(d.seconds_until_kept_leaves().unwrap(), Some(14 * 3600));
+
+    d.set_now_for_tests("2026-10-05T23:59:59");
+    let tasks = d.tasks(Scope::Inbox).unwrap();
+    assert_eq!(titles(&tasks), ["а", "б"]);
+    assert!(tasks[1].done.is_some(), "shown as completed");
+    assert_eq!(d.counts().unwrap().inbox, 1, "not counted as open");
+    assert_eq!(d.seconds_until_kept_leaves().unwrap(), Some(1));
+
+    d.set_now_for_tests("2026-10-06T00:00");
+    assert_eq!(view(&d, Scope::Inbox), ["а"], "gone at midnight");
+    assert_eq!(view(&d, Scope::Completed), ["б", "вчера"]);
+    assert_eq!(d.seconds_until_kept_leaves().unwrap(), None);
+}
+
+#[test]
+fn s32_the_time_is_stored_so_that_a_version_that_knows_only_minutes_can_read_it() {
+    let d = device();
+    let stored = |keep| {
+        d.set_keep_done(keep).unwrap();
+        d.setting_for_tests("keep_done").unwrap()
+    };
+    assert_eq!(stored(KeepDone::Seconds { seconds: 0 }), serde_json::json!(0));
+    assert_eq!(stored(KeepDone::Seconds { seconds: 900 }), serde_json::json!(15));
+    assert_eq!(stored(KeepDone::Seconds { seconds: 5 }), serde_json::json!("5s"));
+    assert_eq!(stored(KeepDone::Seconds { seconds: 15 }), serde_json::json!("15s"));
+    assert_eq!(stored(KeepDone::EndOfDay), serde_json::json!("day"));
+
+    // What such a version wrote, and what a later one may write.
+    let read = |value| {
+        d.set_setting_for_tests("keep_done", value);
+        d.keep_done().unwrap()
+    };
+    assert_eq!(read(serde_json::json!(15)), KeepDone::Seconds { seconds: 900 });
+    assert_eq!(read(serde_json::json!(100_000)), KeepDone::Seconds { seconds: 86_400 });
+    assert_eq!(read(serde_json::json!("90s")), KeepDone::Seconds { seconds: 90 });
+    assert_eq!(
+        read(serde_json::json!("9999999s")),
+        KeepDone::Seconds { seconds: 86_400 }
+    );
+    for unknown in [
+        serde_json::json!("week"),
+        serde_json::json!("s"),
+        serde_json::json!(-1),
+        serde_json::json!(null),
+    ] {
+        assert_eq!(
+            read(unknown.clone()),
+            KeepDone::Seconds { seconds: 5 },
+            "{unknown}: the default"
+        );
+    }
 }
 
 #[test]
@@ -1178,24 +1264,24 @@ fn r68_a_repeating_task_moves_on_and_a_far_clock_does_not_keep_a_task() {
 #[test]
 fn r68_the_time_runs_to_the_second_and_the_store_tells_when_it_ends() {
     let d = device();
-    d.set_keep_done_minutes(1).unwrap();
+    d.set_keep_done(KeepDone::Seconds { seconds: 15 }).unwrap();
     assert_eq!(d.seconds_until_kept_leaves().unwrap(), None, "nothing is kept");
     due_today(&d, "а");
     let b = due_today(&d, "б");
 
     d.set_now_for_tests("2026-10-05T10:00:40");
     d.complete_task(b.id).unwrap();
-    d.set_now_for_tests("2026-10-05T10:01:10");
+    d.set_now_for_tests("2026-10-05T10:00:50");
     assert_eq!(view(&d, Scope::Today), ["а", "б"]);
-    assert_eq!(d.seconds_until_kept_leaves().unwrap(), Some(31));
+    assert_eq!(d.seconds_until_kept_leaves().unwrap(), Some(6));
 
-    d.set_now_for_tests("2026-10-05T10:01:39");
-    assert_eq!(view(&d, Scope::Today), ["а", "б"], "a second before the minute is over");
-    d.set_now_for_tests("2026-10-05T10:01:41");
+    d.set_now_for_tests("2026-10-05T10:00:54");
+    assert_eq!(view(&d, Scope::Today), ["а", "б"], "a second before the time is over");
+    d.set_now_for_tests("2026-10-05T10:00:56");
     assert_eq!(view(&d, Scope::Today), ["а"], "a second after");
     assert_eq!(d.seconds_until_kept_leaves().unwrap(), None);
 
-    d.set_keep_done_minutes(0).unwrap();
+    d.set_keep_done(KeepDone::Seconds { seconds: 0 }).unwrap();
     assert_eq!(
         d.seconds_until_kept_leaves().unwrap(),
         None,
@@ -1212,7 +1298,7 @@ fn r69_a_task_closed_as_wont_do_is_kept_then_logged_and_can_be_reopened() {
 
     let closed = d.wont_do_task(b.id.clone()).unwrap();
     assert!(closed.wont && closed.done.is_some());
-    d.set_now_for_tests("2026-10-05T10:04");
+    d.set_now_for_tests("2026-10-05T10:00:04");
     let inbox = d.tasks(Scope::Inbox).unwrap();
     assert_eq!(titles(&inbox), ["а", "б", "в"], "kept where it was (R68)");
     assert!(inbox[1].wont);

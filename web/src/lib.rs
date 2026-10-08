@@ -17,8 +17,8 @@ use std::time::{Duration, Instant};
 pub use oidc::OidcConfig;
 
 use lists_core::{
-    markdown_layout, AppError, Attachment, FilterSpec, MarkdownAlign, MarkdownKind, NewTask, Priority, Repeat, Scope,
-    SortMode, Store, SyncConfig, TaskItem, TaskList,
+    markdown_layout, AppError, Attachment, FilterSpec, KeepDone, MarkdownAlign, MarkdownKind, NewTask, Priority,
+    Repeat, Scope, SortMode, Store, SyncConfig, TaskItem, TaskList,
 };
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -310,7 +310,11 @@ impl App {
             "filters": s.filters()?.iter().map(|f| json!({ "id": f.id, "name": f.name, "open": f.open_count, "spec": serde_json::to_value(&f.spec).unwrap_or(Value::Null) })).collect::<Vec<_>>(),
             "counts": { "inbox": counts.inbox, "today": counts.today, "overdue": counts.overdue, "upcoming": counts.upcoming, "trash": counts.trash },
             "sync": { "configured": status.configured, "pending": status.pending, "lastOk": status.last_ok, "lastError": status.last_error },
-            "keepDone": s.keep_done_minutes()?,
+            // Seconds, or "day" for the end of the day (R68).
+            "keepDone": match s.keep_done()? {
+                KeepDone::Seconds { seconds } => json!(seconds),
+                KeepDone::EndOfDay => json!("day"),
+            },
             "keptFor": s.seconds_until_kept_leaves()?,
         }))
     }
@@ -400,12 +404,17 @@ impl App {
                     .set_list_show_done(id()?, a.get("value").and_then(Value::as_bool).unwrap_or(false))
                     .map(|_| done)?,
                 "setKeepDone" => {
-                    let minutes = a
-                        .get("value")
-                        .and_then(Value::as_u64)
-                        .ok_or_else(|| AppError::invalid("value"))?;
-                    s.set_keep_done_minutes(u32::try_from(minutes).unwrap_or(u32::MAX))
-                        .map(|_| done)?
+                    let keep = match a.get("value") {
+                        Some(Value::String(day)) if day == "day" => KeepDone::EndOfDay,
+                        Some(value) => KeepDone::Seconds {
+                            seconds: value
+                                .as_u64()
+                                .map(|seconds| u32::try_from(seconds).unwrap_or(u32::MAX))
+                                .ok_or_else(|| AppError::invalid("value"))?,
+                        },
+                        None => return Err(AppError::invalid("value")),
+                    };
+                    s.set_keep_done(keep).map(|_| done)?
                 }
                 "deleteList" => s.delete_list(id()?).map(|_| done)?,
                 "setProject" => s

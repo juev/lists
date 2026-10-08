@@ -756,21 +756,38 @@ fn s32_the_shared_setting_merges_like_any_field_and_reaches_a_new_device() {
     let (a, b) = (device(), device());
     settle(&a, &b, &storage);
 
-    a.set_keep_done_minutes(15).unwrap();
+    let at_once = KeepDone::Seconds { seconds: 0 };
+    a.set_keep_done(KeepDone::Seconds { seconds: 15 }).unwrap();
     b.set_now_for_tests("2026-10-05T10:01");
-    b.set_keep_done_minutes(0).unwrap();
+    b.set_keep_done(at_once).unwrap();
     settle(&a, &b, &storage);
-    assert_eq!((a.keep_done_minutes().unwrap(), b.keep_done_minutes().unwrap()), (0, 0));
+    assert_eq!((a.keep_done().unwrap(), b.keep_done().unwrap()), (at_once, at_once));
 
     let c = device();
     sync(&c, &storage);
-    assert_eq!(c.keep_done_minutes().unwrap(), 0);
+    assert_eq!(c.keep_done().unwrap(), at_once);
 
     // What it means on the device that did not set it: completed there, gone at once here.
     let t = add(&b, "задача");
     b.complete_task(t.id).unwrap();
     settle(&b, &a, &storage);
     assert!(view(&a, Scope::Inbox).is_empty());
+
+    let everywhere = |keep: KeepDone| {
+        settle(&a, &b, &storage);
+        sync(&c, &storage);
+        for device in [&a, &b, &c] {
+            assert_eq!(device.keep_done().unwrap(), keep);
+        }
+    };
+    a.set_now_for_tests("2026-10-05T10:02");
+    a.set_keep_done(KeepDone::EndOfDay).unwrap();
+    everywhere(KeepDone::EndOfDay);
+
+    // A version that knows only minutes chooses fifteen of them.
+    b.set_now_for_tests("2026-10-05T10:03");
+    b.set_setting_for_tests("keep_done", serde_json::json!(15));
+    everywhere(KeepDone::Seconds { seconds: 900 });
 }
 
 #[test]

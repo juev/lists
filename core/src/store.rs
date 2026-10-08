@@ -105,6 +105,21 @@ impl Inner {
         }
     }
 
+    /// A moment of this device's local time on the clock of the stamps.
+    fn ms_of(&self, local: NaiveDateTime) -> u64 {
+        use chrono::TimeZone;
+        let utc = match self.now {
+            // The clock of the tests has no time zone.
+            Some(_) => local.and_utc().timestamp_millis(),
+            // An hour the clocks skip has no moment of its own: take it as if they had not moved.
+            None => chrono::Local
+                .from_local_datetime(&local)
+                .earliest()
+                .map_or_else(|| local.and_utc().timestamp_millis(), |t| t.timestamp_millis()),
+        };
+        utc.max(0) as u64
+    }
+
     pub fn write<T>(&mut self, f: impl FnOnce(&mut Writer) -> Result<T>) -> Result<T> {
         let now = self.now();
         let now_ms = self.now_ms();
@@ -146,11 +161,43 @@ const LIVE: &str = "t.eff_deleted = 0 AND t.log_of IS NULL";
 const COMPLETED: &str = "t.eff_deleted = 0 AND t.done IS NOT NULL AND (t.eff_parent IS NULL OR t.log_of IS NOT NULL)";
 const NOT_ARCHIVED: &str = "t.eff_list NOT IN (SELECT id FROM lists WHERE archived = 1)";
 
-/// Minutes a completed task stays in its view when nothing else is set (R68).
-const KEEP_DONE_DEFAULT: u32 = 5;
-const KEEP_DONE_MAX: u32 = 24 * 60;
+/// How long a completed task stays in its view when nothing else is set (R68).
+const KEEP_DONE_DEFAULT: KeepDone = KeepDone::Seconds { seconds: 5 };
+const KEEP_DONE_MAX_MINUTES: u32 = 24 * 60;
 
-fn keep_done(conn: &Connection) -> Result<u32> {
+/// The setting as S32 stores it: a number is minutes, the form a version before the seconds reads;
+/// a string is seconds with an `s`, or `day`.
+fn keep_done_from_value(value: &Value) -> Option<KeepDone> {
+    if let Some(minutes) = value.as_u64() {
+        let minutes = minutes.min(u64::from(KEEP_DONE_MAX_MINUTES)) as u32;
+        return Some(KeepDone::Seconds { seconds: minutes * 60 });
+    }
+    match value.as_str()? {
+        "day" => Some(KeepDone::EndOfDay),
+        text => {
+            let seconds = text.strip_suffix('s')?.parse::<u32>().ok()?;
+            Some(KeepDone::Seconds {
+                seconds: seconds.min(KEEP_DONE_MAX_MINUTES * 60),
+            })
+        }
+    }
+}
+
+fn keep_done_to_value(keep: KeepDone) -> Value {
+    match keep {
+        KeepDone::EndOfDay => json!("day"),
+        KeepDone::Seconds { seconds } => {
+            let seconds = seconds.min(KEEP_DONE_MAX_MINUTES * 60);
+            if seconds % 60 == 0 {
+                json!(seconds / 60)
+            } else {
+                json!(format!("{seconds}s"))
+            }
+        }
+    }
+}
+
+fn keep_done(conn: &Connection) -> Result<KeepDone> {
     let stored: Option<String> = conn
         .query_row(
             "SELECT value FROM fields WHERE kind = ?1 AND id = ?2 AND field = 'keep_done'",
@@ -159,8 +206,9 @@ fn keep_done(conn: &Connection) -> Result<u32> {
         )
         .optional()?;
     Ok(stored
-        .and_then(|v| v.parse::<u32>().ok())
-        .map_or(KEEP_DONE_DEFAULT, |m| m.min(KEEP_DONE_MAX)))
+        .and_then(|v| serde_json::from_str::<Value>(&v).ok())
+        .and_then(|v| keep_done_from_value(&v))
+        .unwrap_or(KEEP_DONE_DEFAULT))
 }
 
 /// R68 as SQL: a task completed a moment ago still counts as open.
@@ -173,7 +221,7 @@ struct Recent {
 
 impl Recent {
     fn at(inner: &Inner) -> Result<Self> {
-        let Some(window) = kept_window(inner)? else {
+        let Some(Kept { window, .. }) = kept(inner)? else {
             return Ok(Recent {
                 open: "t.done IS NULL".into(),
                 settled: "t.done IS NOT NULL".into(),
@@ -186,30 +234,57 @@ impl Recent {
     }
 }
 
-/// How long the setting keeps a completed task, in the milliseconds of the stamps.
-fn kept_span_ms(conn: &Connection) -> Result<u64> {
-    Ok(u64::from(keep_done(conn)?) * 60_000)
+/// The completed tasks the setting still keeps in their views.
+struct Kept {
+    /// SQL that is true for such a task.
+    window: String,
+    /// When a task whose `done` was stamped at the given millisecond leaves, on the same clock.
+    leaves_ms: Box<dyn Fn(u64) -> u64>,
 }
 
-/// SQL that is true for a task completed within the time the setting gives; none when it gives no time.
+/// None when the setting gives no time.
 ///
 /// The time counts from the stamp of `done`: it has the precision the setting needs and no time zone.
 /// The value of `done` has to agree with it to the minute, so that tasks whose completion was only
 /// recorded now (an import, a calendar read for the first time) are not taken for just completed.
-fn kept_window(inner: &Inner) -> Result<Option<String>> {
-    let span_ms = kept_span_ms(&inner.conn)?;
-    if span_ms == 0 {
-        return Ok(None);
-    }
+fn kept(inner: &Inner) -> Result<Option<Kept>> {
     let (now, now_ms) = (inner.now(), inner.now_ms());
-    let slack = chrono::Duration::milliseconds(span_ms as i64) + chrono::Duration::minutes(1);
-    Ok(Some(format!(
-        "(substr(t.done_stamp, 1, 12) BETWEEN '{:012x}' AND '{:012x}' AND t.done BETWEEN '{}' AND '{}')",
-        now_ms.saturating_sub(span_ms),
-        now_ms + span_ms,
-        (now - slack).format(MOMENT_FMT),
-        (now + slack).format(MOMENT_FMT)
-    )))
+    let window = |stamps: (u64, u64), done: (NaiveDateTime, NaiveDateTime)| {
+        format!(
+            "(substr(t.done_stamp, 1, 12) BETWEEN '{:012x}' AND '{:012x}' AND t.done BETWEEN '{}' AND '{}')",
+            stamps.0,
+            stamps.1,
+            done.0.format(MOMENT_FMT),
+            done.1.format(MOMENT_FMT)
+        )
+    };
+    Ok(match keep_done(&inner.conn)? {
+        KeepDone::Seconds { seconds: 0 } => None,
+        KeepDone::Seconds { seconds } => {
+            let span_ms = u64::from(seconds) * 1000;
+            let slack = chrono::Duration::milliseconds(span_ms as i64) + chrono::Duration::minutes(1);
+            Some(Kept {
+                window: window(
+                    (now_ms.saturating_sub(span_ms), now_ms + span_ms),
+                    (now - slack, now + slack),
+                ),
+                leaves_ms: Box::new(move |done_ms| done_ms + span_ms),
+            })
+        }
+        // The day is the one on the clock of this device: `done` is written in local time.
+        KeepDone::EndOfDay => {
+            let midnight = now.date().and_time(chrono::NaiveTime::MIN);
+            let next = midnight + chrono::Duration::days(1);
+            let (from_ms, until_ms) = (inner.ms_of(midnight), inner.ms_of(next));
+            Some(Kept {
+                window: window(
+                    (from_ms, until_ms.saturating_sub(1)),
+                    (midnight, next - chrono::Duration::minutes(1)),
+                ),
+                leaves_ms: Box::new(move |_| until_ms.saturating_sub(1)),
+            })
+        }
+    })
 }
 
 fn task_from_row(r: &Row) -> rusqlite::Result<TaskItem> {
@@ -388,6 +463,28 @@ impl Store {
         self.write(|w| w.task(id, field, value)).unwrap();
     }
 
+    /// Writes one register of the shared settings the way a version with other rules would.
+    #[doc(hidden)]
+    pub fn set_setting_for_tests(&self, field: &str, value: Value) {
+        self.write(|w| w.set(KIND_SETTINGS, SETTINGS_ID, field, value)).unwrap();
+    }
+
+    /// One register of the shared settings as it is stored.
+    #[doc(hidden)]
+    pub fn setting_for_tests(&self, field: &str) -> Option<Value> {
+        let stored: Option<String> = self
+            .lock()
+            .conn
+            .query_row(
+                "SELECT value FROM fields WHERE kind = ?1 AND id = ?2 AND field = ?3",
+                [KIND_SETTINGS, SETTINGS_ID, field],
+                |r| r.get(0),
+            )
+            .optional()
+            .unwrap();
+        stored.and_then(|v| serde_json::from_str(&v).ok())
+    }
+
     #[doc(hidden)]
     pub fn set_compact_after_for_tests(&self, files: u32) {
         *self.compact_after.lock().unwrap() = files;
@@ -502,8 +599,8 @@ impl Store {
         self.list_field(id, "show_done", json!(show))
     }
 
-    /// Minutes a completed task stays where it was before it leaves the view; 0 removes it at once (R68).
-    pub fn keep_done_minutes(&self) -> Result<u32> {
+    /// How long a completed task stays where it was before it leaves the view (R68).
+    pub fn keep_done(&self) -> Result<KeepDone> {
         keep_done(&self.lock().conn)
     }
 
@@ -511,7 +608,7 @@ impl Store {
     /// A screen that shows tasks looks again after that long (R68).
     pub fn seconds_until_kept_leaves(&self) -> Result<Option<u32>> {
         let inner = self.lock();
-        let Some(window) = kept_window(&inner)? else {
+        let Some(Kept { window, leaves_ms }) = kept(&inner)? else {
             return Ok(None);
         };
         let first: Option<String> = inner.conn.query_row(
@@ -523,20 +620,13 @@ impl Store {
             return Ok(None);
         };
         // One more second: the task is still kept at the last millisecond of its time.
-        let left_ms = (done_ms + kept_span_ms(&inner.conn)?).saturating_sub(inner.now_ms());
+        let left_ms = leaves_ms(done_ms).saturating_sub(inner.now_ms());
         Ok(Some((left_ms / 1000 + 1) as u32))
     }
 
     /// The setting is one for all devices and travels with sync.
-    pub fn set_keep_done_minutes(&self, minutes: u32) -> Result<()> {
-        self.write(|w| {
-            w.set(
-                KIND_SETTINGS,
-                SETTINGS_ID,
-                "keep_done",
-                json!(minutes.min(KEEP_DONE_MAX)),
-            )
-        })
+    pub fn set_keep_done(&self, keep: KeepDone) -> Result<()> {
+        self.write(|w| w.set(KIND_SETTINGS, SETTINGS_ID, "keep_done", keep_done_to_value(keep)))
     }
 
     pub fn set_list_defaults(&self, id: String, priority: Priority, due_today: bool) -> Result<()> {
