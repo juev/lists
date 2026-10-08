@@ -8,7 +8,7 @@ import UserNotifications
 /// outside process send them without the Accessibility permission. Debug
 /// builds only. `LISTS_DEBUG_SCRIPT` holds steps separated by `;`:
 /// `type:text`, `key:return`, `key:n+cmd`, `sleep:0.5`, `click:x,y`, `quick`, `settings`,
-/// `state` (prints who has the keyboard and the text being typed into), `copyfiles:path,path` and `copyimage`
+/// `state` (prints who has the keyboard, the text being typed into and the size of its field), `copyfiles:path,path` and `copyimage`
 /// (fill the pasteboard), `draft` (prints the files and the dates of the open new-task card),
 /// `code:17` (presses the key with that key code, whatever the layout, in the date editor: the open popover, or the one `dateeditor` made;
 /// for a popover the press carries the window the popover hangs on, as a press on the keyboard does: `scripts/postkey.swift` sends
@@ -311,7 +311,7 @@ enum DebugScript {
                     }
                 case "state":
                     let window = target
-                    print("debug: key window \(window.map { type(of: $0) }.map(String.init(describing:)) ?? "none"), first responder \(window?.firstResponder.map { String(describing: type(of: $0)) } ?? "none")\((window?.firstResponder as? NSText).map { " with \"\($0.string)\"" } ?? "")")
+                    print("debug: key window \(window.map { type(of: $0) }.map(String.init(describing:)) ?? "none"), first responder \(window?.firstResponder.map { String(describing: type(of: $0)) } ?? "none")\((window?.firstResponder as? NSText).map { " with \"\($0.string)\"" } ?? "")\(((window?.firstResponder as? NSTextView)?.delegate as? NSTextField).map { ", field \(Int($0.frame.width))x\(Int($0.frame.height))" } ?? "")")
                 case "rowshot":
                     // The row of the selected task drawn into a file, eight pixels to a point.
                     if let task = AppModel.shared.selectedTask {
