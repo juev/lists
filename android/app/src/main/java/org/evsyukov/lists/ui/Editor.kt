@@ -83,10 +83,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -123,12 +125,15 @@ import org.evsyukov.lists.hasTime
 import org.evsyukov.lists.isOverdue
 import org.evsyukov.lists.listColors
 import org.evsyukov.lists.momentString
+import org.evsyukov.lists.pickerDay
+import org.evsyukov.lists.pickerMillis
 import org.evsyukov.lists.parseMoment
 import org.evsyukov.lists.plusDays
 import org.evsyukov.lists.presetName
 import org.evsyukov.lists.priorities
 import org.evsyukov.lists.repeatPresets
 import org.evsyukov.lists.summary
+import org.evsyukov.lists.timeOf
 import org.evsyukov.lists.title
 import org.evsyukov.lists.today
 import org.evsyukov.lists.weekdayNames
@@ -148,9 +153,7 @@ import uniffi.lists_core.TaskItem
 import uniffi.lists_core.TaskList
 import uniffi.lists_core.checkSyncConnection
 import java.io.File
-import java.time.Instant
 import java.time.LocalDate
-import java.time.ZoneOffset
 
 /** Copies what a content URI points at into a cache file named like the original. */
 fun copyToCache(context: Context, uri: Uri): File? = runCatching {
@@ -538,16 +541,32 @@ fun MomentDialog(title: String, value: String?, timeRequired: Boolean = false, o
             dismissButton = { TextButton(onClick = onDismiss) { Text(str(R.string.cancel)) } },
         )
         "date" -> {
-            val picker = rememberDatePickerState(date.atStartOfDay().toInstant(ZoneOffset.UTC).toEpochMilli())
+            val picker = rememberDatePickerState(pickerMillis(date))
             DatePickerDialog(
                 onDismissRequest = onDismiss,
                 confirmButton = {
-                    TextButton(onClick = {
-                        picker.selectedDateMillis?.let { pickDay(Instant.ofEpochMilli(it).atZone(ZoneOffset.UTC).toLocalDate()) }
-                    }) { Text(str(R.string.done)) }
+                    TextButton(onClick = { picker.selectedDateMillis?.let { pickDay(pickerDay(it)) } }) { Text(str(R.string.done)) }
                 },
                 dismissButton = { TextButton(onClick = onDismiss) { Text(str(R.string.cancel)) } },
-            ) { DatePicker(picker) }
+            ) {
+                // The dialog lays its content out in a box: the column keeps the row under the calendar.
+                Column {
+                    // In a low window the calendar is taller than its share and would draw over the row.
+                    DatePicker(picker, Modifier.weight(1f, fill = false).clipToBounds())
+                    // R74: the time is one tap away from the day, without a second visit to the dialog.
+                    if (!timeRequired) {
+                        Row(
+                            Modifier.fillMaxWidth()
+                                .clickable(role = Role.Button) { picker.selectedDateMillis?.let { date = pickerDay(it); step = "time" } }
+                                .padding(horizontal = 24.dp, vertical = 12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                        ) {
+                            Text(str(R.string.time))
+                            Text(timeOf(value) ?: str(R.string.time_off), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            }
         }
         "time" -> AlertDialog(
             onDismissRequest = onDismiss,
