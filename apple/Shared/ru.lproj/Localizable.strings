@@ -119,6 +119,8 @@
 "Keep completed tasks in this list" = "Оставлять выполненные задачи в списке";
 "New tasks" = "Новые задачи";
 "Cancel" = "Отмена";
+"Save" = "Сохранить";
+"From the clipboard" = "Из буфера обмена";
 "Create" = "Создать";
 "Done" = "Готово";
 "Notes" = "Заметка";

@@ -185,17 +185,19 @@ struct Chip: View {
     var symbol: String?
     var text: String
     var tint: Color = .secondary
+    /// A field that is not set: the icon alone, larger and without the capsule (R82).
+    var plain = false
 
     var body: some View {
         HStack(spacing: 3) {
             if let symbol { Image(systemName: symbol) }
             if !text.isEmpty { Text(text) }
         }
-        .font(AppFont.style(.caption))
+        .font(AppFont.style(plain ? .body : .caption))
         .foregroundStyle(tint)
         .padding(.horizontal, 6)
         .padding(.vertical, 2)
-        .background(tint.opacity(0.12), in: Capsule())
+        .background(tint.opacity(plain ? 0 : 0.12), in: Capsule())
         .lineLimit(1)
     }
 }
