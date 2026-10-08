@@ -219,6 +219,8 @@
     <string name="due_at_time_setting">Task due at a time</string>
     <string name="due_on_day_setting">Task due on a day</string>
     <string name="summary_setting">Summary of the day</string>
+    <string name="notification_sound">Sound</string>
+    <string name="choose">Choose</string>
     <string name="at_due_time">At the due time</string>
     <string name="min_before">%1$s min before</string>
     <string name="day_before">A day before</string>
