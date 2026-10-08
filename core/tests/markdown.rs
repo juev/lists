@@ -284,6 +284,31 @@ fn r48_links_of_every_form() {
 }
 
 #[test]
+fn r48_the_scheme_of_a_link_is_read_without_regard_to_case() {
+    // The scenario of the specification: a keyboard starts a sentence with a capital.
+    let text = "Https://example.org/A и [x](HTTPS://EXAMPLE.ORG)";
+    assert_eq!(of(text, link("https://example.org/A")), ["Https://example.org/A"]);
+    assert_eq!(of(text, link("https://EXAMPLE.ORG")), ["x"]);
+    assert_eq!(
+        of("x\nHTTP://b.example/Y.", link("http://b.example/Y")),
+        ["HTTP://b.example/Y"]
+    );
+    assert_eq!(
+        of("<Https://a.example/x>", link("https://a.example/x")),
+        ["Https://a.example/x"]
+    );
+    assert_eq!(of("[x](MailTo:me@example.org)", link("mailto:me@example.org")), ["x"]);
+    // Letters of more than one byte before the address do not move its range.
+    assert_eq!(
+        of("Ёж Https://a.example", link("https://a.example")),
+        ["Https://a.example"]
+    );
+    // A scheme alone and a scheme inside a word are still text.
+    assert_eq!(spans("Https://").len(), 0);
+    assert_eq!(spans("xHttps://a.example").len(), 0);
+}
+
+#[test]
 fn r48_an_image_is_a_link_with_its_text() {
     let text = "![схема](https://example.org/a.png)";
     assert_eq!(of(text, link("https://example.org/a.png")), ["схема"]);
@@ -303,7 +328,7 @@ fn r53_only_web_and_mail_addresses_are_links() {
     ] {
         assert!(!spans(text).iter().any(|(k, _)| matches!(k, Link { .. })), "{text}");
     }
-    assert_eq!(of("[x](HTTPS://EXAMPLE.ORG)", link("HTTPS://EXAMPLE.ORG")), ["x"]);
+    assert_eq!(of("[x](HTTPS://EXAMPLE.ORG)", link("https://EXAMPLE.ORG")), ["x"]);
 }
 
 #[test]
