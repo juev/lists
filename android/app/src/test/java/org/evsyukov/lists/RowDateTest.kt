@@ -17,7 +17,8 @@ class RowDateTest {
     @Test
     fun r72_a_day_the_heading_names_is_not_written_and_the_time_stays() {
         assertNull(rowDate(today, open = true, dayInHeading = true, label = label))
-        assertEquals("23:59" to false, rowDate("${today}T23:59", open = true, dayInHeading = true, label = label))
+        // A day ahead, as under a day of Upcoming: a time of today would be late for a part of the day.
+        assertEquals("09:00" to false, rowDate("${plusDays(1)}T09:00", open = true, dayInHeading = true, label = label))
     }
 
     @Test
