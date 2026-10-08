@@ -81,6 +81,10 @@ final class AppModel {
     var notifyAllDay: String = UserDefaults.standard.string(forKey: "notifyAllDay") ?? "09:00" { didSet { saveNotify() } }
     var notifySummary: String = UserDefaults.standard.string(forKey: "notifySummary") ?? "" { didSet { saveNotify() } }
     var notifySound: Bool = UserDefaults.standard.object(forKey: "notifySound") as? Bool ?? true { didSet { saveNotify() } }
+    /// A system alert sound by its name, empty for the standard sound of notifications (R36).
+    var notifySoundName: String = UserDefaults.standard.string(forKey: "notifySoundName") ?? "" { didSet { saveNotify() } }
+    /// What a notification plays: nil for silence.
+    var notifySoundChoice: String? { notifySound ? notifySoundName : nil }
 
     var notifySettings: NotifySettings {
         NotifySettings(
@@ -97,7 +101,8 @@ final class AppModel {
         defaults.set(notifyAllDay, forKey: "notifyAllDay")
         defaults.set(notifySummary, forKey: "notifySummary")
         defaults.set(notifySound, forKey: "notifySound")
-        Reminders.shared.refresh(store, settings: notifySettings, sound: notifySound)
+        defaults.set(notifySoundName, forKey: "notifySoundName")
+        Reminders.shared.refresh(store, settings: notifySettings, sound: notifySoundChoice)
     }
 
     /// Before several lead times were allowed there was one, kept under `notifyLead`.
@@ -306,7 +311,7 @@ final class AppModel {
                 loaded[id] = try store.subtasks(parentId: id)
             }
             children = loaded
-            Reminders.shared.refresh(store, settings: notifySettings, sound: notifySound)
+            Reminders.shared.refresh(store, settings: notifySettings, sound: notifySoundChoice)
         } catch {
             alert = describe(error)
         }

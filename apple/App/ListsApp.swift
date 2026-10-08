@@ -308,6 +308,16 @@ struct SettingsView: View {
                     ForEach(Self.times, id: \.self) { Text(L("At %@", $0)).tag($0) }
                 }
                 Toggle(L("Play a sound"), isOn: $model.notifySound)
+                if model.notifySound {
+                    // R36: the chosen sound is heard at once.
+                    Picker(L("Sound"), selection: Binding(
+                        get: { NotifySound.names.contains(model.notifySoundName) ? model.notifySoundName : "" },
+                        set: { model.notifySoundName = $0; NotifySound.play($0) })) {
+                        Text(L("Standard")).tag("")
+                        Divider()
+                        ForEach(NotifySound.names, id: \.self) { Text($0).tag($0) }
+                    }
+                }
                 Text(L("A reminder set on a task is always shown. These settings apply to this Mac only."))
                     .font(AppFont.style(.caption)).foregroundStyle(.secondary)
             }

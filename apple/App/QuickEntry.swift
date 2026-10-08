@@ -133,6 +133,46 @@ final class QuickEntryPanel: NSPanel {
     }
 }
 
+/// The sounds a notification can play besides the standard one (R36): the alert sounds of the system.
+enum NotifySound {
+    private static let folder = URL(fileURLWithPath: "/System/Library/Sounds", isDirectory: true)
+
+    /// Without the extension, as System Settings shows them.
+    static let names: [String] = ((try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? [])
+        .filter { $0.pathExtension == "aiff" }
+        .map { $0.deletingPathExtension().lastPathComponent }
+        .sorted()
+
+    static func play(_ name: String) {
+        guard names.contains(name) else { return }
+        NSSound(named: name)?.play()
+    }
+
+    /// Where the copy of a sound is kept for the notification centre; nil in a build without a group.
+    static func copy(of name: String) -> URL? {
+        guard let group = Storage.groupIdentifier,
+              let container = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: group)
+        else { return nil }
+        return container.appendingPathComponent("Library/Sounds/\(name).aiff")
+    }
+
+    /// The empty name and a name the system no longer has give the standard sound.
+    ///
+    /// A notification finds a sound by its file name in `Library/Sounds` of the
+    /// app's containers and in its bundle; the system folder is not among the
+    /// places the documentation names. So the sound is copied into the group
+    /// container before it is asked for by name.
+    static func notification(_ name: String) -> UNNotificationSound {
+        guard names.contains(name) else { return .default }
+        let fm = FileManager.default
+        if let copy = copy(of: name), !fm.fileExists(atPath: copy.path) {
+            try? fm.createDirectory(at: copy.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try? fm.copyItem(at: folder.appendingPathComponent("\(name).aiff"), to: copy)
+        }
+        return UNNotificationSound(named: UNNotificationSoundName("\(name).aiff"))
+    }
+}
+
 /// Turns the core's notification plan into local notifications.
 @MainActor
 final class Reminders {
@@ -140,9 +180,10 @@ final class Reminders {
     private var scheduled: [String] = []
 
     /// Takes the store as an argument: it is called while `AppModel.shared` is still being built.
-    func refresh(_ store: Store?, settings: NotifySettings, sound: Bool) {
+    /// `sound` is the name of a system sound, empty for the standard one and nil for silence.
+    func refresh(_ store: Store?, settings: NotifySettings, sound: String?) {
         guard let store, let plan = try? store.plannedNotifications(settings: settings) else { return }
-        let signature = plan.map { "\($0.key)|\($0.at)|\($0.title)|\($0.count)|\(sound)" }
+        let signature = plan.map { "\($0.key)|\($0.at)|\($0.title)|\($0.count)|\(sound ?? "-")" }
         guard signature != scheduled else { return }
         scheduled = signature
 
@@ -159,7 +200,7 @@ final class Reminders {
                 content.title = item.title
                 if let due = item.due { content.body = L("Due: %@", Moment.label(due).lowercased()) }
             }
-            if sound { content.sound = .default }
+            if let sound { content.sound = NotifySound.notification(sound) }
             if let task = item.taskId { content.userInfo = ["task": task] }
             let parts = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: date)
             return UNNotificationRequest(identifier: item.key, content: content, trigger: UNCalendarNotificationTrigger(dateMatching: parts, repeats: false))
