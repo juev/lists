@@ -431,6 +431,8 @@ private fun CommittedField(
         if (trimmed != saved) commit(trimmed)
     }
     DisposableEffect(key) { onDispose { if (focused) save() } }
+    // R83: an app left in the background may be killed there, and the field never loses the keyboard then.
+    LifecycleEventEffect(Lifecycle.Event.ON_STOP) { if (focused) save() }
     TextField(
         value = text,
         onValueChange = {
