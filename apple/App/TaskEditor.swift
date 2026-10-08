@@ -131,7 +131,7 @@ struct TaskEditor: View {
 
     /// The chips in the order they are drawn, which is the order Tab walks them in (R62).
     private var stops: [CardChip] {
-        [.start, .due] + (showsRepeat ? [.repeat] : []) + (showsRemind ? [.remind] : []) + [.priority] + task.tags.map(CardChip.tag) + [.add] + (task.done == nil ? [.wont] : [])
+        [.start, .due] + (showsRepeat ? [.repeat] : []) + (showsRemind ? [.remind] : []) + [.priority] + task.tags.map(CardChip.tag) + [.add]
     }
 
     private var showsRepeat: Bool { task.repeat != nil || popover == .repeat }
@@ -241,17 +241,6 @@ struct TaskEditor: View {
             }
             .menuAnchor(menus, .add)
             .chipStop(.add, focus: $chip, keys: keys) { menus.show(addChoices, under: .add) }
-
-            if task.done == nil {
-                Button {
-                    model.wontDo(task)
-                } label: {
-                    Chip(symbol: "xmark.square", text: L("Won't do"))
-                }
-                .buttonStyle(.plain)
-                .help(L("Close the task without doing it"))
-                .chipStop(.wont, focus: $chip, keys: keys) { model.wontDo(task) }
-            }
         }
     }
 
