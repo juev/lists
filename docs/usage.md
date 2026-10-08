@@ -16,10 +16,11 @@ The fixed views next to the lists:
 | Today | tasks due today or earlier, and tasks without a due date whose start date has come |
 | Upcoming | tasks with a future date, by day |
 | All | every open task |
-| Completed | finished tasks and the record of each finished repeat; Clear… at the bottom removes those older than a month, older than a year, or all of them |
+| Completed | finished tasks and the record of each finished repeat, tasks marked "won't do" among them; Clear… at the bottom removes those older than a month, older than a year, or all of them |
+| Won't do | the part of Completed that was closed as "won't do"; it has no Clear… of its own |
 | Trash | deleted tasks; they can be restored until the trash is emptied by hand |
 
-On macOS, Settings → Sidebar → "Show Completed in the sidebar" removes the Completed view from the sidebar and from the Go menu (⌘5). It is a setting of that Mac and does not sync. It is not the per-list switch "Keep completed tasks in this list" (context menu of a list → Configure…), which decides whether finished tasks stay at the end of that one list.
+On macOS, Settings → Sidebar → "Show Completed in the sidebar" removes the Completed and Won't do views from the sidebar and from the Go menu (⌘5, ⌘6). It is a setting of that Mac and does not sync. It is not the per-list switch "Keep completed tasks in this list" (context menu of a list → Configure…), which decides whether finished tasks stay at the end of that one list.
 
 Search looks through titles and notes in all lists.
 
@@ -54,6 +55,8 @@ Notes are read as Markdown and styled while you type; there is no separate previ
 In the web interface a note is shown formatted until you click it; the click opens the plain text for editing, and leaving the field saves it. Checkboxes are not toggled there. Quick entry on Android and the share sheets keep a plain text field.
 
 A completed task does not leave its view at once: it stays where it was, struck through and dimmed, for the time chosen in Settings → "Completed tasks leave the view" (at once, after 1, 5, 15 minutes or an hour; after 5 minutes unless changed; in the web interface the choice is at the bottom of the sidebar), and a tap on its mark during that time reopens it. The setting is shared by all devices and syncs; over CalDAV it does not travel, so there it is set on each device.
+
+A task that will not be done, but should not be deleted either, is closed as "won't do": the item Won't do in the context menu of a task or the chip in its card on macOS, in the long-press menu or the ⋮ menu of the card on Android, and the button in the card in the web interface. The mark then shows a cross in place of the tick. From there the task behaves like a completed one: it stays in view for the same time, a tap on its mark reopens it, its open subtasks get the same mark, and a repeating task moves to its next occurrence, leaving a "won't do" record. Such tasks are listed in Completed and in the Won't do view. They are left out of both numbers of the "done/total" counter of a project and of a task with subtasks. Over CalDAV such a task has `STATUS:CANCELLED`, and a task cancelled in another CalDAV app arrives as "won't do". A device with an earlier version of the app shows such a task as completed.
 
 Deleting can be undone: ⌘Z on macOS, the Undo bar on Android. Completing is undone with ⌘Z on macOS or by tapping the mark again; the Undo bar after completing appears only when completed tasks leave at once. Only emptying the trash and clearing Completed ask for confirmation: both remove tasks for good. Clearing takes finished tasks with their subtasks and the records of finished repeats; open tasks and the trash stay as they are. Over CalDAV the cleared tasks end up in the trash of the other devices instead of disappearing there.
 
@@ -104,7 +107,7 @@ Where the entry field is:
 
 ## Saved filters
 
-A filter is made with the "+" next to Filters in the sidebar on macOS (or File → New Filter…), with New filter in the drawer on Android, and from the sidebar in the web interface. It is a named view with conditions that must all hold: date (any, overdue, today, the next N days including overdue, no date), lists, tags (all of the chosen ones), a minimum priority, state (open, completed, all) and words in the title or notes. Four come ready: Next 7 days, Overdue, High priority, No date.
+A filter is made with the "+" next to Filters in the sidebar on macOS (or File → New Filter…), with New filter in the drawer on Android, and from the sidebar in the web interface. It is a named view with conditions that must all hold: date (any, overdue, today, the next N days including overdue, no date), lists, tags (all of the chosen ones), a minimum priority, state (open, completed, won't do, all) and words in the title or notes. Four come ready: Next 7 days, Overdue, High priority, No date.
 
 Filters sync like the rest of the data. Over CalDAV they are kept in a property of the Inbox calendar and are lost on servers that do not store such properties.
 
@@ -182,7 +185,7 @@ On Android 13 and newer a notification arrives at its minute only when "Alarms &
 | Space or ⌘Enter | complete |
 | ⌘T | due today |
 | ⌘] and ⌘[ | make a subtask, move a level up |
-| ⌘1 … ⌘5 | views |
+| ⌘1 … ⌘6 | views |
 | ⌘F | search |
 | ⌘Z | undo |
 | ⌃⌥Space | quick entry from any app |
