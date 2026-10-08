@@ -31,6 +31,7 @@ import SwiftUI
 /// `rowshot:/path/to.png` (draws the row of the selected task into a file, eight pixels to a point: a hidden window draws no rows;
 /// the launch arguments `-textScale 1.5 -fontDesign serif` choose the text for one run and save nothing),
 /// `caret:5` (puts the cursor of that note at the offset), `box:0` (clicks the checkbox with that number in it),
+/// `noteclick:5` (clicks the character of that note at the offset and prints the address a link there hands to the system; the browser is not opened),
 /// `chips` (prints which chip of the card has the keyboard and which of its popovers is open; `key:backtab+shift` is ⇧Tab),
 /// `ghost` (puts the windows of a hidden app on screen transparent, deaf to the mouse and without the keyboard, popovers that open later among them:
 /// a hidden app shows no popovers; key presses then go to the open popover first, as they do when it has the keyboard),
@@ -295,6 +296,7 @@ enum DebugScript {
                 case "notes": print("debug: notes \(notesView(in: target?.contentView)?.debugState ?? "none")")
                 case "caret": notesView(in: target?.contentView)?.setSelectedRange(NSRange(location: Int(argument) ?? 0, length: 0))
                 case "box": print("debug: box \(argument) clicked \(notesView(in: target?.contentView)?.debugClickBox(Int(argument) ?? 0) ?? false)")
+                case "noteclick": print("debug: noteclick \(argument) \(notesView(in: target?.contentView)?.debugClickText(Int(argument) ?? 0) ?? "no note")")
                 default: print("debug: unknown step \(step)")
                 }
                 try? await _Concurrency.Task.sleep(for: .milliseconds(60))

@@ -13,6 +13,8 @@ class MarkdownTextView: NSTextView, NSLayoutManagerDelegate {
     }
     /// A checkbox was clicked and the text has changed.
     var onToggle: () -> Void = {}
+    /// Hands the address of a clicked link to the system (R71).
+    var openLink: (URL) -> Void = { NSWorkspace.shared.open($0) }
 
     private var concealed = IndexSet()
     private var bullets = IndexSet()
@@ -162,7 +164,7 @@ class MarkdownTextView: NSTextView, NSLayoutManagerDelegate {
                 indent(range, first: 12, rest: 12)
             case .link(let url):
                 links.append((range, url))
-                storage.addAttributes([.foregroundColor: NSColor.linkColor, .underlineStyle: NSUnderlineStyle.single.rawValue], range: range)
+                storage.addAttributes([.foregroundColor: NSColor.linkColor, .underlineStyle: NSUnderlineStyle.single.rawValue, .cursor: NSCursor.pointingHand], range: range)
             case .listMarker(let ordered):
                 if shown, !ordered { storage.addAttribute(.foregroundColor, value: dim, range: range) }
                 if !ordered, !shown, range.length == 1 { bullets.insert(range.location) }
@@ -382,25 +384,51 @@ class MarkdownTextView: NSTextView, NSLayoutManagerDelegate {
 
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
-        if !click(at: point, command: event.modifierFlags.contains(.command)) { super.mouseDown(with: event) }
+        if box(at: point) == nil, link(at: point) != nil {
+            // Shift extends the selection and Control asks for the menu, on a link as anywhere else.
+            let plain = event.modifierFlags.intersection([.shift, .control, .option]).isEmpty
+            if !plain || dragged(from: event) { super.mouseDown(with: event); return }
+            // The second click of a double click would open the address again.
+            if event.clickCount > 1 { return }
+        }
+        if !click(at: point) { super.mouseDown(with: event) }
     }
 
-    /// Toggles the checkbox under the point, or with ⌘ opens the link there.
+    /// Toggles the checkbox under the point or opens the link there (R51, R71).
     @discardableResult
-    func click(at point: NSPoint, command: Bool) -> Bool {
-        if let box = boxes.first(where: { boxRect($0.range)?.insetBy(dx: -2, dy: -2).contains(point) == true }) {
+    func click(at point: NSPoint) -> Bool {
+        if let box = box(at: point) {
             toggle(box.range, checked: box.checked)
             return true
         }
-        guard command, let layout = layoutManager, let container = textContainer else { return false }
+        guard let url = link(at: point) else { return false }
+        openLink(url)
+        return true
+    }
+
+    private func box(at point: NSPoint) -> (range: NSRange, checked: Bool)? {
+        boxes.first { boxRect($0.range)?.insetBy(dx: -2, dy: -2).contains(point) == true }
+    }
+
+    /// The address of the link whose text is under the point.
+    private func link(at point: NSPoint) -> URL? {
+        guard let layout = layoutManager, let container = textContainer else { return nil }
         let inContainer = NSPoint(x: point.x - textContainerOrigin.x, y: point.y - textContainerOrigin.y)
         var fraction: CGFloat = 0
         let glyph = layout.glyphIndex(for: inContainer, in: container, fractionOfDistanceThroughGlyph: &fraction)
-        guard layout.boundingRect(forGlyphRange: NSRange(location: glyph, length: 1), in: container).contains(inContainer) else { return false }
+        guard layout.boundingRect(forGlyphRange: NSRange(location: glyph, length: 1), in: container).contains(inContainer) else { return nil }
         let character = layout.characterIndexForGlyph(at: glyph)
-        guard let link = links.first(where: { NSLocationInRange(character, $0.range) }), let url = URL(string: link.url) else { return false }
-        NSWorkspace.shared.open(url)
-        return true
+        return links.first { NSLocationInRange(character, $0.range) }.flatMap { URL(string: $0.url) }
+    }
+
+    /// Whether the mouse leaves the place of the press before the button is released:
+    /// a drag that starts on a link selects text, a click opens the link.
+    private func dragged(from down: NSEvent) -> Bool {
+        while let next = window?.nextEvent(matching: [.leftMouseUp, .leftMouseDragged]) {
+            if next.type == .leftMouseUp { return false }
+            if hypot(next.locationInWindow.x - down.locationInWindow.x, next.locationInWindow.y - down.locationInWindow.y) > 3 { return true }
+        }
+        return false
     }
 
     private func toggle(_ range: NSRange, checked: Bool) {
@@ -456,7 +484,20 @@ class MarkdownTextView: NSTextView, NSLayoutManagerDelegate {
     /// Clicks the checkbox with this number through the same path as the mouse.
     func debugClickBox(_ index: Int) -> Bool {
         guard boxes.indices.contains(index), let rect = boxRect(boxes[index].range) else { return false }
-        return click(at: NSPoint(x: rect.midX, y: rect.midY), command: false)
+        return click(at: NSPoint(x: rect.midX, y: rect.midY))
+    }
+
+    /// Clicks the character at this offset through the same path as the mouse and
+    /// returns the address handed to the system, which does not get it.
+    func debugClickText(_ offset: Int) -> String {
+        guard let layout = layoutManager, let container = textContainer, offset < (string as NSString).length else { return "no such character" }
+        let rect = layout.boundingRect(forGlyphRange: layout.glyphRange(forCharacterRange: NSRange(location: offset, length: 1), actualCharacterRange: nil), in: container)
+        var opened: [String] = []
+        let system = openLink
+        openLink = { opened.append($0.absoluteString) }
+        defer { openLink = system }
+        let handled = click(at: NSPoint(x: rect.midX + textContainerOrigin.x, y: rect.midY + textContainerOrigin.y))
+        return "handled \(handled), opened \(opened), cursor \(selectedRange().location)"
     }
     #endif
 }
