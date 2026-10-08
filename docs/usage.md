@@ -35,6 +35,8 @@ Only the title is required. A task can also have notes, a start date, a due date
 
 On macOS a task opens in place in the list as an outlined card; on Android it opens as a bottom sheet over the list. The card always shows the start date and the due date. Other empty fields take no room: they are added from the "+" button.
 
+On Android the title, the note, a subtask and the name of a list or a filter start with a capital letter when the keyboard has auto-capitalisation turned on; a tag, the search and the tag and text fields of a filter are typed as they are. Suggestions and autocorrection follow the settings of the keyboard.
+
 On macOS Return on the selected row, or a double click, opens its card with the cursor at the end of the title, and Esc closes the card and hands the keyboard back to the list with the same row selected. Esc closes the card of the selected row as well when the list has the keyboard, after a click on the chevron or inside the card. The chevron at the end of a row only opens and closes the card. One card is open at a time. Opening another task, or moving to another row with a click or the arrow keys, closes the open card and keeps what was typed in it. A task stays open while one of its subtasks is selected or open. The card of a new task closes an open task, and opening a task closes the card of a new one the way Esc does.
 
 On macOS ⌘N, or the "+" button in the toolbar, opens the card of a new task right in the list with every field at hand: title, notes, start date, due date, repeat, priority, tags, list and files. Return in the title creates the task. Esc creates it when it has a title and drops an empty card.

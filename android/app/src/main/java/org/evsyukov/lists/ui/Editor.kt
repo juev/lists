@@ -401,7 +401,7 @@ private fun CommittedField(
         singleLine = singleLine,
         textStyle = textStyle,
         colors = transparentField(),
-        keyboardOptions = if (singleLine) KeyboardOptions(imeAction = ImeAction.Done) else KeyboardOptions.Default,
+        keyboardOptions = if (singleLine) SentenceKeyboard.copy(imeAction = ImeAction.Done) else SentenceKeyboard,
         keyboardActions = KeyboardActions(onDone = { save() }),
         modifier = modifier.onFocusChanged {
             if (focused && !it.isFocused) save()
@@ -421,7 +421,7 @@ private fun SubtaskField(onAdd: (String) -> Unit) {
             placeholder = { Text(str(R.string.subtask)) },
             singleLine = true,
             colors = transparentField(),
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+            keyboardOptions = SentenceKeyboard.copy(imeAction = ImeAction.Done),
             keyboardActions = KeyboardActions(onDone = { onAdd(text); text = "" }),
             modifier = Modifier.weight(1f),
         )
@@ -744,7 +744,7 @@ fun ListDialog(list: TaskList?, model: MainViewModel, onDismiss: () -> Unit) {
         onDismiss = onDismiss,
         content = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
-                if (!inbox) OutlinedTextField(name, { name = it }, singleLine = true, label = { Text(str(R.string.title)) })
+                if (!inbox) OutlinedTextField(name, { name = it }, singleLine = true, label = { Text(str(R.string.title)) }, keyboardOptions = SentenceKeyboard)
                 Row(Modifier.padding(vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     for (hex in listColors) {
                         val shown = parseColor(hex) ?: MaterialTheme.colorScheme.primary
@@ -914,9 +914,9 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
                     }
                 }
                 if (enabled) {
-                    OutlinedTextField(url, { url = it.trim() }, singleLine = true, label = { Text(str(R.string.address)) }, placeholder = { Text("https://…/dav/files/me") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri))
-                    OutlinedTextField(user, { user = it }, singleLine = true, label = { Text(str(R.string.user)) })
-                    OutlinedTextField(password, { password = it }, singleLine = true, label = { Text(str(R.string.password)) }, visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password))
+                    OutlinedTextField(url, { url = it.trim() }, singleLine = true, label = { Text(str(R.string.address)) }, placeholder = { Text("https://…/dav/files/me") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, autoCorrectEnabled = false))
+                    OutlinedTextField(user, { user = it }, singleLine = true, label = { Text(str(R.string.user)) }, keyboardOptions = KeyboardOptions(autoCorrectEnabled = false))
+                    OutlinedTextField(password, { password = it }, singleLine = true, label = { Text(str(R.string.password)) }, visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false))
                     Text(
                         str(if (kind == "caldav") R.string.caldav_hint else R.string.webdav_hint),
                         style = MaterialTheme.typography.bodySmall,
@@ -959,8 +959,8 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
                     Text(str(R.string.push_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     SwitchRow(str(R.string.push_sign_in), pushSignIn) { pushSignIn = it }
                     if (pushSignIn) {
-                        OutlinedTextField(pushServer, { pushServer = it.trim() }, singleLine = true, label = { Text(str(R.string.push_server)) }, placeholder = { Text("https://ntfy.example.org") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri))
-                        OutlinedTextField(pushToken, { pushToken = it.trim() }, singleLine = true, label = { Text(str(R.string.push_token)) }, placeholder = { Text("tk_…") }, visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password))
+                        OutlinedTextField(pushServer, { pushServer = it.trim() }, singleLine = true, label = { Text(str(R.string.push_server)) }, placeholder = { Text("https://ntfy.example.org") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, autoCorrectEnabled = false))
+                        OutlinedTextField(pushToken, { pushToken = it.trim() }, singleLine = true, label = { Text(str(R.string.push_token)) }, placeholder = { Text("tk_…") }, visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false))
                         Text(str(R.string.push_token_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp))
                         if (pushRefused) {
                             Text(str(R.string.push_refused), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
@@ -1101,7 +1101,7 @@ fun FilterDialog(filter: SavedFilter?, state: UiState, model: MainViewModel, onD
         onDismiss = onDismiss,
         content = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
-                OutlinedTextField(name, { name = it }, singleLine = true, label = { Text(str(R.string.title)) })
+                OutlinedTextField(name, { name = it }, singleLine = true, label = { Text(str(R.string.title)) }, keyboardOptions = SentenceKeyboard)
                 if (filter == null) {
                     FlowRow(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         AssistChip(onClick = { name = str(R.string.next_7_days); window = "next"; days = "7" }, label = { Text(str(R.string.next_7_days)) })

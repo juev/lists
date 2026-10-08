@@ -22,6 +22,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.List
@@ -101,6 +102,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
@@ -343,6 +345,12 @@ private fun SearchField(query: String, onChange: (String) -> Unit) {
         modifier = Modifier.fillMaxWidth().focusRequester(focus),
     )
 }
+
+/**
+ * Free text, a title or a note: the keyboard starts a sentence with a capital
+ * when its own setting allows it (R70). A tag and a search leave it out.
+ */
+val SentenceKeyboard = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences)
 
 @Composable
 fun transparentField() = TextFieldDefaults.colors(
