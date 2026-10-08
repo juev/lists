@@ -4,6 +4,8 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- R78: the events of the day in Today; asked when the setting is turned on. -->
+    <uses-permission android:name="android.permission.READ_CALENDAR" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- Reminders at the minute they are set for (R66); the user grants it on Android 13 and newer. -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />

@@ -12,6 +12,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -117,6 +118,8 @@ import org.evsyukov.lists.NotifyPrefs
 import org.evsyukov.lists.EntryPrefs
 import org.evsyukov.lists.LookPrefs
 import org.evsyukov.lists.Repo
+import org.evsyukov.lists.EventPrefs
+import org.evsyukov.lists.SystemCalendars
 import org.evsyukov.lists.Secrets
 import org.evsyukov.lists.dateLabel
 import org.evsyukov.lists.displayName
@@ -903,9 +906,19 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
     var exactAlarms by remember { mutableStateOf(Reminders.exact(context)) }
     // S31: the same on the way back from the system dialog about the battery.
     var unrestricted by remember { mutableStateOf(Background.unrestricted(context)) }
+    // R78: the same on the way back from the system screen of the calendar permission.
+    var eventsOn by remember { mutableStateOf(EventPrefs.enabled(context)) }
+    var calendarGranted by remember { mutableStateOf(SystemCalendars.granted(context)) }
+    var hiddenCalendars by remember { mutableStateOf(EventPrefs.hidden(context)) }
+    val askCalendar = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        calendarGranted = granted
+        scope.launch { SystemCalendars.refresh(context) }
+    }
+    val calendars = remember(eventsOn, calendarGranted) { if (eventsOn) SystemCalendars.calendars(context) else emptyList() }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         exactAlarms = Reminders.exact(context)
         unrestricted = Background.unrestricted(context)
+        calendarGranted = SystemCalendars.granted(context)
     }
     var leads by remember { mutableStateOf(NotifyPrefs.leads(context)) }
     var newTaskList by remember { mutableStateOf(EntryPrefs.newTaskList(context)) }
@@ -961,6 +974,43 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
                         Text(str(R.string.exact_alarms_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
+                HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                Text(str(R.string.calendar_events), style = MaterialTheme.typography.labelLarge)
+                SwitchRow(str(R.string.show_calendar_events), eventsOn) {
+                    eventsOn = it
+                    EventPrefs.setEnabled(context, it)
+                    // R78: the permission is asked when the setting is turned on, not before.
+                    if (it && !calendarGranted) askCalendar.launch(android.Manifest.permission.READ_CALENDAR)
+                    scope.launch { SystemCalendars.refresh(context) }
+                }
+                if (eventsOn && !calendarGranted) {
+                    // After a refusal the system shows its dialog no more: the way is through its settings.
+                    SettingRow(str(R.string.calendar_no_access), str(R.string.allow)) {
+                        context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}")))
+                    }
+                }
+                // R78: the system gives all the calendars at once, the choice among them is made here.
+                for (calendar in calendars) {
+                    val shown = calendar.id !in hiddenCalendars
+                    Row(
+                        Modifier.fillMaxWidth().toggleable(shown, role = Role.Checkbox) { show ->
+                            hiddenCalendars = if (show) hiddenCalendars - calendar.id else hiddenCalendars + calendar.id
+                            EventPrefs.setHidden(context, hiddenCalendars)
+                            scope.launch { SystemCalendars.refresh(context) }
+                        },
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(Modifier.size(10.dp).background(Color(calendar.color), CircleShape))
+                        Column(Modifier.weight(1f).padding(start = 10.dp)) {
+                            Text(calendar.name)
+                            if (calendar.account.isNotEmpty() && calendar.account != calendar.name) {
+                                Text(calendar.account, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                        Checkbox(checked = shown, onCheckedChange = null, modifier = Modifier.padding(12.dp))
+                    }
+                }
+                Text(str(R.string.calendar_events_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 HorizontalDivider(Modifier.padding(vertical = 8.dp))
                 Text(str(R.string.new_tasks_setting), style = MaterialTheme.typography.labelLarge)
                 val listChoices = state.lists.filter { !it.archived && it.id != "inbox" }

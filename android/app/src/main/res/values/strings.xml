@@ -234,6 +234,10 @@
     <string name="new_tasks_setting">New tasks</string>
     <string name="default_list">Default list</string>
     <string name="last_used_list">Last used list</string>
+    <string name="calendar_events">Calendar events</string>
+    <string name="show_calendar_events">Show calendar events in Today</string>
+    <string name="calendar_events_hint">Events are read from the calendars of this device and are shown above the tasks. They are not synced, and this setting applies to this device only.</string>
+    <string name="calendar_no_access">Lists has no access to the calendar</string>
     <string name="parse_title">Recognize dates, priority, tags and lists in the title</string>
     <string name="clipboard_note">Start the note with the clipboard in quick entry</string>
     <string name="remove_clipboard_note">Remove the text taken from the clipboard</string>
