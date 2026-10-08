@@ -54,7 +54,9 @@ final class AppModel {
     var syncStatus = SyncStatus(configured: false, pending: 0, lastOk: nil, lastError: nil)
     var syncing = false
     /// Text size factor and font design chosen in Settings.
-    var textScale: Double = UserDefaults.standard.object(forKey: AppFont.scaleKey) as? Double ?? 1.0 {
+    /// A launch argument (`-textScale 1.5`) arrives as a string.
+    var textScale: Double = UserDefaults.standard.object(forKey: AppFont.scaleKey)
+        .flatMap({ ($0 as? Double) ?? ($0 as? String).flatMap(Double.init) }) ?? 1.0 {
         didSet { UserDefaults.standard.set(textScale, forKey: AppFont.scaleKey) }
     }
     var fontDesign: String = UserDefaults.standard.string(forKey: AppFont.designKey) ?? "default" {

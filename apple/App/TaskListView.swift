@@ -261,6 +261,9 @@ struct TaskRow: View {
                     .foregroundStyle(task.done != nil ? Color.secondary : (model.list(task.listId)?.tint ?? .accentColor))
             }
             .buttonStyle(.plain)
+            // The mark is taller than a capital of the title: on the baseline it stands too high.
+            // Its middle goes to the middle of a capital of the first line instead.
+            .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + AppFont.native(.body).capHeight / 2 }
             .disabled(task.isLog || inTrash)
             .accessibilityLabel(task.done != nil ? L("Reopen") : L("Complete"))
 

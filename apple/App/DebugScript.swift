@@ -28,6 +28,8 @@ import SwiftUI
 /// `windows` (prints the windows of the app),
 /// `notes` (prints the note of the open card as it is drawn: what is hidden, what is replaced and which fonts differ),
 /// `shot:/path/to.png` (draws that note into a file, on screen or not),
+/// `rowshot:/path/to.png` (draws the row of the selected task into a file, eight pixels to a point: a hidden window draws no rows;
+/// the launch arguments `-textScale 1.5 -fontDesign serif` choose the text for one run and save nothing),
 /// `caret:5` (puts the cursor of that note at the offset), `box:0` (clicks the checkbox with that number in it),
 /// `chips` (prints which chip of the card has the keyboard and which of its popovers is open; `key:backtab+shift` is ⇧Tab),
 /// `ghost` (puts the windows of a hidden app on screen transparent, deaf to the mouse and without the keyboard, popovers that open later among them:
@@ -263,6 +265,18 @@ enum DebugScript {
                 case "state":
                     let window = target
                     print("debug: key window \(window.map { type(of: $0) }.map(String.init(describing:)) ?? "none"), first responder \(window?.firstResponder.map { String(describing: type(of: $0)) } ?? "none")\((window?.firstResponder as? NSText).map { " with \"\($0.string)\"" } ?? "")")
+                case "rowshot":
+                    // The row of the selected task drawn into a file, eight pixels to a point.
+                    if let task = AppModel.shared.selectedTask {
+                        let row = TaskRow(task: task, depth: 0).environment(AppModel.shared)
+                            .frame(width: 320).background(Color.white).environment(\.colorScheme, .light)
+                        let renderer = ImageRenderer(content: row)
+                        renderer.scale = 8
+                        if let image = renderer.cgImage {
+                            try? NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: argument))
+                            print("debug: row drawn, \(image.width)x\(image.height) pixels, text scale \(AppModel.shared.textScale), design \(AppModel.shared.fontDesign)")
+                        }
+                    }
                 case "shot":
                     // The note drawn into a file: it need not be on screen for that.
                     if let view = notesView(in: target?.contentView), let image = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
