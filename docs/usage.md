@@ -108,7 +108,7 @@ The quick-entry window starts the note with the clipboard: copy a link or a piec
 Where the entry field is:
 
 - **macOS**: the card in the main window (⌘N); a global hotkey that opens a small window over any app (⌃⌥Space by default, changeable in Settings); the menu bar item, which also lists today's tasks; the share extension; the Services menu; the `lists://add?text=…` URL.
-- **Android**: the "+" button on the main screen, which opens the card of a new task as a bottom sheet and keeps it open for the next task after Done on the keyboard or the send button (back or a tap outside closes it). The card is compact: the title, one line of the note and a row of icons for the start date, the due date, the repeat, the priority, files and the list, each with its value next to it once set. The button beside the title expands the card to the full screen, where the note has room and the fields are rows with names; the same button brings it back, and nothing typed is lost. In landscape the card is always expanded. Besides the button there is a small window over the current app from Share, from the text-selection menu, from the launcher shortcut and from the quick settings tile.
+- **Android**: the "+" button on the main screen, which opens the card of a new task as a bottom sheet and keeps it open for the next task after Done on the keyboard or the send button (back or a tap outside closes it). The card is compact: the title, one line of the note and a row of icons for the start date, the due date, the repeat, the priority, files and the list, each with its value next to it once set. The button beside the title expands the card to the full screen, where the note has room and the fields are rows with names; the same button brings it back, and nothing typed is lost. Besides the button there is a small window over the current app from Share, from the text-selection menu, from the launcher shortcut and from the quick settings tile. That window turns with the app under it, and in landscape its card is always expanded.
 - **Web**: the New task field in the task list.
 
 A new task takes its place from the view it is created in: the list on screen, the project it is added to, or the default list from the settings where the view has no list of its own (Today, Upcoming, All, a tag, a filter). The view sets nothing else. A task created in Today has no due date, and a task created in the view of a tag has no tag, until you set them in the card or type them in the title; without them the task is not in that view once it is saved. The defaults of a list, a priority and "due today", stand next to their icons in the card on macOS and Android before the task is saved. They follow the list chosen in the card and can be changed or removed like a value you picked, and what the title says wins over them.
@@ -203,6 +203,10 @@ Text size (five steps) and typeface (system, rounded, serif, monospaced) are cho
 ## Light and dark
 
 By default the apps look the way the system does, and follow it when it switches between light and dark on a schedule. Appearance chooses otherwise: Same as the system, Light or Dark. It is in Settings on macOS, in Settings in the drawer on Android, and at the bottom of the sidebar in the web interface. The choice applies at once and to every window, is kept by the device (by the browser in the web interface) and does not sync. List colours and the red of an overdue date are the same in both looks.
+
+## Orientation on Android
+
+On a phone the app stays in portrait and does not turn with the device. The quick-entry window is the exception: it opens over another app and may stand in landscape with it. On a tablet and on an unfolded foldable the app turns with the device.
 
 ## Gestures on Android
 
