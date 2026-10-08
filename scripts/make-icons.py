@@ -8,6 +8,7 @@ adaptive icon and the icons of the web interface. PNGs are rendered with
 headless Chrome and scaled with sips, so this runs on a Mac with Chrome.
 """
 import json
+import math
 import pathlib
 import subprocess
 import tempfile
@@ -23,6 +24,7 @@ GRADIENT = (
 # two open ones. (cy, bar width, checked)
 ROWS = [(39, 29, True), (54, 29, False), (69, 20, False)]
 CX, BAR_X, BAR_H = 36.5, 48, 5.2
+ANDROID_SCALE = 1.1
 
 
 def glyph(scale):
@@ -94,23 +96,54 @@ def web(big, rounded_big):
         scaled(big, size, out / f"icon-{size}.png")
 
 
-def android():
-    res = ROOT / "android/app/src/main/res"
+def check_outline(cy):
+    """The check mark as a closed outline, to cut it out of the disc."""
+    half = 0.95
+    a, b, c = (CX - 3.1, cy + 0.2), (CX - 0.9, cy + 2.4), (CX + 3.2, cy - 2.0)
+
+    def unit(p, q):
+        length = math.hypot(q[0] - p[0], q[1] - p[1])
+        return (q[0] - p[0]) / length, (q[1] - p[1]) / length
+
+    def side(sign):
+        (ux, uy), (vx, vy) = unit(a, b), unit(b, c)
+        # Offset both segments to one side and join them where the offsets meet.
+        p = (a[0] - ux * half - uy * half * sign, a[1] - uy * half + ux * half * sign)
+        q = (c[0] + vx * half - vy * half * sign, c[1] + vy * half + vx * half * sign)
+        t = ((q[0] - p[0]) * vy - (q[1] - p[1]) * vx) / (ux * vy - uy * vx)
+        return [p, (p[0] + ux * t, p[1] + uy * t), q]
+
+    points = side(1) + side(-1)[::-1]
+    return "M" + "L".join(f"{x:.2f},{y:.2f}" for x, y in points) + "z"
+
+
+def android_paths(monochrome):
     paths = []
     for cy, width, checked in ROWS:
         if checked:
             r = 6.2
-            paths.append(f'        <path android:fillColor="#FFFFFFFF" android:pathData="M{CX - r},{cy}a{r},{r} 0,1 0,{2 * r},0a{r},{r} 0,1 0,-{2 * r},0z" />')
-            paths.append(f'        <path android:strokeColor="#FF2F6FED" android:strokeWidth="1.9" android:strokeLineCap="round" android:strokeLineJoin="round" android:pathData="M{CX - 3.1},{cy + 0.2}l2.2,2.2 4.1,-4.4" />')
+            disc = f"M{CX - r},{cy}a{r},{r} 0,1 0,{2 * r},0a{r},{r} 0,1 0,-{2 * r},0z"
+            if monochrome:
+                paths.append(f'        <path android:fillColor="#FFFFFFFF" android:fillType="evenOdd" android:pathData="{disc}{check_outline(cy)}" />')
+            else:
+                paths.append(f'        <path android:fillColor="#FFFFFFFF" android:pathData="{disc}" />')
+                paths.append(f'        <path android:strokeColor="#FF2F6FED" android:strokeWidth="1.9" android:strokeLineCap="round" android:strokeLineJoin="round" android:pathData="M{CX - 3.1},{cy + 0.2}l2.2,2.2 4.1,-4.4" />')
         else:
             r = 5.1
             paths.append(f'        <path android:strokeColor="#FFFFFFFF" android:strokeWidth="2.2" android:strokeAlpha="0.9" android:pathData="M{CX - r},{cy}a{r},{r} 0,1 0,{2 * r},0a{r},{r} 0,1 0,-{2 * r},0z" />')
         h, y = BAR_H, cy - BAR_H / 2
         alpha = "" if checked else ' android:fillAlpha="0.9"'
         paths.append(f'        <path android:fillColor="#FFFFFFFF"{alpha} android:pathData="M{BAR_X + h / 2},{y}h{width - h}a{h / 2},{h / 2} 0,0 1,0,{h}h-{width - h}a{h / 2},{h / 2} 0,0 1,0,-{h}z" />')
-    body = "\n".join(paths)
-    # The glyph stays inside the middle 66 units, the part no launcher mask cuts.
-    (res / "drawable/ic_launcher_foreground.xml").write_text(f'''<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    return "\n".join(paths)
+
+
+def android():
+    res = ROOT / "android/app/src/main/res"
+    # A launcher may cut everything outside a circle of radius 33 around the
+    # centre. The corners of the glyph are 29.25 units away, so 1.1 keeps them
+    # inside; AdaptiveIconTest checks the result.
+    for name, monochrome in (("ic_launcher_foreground", False), ("ic_launcher_monochrome", True)):
+        (res / f"drawable/{name}.xml").write_text(f'''<vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
@@ -118,9 +151,9 @@ def android():
     <group
         android:pivotX="54"
         android:pivotY="54"
-        android:scaleX="1.3"
-        android:scaleY="1.3">
-{body}
+        android:scaleX="{ANDROID_SCALE}"
+        android:scaleY="{ANDROID_SCALE}">
+{android_paths(monochrome)}
     </group>
 </vector>
 ''')
@@ -136,7 +169,7 @@ def android():
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
     <background android:drawable="@drawable/ic_launcher_background" />
     <foreground android:drawable="@drawable/ic_launcher_foreground" />
-    <monochrome android:drawable="@drawable/ic_launcher_foreground" />
+    <monochrome android:drawable="@drawable/ic_launcher_monochrome" />
 </adaptive-icon>
 ''')
 
