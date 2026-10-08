@@ -35,9 +35,11 @@ import androidx.compose.material.icons.filled.Inbox
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.CheckBox
 import androidx.compose.material.icons.outlined.CheckBoxOutlineBlank
+import androidx.compose.material.icons.outlined.Checklist
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.CloudDone
 import androidx.compose.material.icons.outlined.CloudOff
@@ -47,6 +49,7 @@ import androidx.compose.material.icons.outlined.FilterList
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Inventory2
 import androidx.compose.material.icons.outlined.Menu
+import androidx.compose.material.icons.outlined.Repeat
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Tag
@@ -135,11 +138,12 @@ import org.evsyukov.lists.EntryPrefs
 import org.evsyukov.lists.str
 import org.evsyukov.lists.Repo
 import org.evsyukov.lists.dateLabel
+import org.evsyukov.lists.dayOf
 import org.evsyukov.lists.displayName
-import org.evsyukov.lists.isOverdue
 import org.evsyukov.lists.marks
 import org.evsyukov.lists.plusDays
 import org.evsyukov.lists.priorities
+import org.evsyukov.lists.rowDate
 import org.evsyukov.lists.title
 import org.evsyukov.lists.today
 import kotlinx.coroutines.launch
@@ -625,7 +629,7 @@ fun TaskRow(task: TaskItem, state: UiState, onToggle: () -> Unit, onOpen: () -> 
         Modifier
             .fillMaxWidth()
             .combinedClickable(onClick = onOpen, onLongClick = { menu = true })
-            .padding(start = 4.dp, end = 16.dp, top = 4.dp, bottom = 4.dp),
+            .padding(start = 4.dp, end = 16.dp, top = 6.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         IconButton(onClick = onToggle, enabled = !task.deleted && !task.isLog) {
@@ -639,28 +643,37 @@ fun TaskRow(task: TaskItem, state: UiState, onToggle: () -> Unit, onOpen: () -> 
                 tint = if (done) MaterialTheme.colorScheme.onSurfaceVariant else state.list(task.listId)?.tint() ?: MaterialTheme.colorScheme.primary,
             )
         }
-        Column(Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (task.isProject) {
-                    Icon(Icons.Outlined.Folder, str(R.string.project), Modifier.padding(end = 6.dp).size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                if (task.priority != Priority.NONE) {
-                    Text(
-                        task.priority.marks(),
-                        color = Color(0xFFE8890C),
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(end = 6.dp).semantics { contentDescription = task.priority.title() },
-                    )
-                }
-                Text(
-                    task.title,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    textDecoration = if (done) TextDecoration.LineThrough else null,
-                    color = if (done) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
-                )
-            }
-            Summary(task, state, showOrigin)
+        if (task.isProject) {
+            Icon(Icons.Outlined.Folder, str(R.string.project), Modifier.padding(end = 6.dp).size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        if (task.priority != Priority.NONE) {
+            Text(
+                task.priority.marks(),
+                color = Color(0xFFE8890C),
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(end = 6.dp).semantics { contentDescription = task.priority.title() },
+            )
+        }
+        Text(
+            task.title,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textDecoration = if (done) TextDecoration.LineThrough else null,
+            color = if (done) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(1f, fill = false),
+        )
+        Marks(task, parent = task.parentTitle.takeIf { showOrigin })
+        Spacer(Modifier.weight(1f))
+        val scope = state.effectiveScope
+        val dayInHeading = scope == Scope.Upcoming || (scope == Scope.Today && task.due?.let(::dayOf) == today())
+        rowDate(task.due, open = !done, dayInHeading = dayInHeading)?.let { (text, late) ->
+            Text(
+                text,
+                style = MaterialTheme.typography.bodySmall,
+                color = if (late) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                modifier = Modifier.padding(start = 8.dp),
+            )
         }
         Box {
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
@@ -670,35 +683,19 @@ fun TaskRow(task: TaskItem, state: UiState, onToggle: () -> Unit, onOpen: () -> 
     }
 }
 
-/** One line under the title: only what is set (R72). */
+/** Marks after the title, only for what is set, without text or numbers (R72); then the parent of a subtask shown on its own (R12). */
 @Composable
-private fun Summary(task: TaskItem, state: UiState, showOrigin: Boolean) {
-    val muted = MaterialTheme.colorScheme.onSurfaceVariant
-    // A part without text is the mark of a note: an icon, not the text of the note.
-    val parts = buildList<Pair<String?, Color>> {
-        task.due?.let { add(dateLabel(it) to (if (task.done == null && isOverdue(it)) MaterialTheme.colorScheme.error else muted)) }
-            ?: task.start?.let { add(str(R.string.from_date, dateLabel(it).lowercase()) to muted) }
-        if (task.repeat != null) add("↻" to muted)
-        if (task.subtasksTotal > 0u) add("☑ ${task.subtasksDone}/${task.subtasksTotal}" to muted)
-        if (task.attachments > 0u) add("📎 ${task.attachments}" to muted)
-        if (task.notes.isNotEmpty()) add(null to muted)
-        task.tags.forEach { add("#$it" to muted) }
-        if (showOrigin) {
-            val list = state.list(task.listId)?.displayName().orEmpty()
-            add((task.parentTitle?.let { "$list › $it" } ?: list) to muted)
-        }
+private fun Marks(task: TaskItem, parent: String?) {
+    val muted = MaterialTheme.colorScheme.outline
+    val marks = buildList {
+        if (task.repeat != null) add(Icons.Outlined.Repeat to str(R.string.repeat))
+        if (task.notes.isNotEmpty()) add(Icons.AutoMirrored.Outlined.Notes to str(R.string.notes))
+        if (task.attachments > 0u) add(Icons.Outlined.AttachFile to str(R.string.attachments))
+        if (task.subtasksTotal > 0u) add(Icons.Outlined.Checklist to str(R.string.subtasks))
     }
-    if (parts.isEmpty()) return
-    val style = MaterialTheme.typography.bodySmall
-    val line = with(LocalDensity.current) { style.lineHeight.toDp() }
-    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-        for ((text, color) in parts) {
-            if (text == null) {
-                Icon(Icons.AutoMirrored.Outlined.Notes, str(R.string.notes), Modifier.size(line), tint = color)
-            } else {
-                Text(text, style = style, color = color, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-        }
+    for ((icon, name) in marks) Icon(icon, name, Modifier.padding(start = 6.dp).size(16.dp), tint = muted)
+    if (parent != null) {
+        Text(parent, Modifier.padding(start = 8.dp), style = MaterialTheme.typography.bodySmall, color = muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
