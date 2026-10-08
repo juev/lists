@@ -64,9 +64,12 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // R77: the portrait lock of the manifest is for phones; Android 16 lifts it on a wide display itself.
-        if (resources.configuration.smallestScreenWidthDp >= 600) {
-            requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        // R77: portrait is for phones; Android 16 lifts the lock on a wide display itself. Set both ways,
+        // because the request outlives the activity when a foldable is closed.
+        requestedOrientation = if (resources.configuration.smallestScreenWidthDp >= 600) {
+            ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        } else {
+            ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
         }
         enableEdgeToEdge()
         setContent { AppTheme(bars = true) { MainScreen(model, onReminderSet = ::ensureNotifications) } }
