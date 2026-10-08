@@ -75,6 +75,7 @@ object Repo {
 
     private val syncMutex = Mutex()
     private var pending: Job? = null
+    private var moving: Job? = null
 
     /**
      * Call after a local write: refreshes screens and reminders, syncs after two quiet seconds.
@@ -90,7 +91,7 @@ object Repo {
 
     suspend fun sync(): Result<SyncReport> = withContext(Dispatchers.IO) {
         if (store.syncConfig() is SyncConfig.Off) return@withContext Result.success(SyncReport(0u, 0u, 0u, 0u))
-        syncMutex.withLock {
+        val result = syncMutex.withLock {
             syncing.value = true
             val result = runCatching { store.syncNow() }
             syncing.value = false
@@ -99,6 +100,26 @@ object Repo {
             if (result.getOrNull()?.pulled?.let { it > 0u } == true) Reminders.refresh(ListsApp.instance)
             result
         }
+        if (result.isSuccess) moveAttachments()
+        result
+    }
+
+    /**
+     * S34: the content of attachments moves after the fields are on screen, and the next run
+     * for the fields does not wait for it. One pass at a time; the screens reload when it ends.
+     */
+    @Synchronized
+    private fun moveAttachments() {
+        if (moving?.isActive == true) return
+        moving = scope.launch {
+            runCatching { store.syncAttachments() }
+            revision.update { it + 1 }
+        }
+    }
+
+    /** Waits for the pass over attachment content that is going, if one is. */
+    suspend fun attachmentsMoved() {
+        moving?.join()
     }
 }
 
@@ -107,8 +128,12 @@ object Repo {
  * was changed elsewhere while the app is closed, and once after a local write.
  */
 class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
-    override suspend fun doWork(): Result =
-        if (Repo.sync().isSuccess) Result.success() else Result.retry()
+    override suspend fun doWork(): Result {
+        val synced = Repo.sync().isSuccess
+        // The job holds the process until the content of attachments has moved as well (S34).
+        Repo.attachmentsMoved()
+        return if (synced) Result.success() else Result.retry()
+    }
 
     companion object {
         private val online = Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()

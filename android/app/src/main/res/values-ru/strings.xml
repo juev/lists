@@ -90,7 +90,10 @@
     <string name="tag">Тег</string>
     <string name="file_or_image">Файл или изображение</string>
     <string name="add_field">Добавить поле</string>
-    <string name="will_download">загрузится при синхронизации</string>
+    <string name="not_downloaded">ещё не загружено, нажмите, чтобы загрузить</string>
+    <string name="downloading">загружается…</string>
+    <string name="download_failed">не удалось загрузить, попробуйте позже</string>
+    <string name="attachments_waiting">Вложения ждут синхронизации: %1$s</string>
     <string name="detach">Открепить</string>
     <string name="open_in_another_app">Открыть в другой программе</string>
     <string name="cannot_show_file">Этот файл не получается показать здесь.</string>

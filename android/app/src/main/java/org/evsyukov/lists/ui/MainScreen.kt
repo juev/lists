@@ -373,6 +373,7 @@ private fun SyncIcon(state: UiState, syncing: Boolean, onSync: () -> Unit) {
             syncing -> CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
             state.sync.lastError != null -> Icon(Icons.Outlined.CloudOff, str(R.string.sync_failed), tint = MaterialTheme.colorScheme.error)
             state.sync.pending > 0u -> Icon(Icons.Outlined.CloudSync, str(R.string.has_pending))
+            state.sync.attachmentsWaiting > 0u -> Icon(Icons.Outlined.CloudSync, str(R.string.attachments_waiting, state.sync.attachmentsWaiting.toString()))
             else -> Icon(Icons.Outlined.CloudDone, str(R.string.synced), tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }

@@ -203,6 +203,10 @@ fun EditorSheet(editing: Editing, state: UiState, model: MainViewModel, onRemind
     var subtaskField by remember(task.id) { mutableStateOf(false) }
     // The attachment shown over the screen; it closes by itself when the file is removed elsewhere.
     var viewing by remember(task.id) { mutableStateOf<String?>(null) }
+    // Attachments being downloaded on request, and those the last request did not get (R76).
+    var fetching by remember(task.id) { mutableStateOf(setOf<String>()) }
+    var fetchFailed by remember(task.id) { mutableStateOf(setOf<String>()) }
+    val fetchScope = rememberCoroutineScope()
     val pickFiles = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
         if (uris.isNotEmpty()) model.act { store -> attach(context, store, task.id, uris) }
     }
@@ -313,9 +317,28 @@ fun EditorSheet(editing: Editing, state: UiState, model: MainViewModel, onRemind
             for (file in editing.attachments) {
                 Row(
                     Modifier.fillMaxWidth()
-                        .clickable(enabled = file.localPath != null) {
+                        .clickable(enabled = file.id !in fetching) {
                             // An image or a PDF is shown here (R54); the rest is for another app.
-                            if (previewKind(file.mime) != null) viewing = file.id else openAttachment(context, file)
+                            fun show(file: Attachment) {
+                                if (previewKind(file.mime) != null) viewing = file.id else openAttachment(context, file)
+                            }
+                            if (file.localPath != null) {
+                                show(file)
+                            } else {
+                                // R76: a file that has not arrived is downloaded ahead of the others and shown.
+                                fetching = fetching + file.id
+                                fetchFailed = fetchFailed - file.id
+                                fetchScope.launch {
+                                    val got = withContext(Dispatchers.IO) { runCatching { Repo.store.fetchAttachment(file.id) }.getOrNull() }
+                                    fetching = fetching - file.id
+                                    if (got?.localPath == null) {
+                                        fetchFailed = fetchFailed + file.id
+                                    } else {
+                                        Repo.revision.update { it + 1 }
+                                        show(got)
+                                    }
+                                }
+                            }
                         }
                         .padding(start = 16.dp, end = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -324,7 +347,12 @@ fun EditorSheet(editing: Editing, state: UiState, model: MainViewModel, onRemind
                     Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
                         Text(file.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(
-                            if (file.localPath == null) str(R.string.will_download) else android.text.format.Formatter.formatShortFileSize(context, file.size.toLong()),
+                            when {
+                                file.localPath != null -> android.text.format.Formatter.formatShortFileSize(context, file.size.toLong())
+                                file.id in fetching -> str(R.string.downloading)
+                                file.id in fetchFailed -> str(R.string.download_failed)
+                                else -> str(R.string.not_downloaded)
+                            },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -991,9 +1019,10 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
                 } else {
                     Text(str(R.string.local_only), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
+                val waiting = state.sync.attachmentsWaiting.takeIf { it > 0u }?.let { str(R.string.attachments_waiting, it.toString()) }
                 val status = error
                     ?: state.sync.lastError?.let { str(R.string.last_sync_failed, it) }
-                    ?: state.sync.lastOk?.let { str(R.string.synced_at, dateLabel(it).lowercase()) }
+                    ?: listOfNotNull(state.sync.lastOk?.let { str(R.string.synced_at, dateLabel(it).lowercase()) }, waiting).joinToString("\n").ifEmpty { null }
                 if (syncing) Text(str(R.string.syncing), Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodySmall)
                 else if (status != null) Text(status, Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodySmall, color = if (error != null || state.sync.lastError != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
             }

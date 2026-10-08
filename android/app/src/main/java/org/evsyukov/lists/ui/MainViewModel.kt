@@ -52,7 +52,7 @@ data class UiState(
     val search: String? = null,
     val sections: List<TaskSection> = emptyList(),
     val editing: Editing? = null,
-    val sync: SyncStatus = SyncStatus(false, 0u, null, null),
+    val sync: SyncStatus = SyncStatus(false, 0u, 0u, null, null),
     val notice: Notice? = null,
     /** How long a completed task stays in its view; shared by all devices (R68). */
     val keepDone: KeepDone = KeepDone.Seconds(5u),
