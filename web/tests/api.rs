@@ -1,7 +1,7 @@
 //! The web server over HTTP: login, the session cookie, and a task's life
 //! through the JSON interface.
 
-use lists_core::SyncConfig;
+use lists_core::{Store, SyncConfig};
 use lists_web::{start, Config};
 use serde_json::{json, Value};
 
@@ -11,13 +11,17 @@ struct Web {
 }
 
 fn web(password: Option<&str>) -> Web {
+    web_syncing(password, SyncConfig::Off)
+}
+
+fn web_syncing(password: Option<&str>, sync: SyncConfig) -> Web {
     let dir = tempfile::tempdir().unwrap();
     let running = start(Config {
         data_dir: dir.path().to_string_lossy().into_owned(),
         listen: "127.0.0.1:0".into(),
         password: password.map(str::to_string),
         oidc: None,
-        sync: SyncConfig::Off,
+        sync,
         sync_password: None,
         push_server: None,
         push_token: None,
@@ -323,6 +327,57 @@ fn attachments_upload_and_download_as_files() {
     assert!(file.header("Content-Disposition").unwrap().starts_with("attachment"));
     assert_eq!(file.header("X-Content-Type-Options"), Some("nosniff"));
     assert_eq!(file.into_string().unwrap(), "<script>alert(1)</script>");
+}
+
+#[test]
+fn r76_a_waiting_attachment_is_fetched_when_it_is_asked_for() {
+    let storage = tempfile::tempdir().unwrap();
+    let folder = SyncConfig::Folder {
+        path: storage.path().to_string_lossy().into_owned(),
+    };
+    let web = web_syncing(None, folder.clone());
+
+    // Another device attaches a file; only the fields have reached the storage.
+    let (data, source) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let other = Store::open(data.path().to_string_lossy().into_owned()).unwrap();
+    other.set_sync_config(folder).unwrap();
+    let task = other.quick_add("с файлом".into(), None).unwrap();
+    let file = source.path().join("note.txt");
+    std::fs::write(&file, b"from the other device").unwrap();
+    let added = other
+        .add_attachment(task.id.clone(), file.to_string_lossy().into_owned(), None)
+        .unwrap();
+    other.sync_now().unwrap();
+
+    call(&web, "", json!({ "op": "sync" }));
+    let path = format!("/api/task?id={}", task.id);
+    let listed = get(&web, "", &path);
+    assert_eq!(listed["attachments"][0]["name"], "note.txt");
+    assert_eq!(listed["attachments"][0]["present"], false);
+    assert_eq!(get(&web, "", "/api/overview")["sync"]["attachmentsWaiting"], 1);
+
+    // The content is not in the storage: the answer is an error with a reason, and the file still waits.
+    let url = format!("{}/api/file?task={}&id={}", web.base, task.id, added.id);
+    match ureq::get(&url).call() {
+        Err(ureq::Error::Status(502, response)) => {
+            let body: Value = response.into_json().unwrap();
+            assert!(body["error"].as_str().unwrap().contains("storage"), "{body}");
+        }
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(get(&web, "", &path)["attachments"][0]["present"], false);
+
+    // It is there now: the same request brings the file, ahead of the server's own pass.
+    other.sync_attachments().unwrap();
+    let got = ureq::get(&url).call().unwrap();
+    assert!(got.header("Content-Disposition").unwrap().starts_with("attachment"));
+    assert_eq!(got.into_string().unwrap(), "from the other device");
+    assert_eq!(get(&web, "", &path)["attachments"][0]["present"], true);
+    assert_eq!(get(&web, "", "/api/overview")["sync"]["attachmentsWaiting"], 0);
+
+    // An attachment that does not exist is not looked for in the storage.
+    let missing = format!("{}/api/file?task={}&id=nothing", web.base, task.id);
+    assert_eq!(status(ureq::get(&missing).call()), 404);
 }
 
 fn upload(web: &Web, task: &str, name: &str, data: &[u8]) -> Value {

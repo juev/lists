@@ -133,7 +133,7 @@ const RU = {
   "Password": "Пароль", "Sign in": "Войти", "Wrong password": "Неверный пароль", "Sign out": "Выйти", "All done for today": "На сегодня всё",
   "No tasks": "Задач нет", "Nothing found": "Ничего не найдено", "Synced": "Синхронизировано", "Sync failed": "Синхронизация не удалась",
   "waiting": "ожидает отправки", "Deleted": "Удалено", "Undo": "Отменить", "Task completed": "Выполнено", "Moved to the next occurrence": "Перенесено на следующий повтор",
-  "downloads on the next sync": "загрузится при синхронизации", "Download": "Скачать", "Close": "Закрыть", "from": "с", "Delete list": "Удалить список", "Delete this list and move its tasks to the trash?": "Удалить список и отправить его задачи в корзину?",
+  "not downloaded yet": "ещё не загружено", "downloading…": "загружается…", "could not download, try later": "не удалось загрузить, попробуйте позже", "Attachments waiting to sync": "Вложения ждут синхронизации", "Download": "Скачать", "Close": "Закрыть", "from": "с", "Delete list": "Удалить список", "Delete this list and move its tasks to the trash?": "Удалить список и отправить его задачи в корзину?",
   "Sort": "Сортировка", "Manually": "Вручную", "By due date": "По сроку", "By priority": "По приоритету", "By title": "По названию", "Rename": "Переименовать", "time": "время",
   "Sign in with single sign-on": "Войти через единый вход", "Import…": "Импорт…", "tasks": "задач", "attachments": "вложений",
   "Projects": "Проекты", "Filters": "Фильтры", "New filter": "Новый фильтр", "Make it a project": "Сделать проектом", "Turn back into a task": "Сделать обычной задачей",
@@ -168,6 +168,27 @@ function preview(a, href) {
   document.addEventListener("keydown", key);
   document.body.append(box);
 }
+// R76: a waiting attachment is fetched by the server on a click. The row says that it is on its way
+// or why it did not come, and the next click tries again.
+const waitingNote = a => {
+  const s = state.fetching[a.id];
+  return !s ? $("span", {}, t("not downloaded yet")) : s === true ? $("span", {}, t("downloading…"))
+    : $("span", { class: "bad", title: s }, t("could not download, try later"));
+};
+async function fetchFile(task, a, href) {
+  if (state.fetching[a.id] === true) return;
+  state.fetching[a.id] = true; render();
+  try {
+    const res = await fetch(href);
+    if (res.status === 401) { delete state.fetching[a.id]; showLogin(); return; }
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText);
+    // The content is on the server now; the page opens it the way it opens any other file.
+    if (res.body) res.body.cancel().catch(() => {});
+    delete state.fetching[a.id];
+    await load();
+    if (a.preview) preview(a, href); else location.assign(href);
+  } catch (e) { state.fetching[a.id] = e.message || "error"; render(); }
+}
 // The look of the page (R61) belongs to this browser: `light` or `dark` in `localStorage`, nothing for the system's.
 const look = () => { try { const v = localStorage.getItem("appearance"); return v === "light" || v === "dark" ? v : "system"; } catch { return "system"; } };
 function setLook(v) {
@@ -175,7 +196,7 @@ function setLook(v) {
   const c = document.documentElement.classList;
   c.toggle("light", v === "light"); c.toggle("dark", v === "dark");
 }
-const state = { filterEdit: null, scope: "today", search: "", overview: null, tasks: [], open: new Set(), details: {}, drawer: false, typing: false };
+const state = { fetching: {}, filterEdit: null, scope: "today", search: "", overview: null, tasks: [], open: new Set(), details: {}, drawer: false, typing: false };
 const root = document.getElementById("root");
 
 async function api(path, options) {
@@ -420,7 +441,8 @@ function editor(d) {
         const show = a.present && a.preview ? e => { e.preventDefault(); preview(a, href); } : null;
         return $("div", { class: "meta file" },
           show && a.preview === "image" ? $("img", { class: "thumb", src: href + "&view=1", alt: "", loading: "lazy", onclick: show }) : null,
-          a.present ? $("a", { class: "link", href, onclick: show }, a.name) : $("span", {}, `${a.name} — ${t("downloads on the next sync")}`),
+          $("a", { class: "link", href, onclick: a.present ? show : e => { e.preventDefault(); fetchFile(id, a, href); } }, a.name),
+          a.present ? null : waitingNote(a),
           $("button", { class: "link danger", onclick: () => act("removeAttachment", { id: a.id }) }, "×"));
       }),
       $("div", { class: "chips" },
@@ -488,7 +510,7 @@ function render() {
   const o = state.overview, c = o.counts, secs = sections(), origin = state.search || ["today", "upcoming", "completed", "wontdo", "trash"].includes(state.scope) || state.scope.startsWith("tag:") || state.scope.startsWith("filter:");
   const empty = secs.every(s => !s.tasks.length);
   const current = state.scope.startsWith("list:") ? o.lists.find(l => "list:" + l.id === state.scope) : state.scope === "inbox" ? o.lists.find(l => l.id === "inbox") : null;
-  const syncText = !o.sync.configured ? "" : o.sync.lastError ? t("Sync failed") : o.sync.pending ? `${o.sync.pending} ${t("waiting")}` : t("Synced");
+  const syncText = !o.sync.configured ? "" : o.sync.lastError ? t("Sync failed") : o.sync.pending ? `${o.sync.pending} ${t("waiting")}` : o.sync.attachmentsWaiting ? `${t("Attachments waiting to sync")}: ${o.sync.attachmentsWaiting}` : t("Synced");
   const search = $("input", { type: "search", placeholder: t("Search"), value: state.search, oninput: e => { state.search = e.target.value; clearTimeout(search.timer); search.timer = setTimeout(async () => { await load(); const again = document.querySelector("header input"); again.focus(); again.setSelectionRange(again.value.length, again.value.length); }, 250); } });
   const importer = $("input", { type: "file", style: "display:none", onchange: async e => {
     const f = e.target.files[0];
