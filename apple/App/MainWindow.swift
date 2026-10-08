@@ -100,6 +100,7 @@ struct Sidebar: View {
                 row(.all, L("All"), "square.stack", count: 0)
                 if model.showCompletedView {
                     row(.completed, L("Completed"), "checkmark.square", count: 0)
+                    row(.wontDo, L("Won't do"), "xmark.square", count: 0)
                 }
                 if model.counts.trash > 0 {
                     row(.trash, L("Trash"), "trash", count: model.counts.trash)
@@ -459,6 +460,7 @@ struct FilterEditor: View {
             Picker(L("Status"), selection: $status) {
                 Text(L("Open")).tag(FilterStatus.open)
                 Text(L("Completed")).tag(FilterStatus.done)
+                Text(L("Won't do")).tag(FilterStatus.wont)
                 Text(L("All")).tag(FilterStatus.all)
             }
             TextField(L("Contains"), text: $text)

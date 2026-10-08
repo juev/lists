@@ -137,6 +137,7 @@ struct TaskListView: View {
             case .inbox: return (L("Inbox is empty"), "tray", L("Everything without a list lands here."))
             case .upcoming: return (L("Nothing scheduled"), "calendar", L("Tasks with a future date will show up here."))
             case .completed: return (L("Nothing completed yet"), "checkmark.square", "")
+            case .wontDo: return (L("No tasks marked won't do"), "xmark.square", "")
             case .trash: return (L("Trash is empty"), "trash", "")
             case .search: return (L("Nothing found"), "magnifyingglass", "")
             default: return (L("No tasks"), "checklist", L("Press ⌘N to add a task."))
@@ -256,7 +257,7 @@ struct TaskRow: View {
             Button {
                 model.toggleDone(task)
             } label: {
-                Image(systemName: task.done != nil ? "checkmark.square.fill" : "square")
+                Image(systemName: task.wont ? "xmark.square.fill" : task.done != nil ? "checkmark.square.fill" : "square")
                     .font(AppFont.style(.title3))
                     .foregroundStyle(task.done != nil ? Color.secondary : (model.list(task.listId)?.tint ?? .accentColor))
             }
@@ -343,7 +344,7 @@ struct TaskRow: View {
     private var showsOrigin: Bool {
         if depth > 0 { return false }
         switch model.effectiveScope {
-        case .today, .upcoming, .tag, .search, .completed, .trash, .filter: return true
+        case .today, .upcoming, .tag, .search, .completed, .wontDo, .trash, .filter: return true
         default: return false
         }
     }
@@ -389,6 +390,9 @@ struct TaskRow: View {
                 }
             }
             Button(L("Duplicate")) { model.perform { _ = try $0.duplicateTask(id: task.id) } }
+            if task.done == nil {
+                Button(L("Won't do")) { model.wontDo(task) }
+            }
             Divider()
             Button(L("Delete"), role: .destructive) { model.delete(task) }
         }

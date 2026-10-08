@@ -133,6 +133,8 @@ struct AppCommands: Commands {
             scope(L("All"), .all, "4")
             scope(L("Completed"), .completed, "5")
                 .disabled(!model.showCompletedView)
+            scope(L("Won't do"), .wontDo, "6")
+                .disabled(!model.showCompletedView)
             Divider()
             Button(L("Sync now")) { model.syncNow() }
                 .keyboardShortcut("r")
@@ -143,7 +145,7 @@ struct AppCommands: Commands {
     private func scope(_ title: String, _ scope: Scope, _ key: KeyEquivalent) -> some View {
         Button(title) {
             // The menu may not have caught up with the setting yet.
-            if scope == .completed, !model.showCompletedView { return }
+            if scope == .completed || scope == .wontDo, !model.showCompletedView { return }
             model.search = ""
             model.scope = scope
             openWindow(id: "main")

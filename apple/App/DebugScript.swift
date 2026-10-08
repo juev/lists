@@ -34,6 +34,7 @@ import SwiftUI
 /// `chips` (prints which chip of the card has the keyboard and which of its popovers is open; `key:backtab+shift` is ⇧Tab),
 /// `ghost` (puts the windows of a hidden app on screen transparent, deaf to the mouse and without the keyboard, popovers that open later among them:
 /// a hidden app shows no popovers; key presses then go to the open popover first, as they do when it has the keyboard),
+/// `wont` (closes the selected task as "won't do"; `task` prints the state of the selected task), `go:completed` and `go:wontdo` (switch to those views),
 /// `completedview:on` and `completedview:off` (flip the setting that offers the Completed view), `scope` (prints the current view),
 /// `keepdone:5` (sets for how many minutes a completed task stays in view) and `keepdone` alone (prints it),
 /// `appearance:dark`, `appearance:light` and `appearance:system` (choose the look the way Settings does),
@@ -169,10 +170,12 @@ enum DebugScript {
                 case "repeat":
                     if let index = Int(argument), Repeat.presets.indices.contains(index) { AppModel.shared.draft?.repeat = Repeat.presets[index].1 }
                 case "done": AppModel.shared.selectedTask.map(AppModel.shared.toggleDone)
+                case "wont": AppModel.shared.selectedTask.map(AppModel.shared.wontDo)
                 case "task":
                     let task = AppModel.shared.selectedTask
-                    print("debug: task \(task?.title ?? "none"), due \(task?.due ?? "none"), repeat \(task?.repeat?.summary ?? "none")")
+                    print("debug: task \(task?.title ?? "none"), due \(task?.due ?? "none"), repeat \(task?.repeat?.summary ?? "none"), state \(task.map { $0.wont ? "wont do" : $0.done != nil ? "completed" : "open" } ?? "none")")
                 case "inbox": AppModel.shared.scope = .inbox
+                case "go": AppModel.shared.scope = argument == "wontdo" ? .wontDo : argument == "completed" ? .completed : .inbox
                 case "completedview": AppModel.shared.showCompletedView = argument != "off"
                 case "keepdone":
                     if let minutes = UInt32(argument) { AppModel.shared.setKeepDone(minutes) }
