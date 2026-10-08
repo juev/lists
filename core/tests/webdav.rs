@@ -68,13 +68,13 @@ fn two_devices_converge_through_webdav() {
 
     let up = a.sync_now().unwrap();
     assert!(up.pushed > 0);
-    assert_eq!(up.blobs_uploaded, 1);
+    assert_eq!(a.sync_attachments().unwrap().uploaded, 1);
     // The client created the collections itself, starting from the missing base.
     assert!(dav.root.path().join("dav/user/lists/v1/vault.json").is_file());
 
     let down = b.sync_now().unwrap();
     assert!(down.pulled > 0);
-    assert_eq!(down.blobs_downloaded, 1);
+    assert_eq!(b.sync_attachments().unwrap().downloaded, 1);
     assert_eq!(view(&b, Scope::Inbox), ["через WebDAV"]);
     let files = b.attachments(t.id.clone()).unwrap();
     assert_eq!(

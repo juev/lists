@@ -3,14 +3,82 @@
 mod common;
 
 use std::path::Path;
+use std::sync::{mpsc, Mutex};
 
 use common::*;
-use lists_core::sync::remote::DirRemote;
+use lists_core::sync::remote::{DirRemote, Remote};
 use lists_core::*;
 use tempfile::TempDir;
 
 fn sync(d: &Device, storage: &TempDir) -> SyncReport {
     d.sync_with(&DirRemote::new(storage.path())).unwrap()
+}
+
+/// S34: the pass that moves attachment content.
+fn sync_files(d: &Device, storage: &TempDir) -> AttachmentReport {
+    d.sync_attachments_with(&DirRemote::new(storage.path())).unwrap()
+}
+
+fn attach(d: &Device, task: &TaskItem, name: &str, content: &[u8]) -> Attachment {
+    let src = tempfile::tempdir().unwrap();
+    let file = src.path().join(name);
+    std::fs::write(&file, content).unwrap();
+    d.add_attachment(task.id.clone(), file.to_string_lossy().into_owned(), None)
+        .unwrap()
+}
+
+fn folder(storage: &TempDir) -> SyncConfig {
+    SyncConfig::Folder {
+        path: storage.path().to_string_lossy().into_owned(),
+    }
+}
+
+/// A storage that keeps the fields and refuses attachment content whose path has `refused` in it.
+struct NoBlobs {
+    inner: DirRemote,
+    refused: String,
+}
+
+impl NoBlobs {
+    fn new(storage: &TempDir, refused: &str) -> NoBlobs {
+        NoBlobs {
+            inner: DirRemote::new(storage.path()),
+            refused: refused.into(),
+        }
+    }
+
+    fn check(&self, path: &str) -> Result<()> {
+        if path.contains("/blobs/") && path.contains(&self.refused) {
+            return Err(AppError::Sync {
+                msg: "507 Insufficient Storage".into(),
+            });
+        }
+        Ok(())
+    }
+}
+
+impl Remote for NoBlobs {
+    fn id(&self) -> String {
+        self.inner.id()
+    }
+    fn list(&self, dir: &str) -> Result<Vec<String>> {
+        self.inner.list(dir)
+    }
+    fn get(&self, path: &str) -> Result<Option<Vec<u8>>> {
+        self.check(path)?;
+        self.inner.get(path)
+    }
+    fn put(&self, path: &str, data: &[u8]) -> Result<()> {
+        self.check(path)?;
+        self.inner.put(path, data)
+    }
+    fn delete(&self, path: &str) -> Result<()> {
+        self.inner.delete(path)
+    }
+    fn exists(&self, path: &str) -> Result<bool> {
+        self.check(path)?;
+        self.inner.exists(path)
+    }
 }
 
 /// Both devices see everything the other has written.
@@ -405,15 +473,10 @@ fn s13_attachment_content_follows_the_record() {
     let storage = tempfile::tempdir().unwrap();
     let (a, b) = (device(), device());
     let t = add(&a, "с фото");
-    let src = tempfile::tempdir().unwrap();
-    let file = src.path().join("photo.png");
-    std::fs::write(&file, b"\x89PNG not really").unwrap();
-    let att = a
-        .add_attachment(t.id.clone(), file.to_string_lossy().into_owned(), None)
-        .unwrap();
+    let att = attach(&a, &t, "photo.png", b"\x89PNG not really");
 
-    let up = sync(&a, &storage);
-    assert_eq!(up.blobs_uploaded, 1);
+    sync(&a, &storage);
+    assert_eq!(sync_files(&a, &storage).uploaded, 1);
     assert!(Path::new(
         &storage
             .path()
@@ -423,8 +486,8 @@ fn s13_attachment_content_follows_the_record() {
     )
     .exists());
 
-    let down = sync(&b, &storage);
-    assert_eq!(down.blobs_downloaded, 1);
+    sync(&b, &storage);
+    assert_eq!(sync_files(&b, &storage).downloaded, 1);
     let got = b.attachments(t.id).unwrap();
     assert_eq!(got.len(), 1);
     assert_eq!(got[0].sha256, att.sha256);
@@ -434,8 +497,10 @@ fn s13_attachment_content_follows_the_record() {
     );
 
     // Nothing is transferred twice.
-    assert_eq!(sync(&a, &storage), SyncReport::default());
-    assert_eq!(sync(&b, &storage), SyncReport::default());
+    for d in [&a, &b] {
+        assert_eq!(sync(d, &storage), SyncReport::default());
+        assert_eq!(sync_files(d, &storage), AttachmentReport::default());
+    }
 }
 
 #[test]
@@ -443,13 +508,9 @@ fn s13_corrupted_attachment_content_is_not_stored() {
     let storage = tempfile::tempdir().unwrap();
     let (a, b) = (device(), device());
     let t = add(&a, "с файлом");
-    let src = tempfile::tempdir().unwrap();
-    let file = src.path().join("a.txt");
-    std::fs::write(&file, b"original").unwrap();
-    let att = a
-        .add_attachment(t.id.clone(), file.to_string_lossy().into_owned(), None)
-        .unwrap();
+    let att = attach(&a, &t, "a.txt", b"original");
     sync(&a, &storage);
+    sync_files(&a, &storage);
     std::fs::write(
         storage
             .path()
@@ -460,7 +521,282 @@ fn s13_corrupted_attachment_content_is_not_stored() {
     )
     .unwrap();
 
-    assert_eq!(sync(&b, &storage).blobs_downloaded, 0);
+    sync(&b, &storage);
+    let pass = sync_files(&b, &storage);
+    assert_eq!((pass.downloaded, pass.waiting), (0, 1));
+    assert_eq!(b.attachments(t.id).unwrap()[0].local_path, None);
+    // Nothing of the attempt is left next to the content.
+    assert_eq!(std::fs::read_dir(b.data_dir().join("blobs")).unwrap().count(), 0);
+}
+
+#[test]
+fn s34_the_fields_arrive_before_the_content() {
+    let storage = tempfile::tempdir().unwrap();
+    let (a, b) = (device(), device());
+    for d in [&a, &b] {
+        d.set_sync_config(folder(&storage)).unwrap();
+    }
+    let t = add(&a, "с файлом");
+    attach(&a, &t, "a.txt", b"content");
+    assert_eq!(a.sync_status().unwrap().attachments_waiting, 1);
+
+    // The run for the fields leaves the content alone, on both sides.
+    let up = a.sync_now().unwrap();
+    assert!(up.pushed > 0);
+    assert_eq!((up.blobs_uploaded, up.blobs_downloaded), (0, 0));
+    assert!(!storage.path().join("lists/v1/blobs").exists());
+    let down = b.sync_now().unwrap();
+    assert_eq!((down.blobs_uploaded, down.blobs_downloaded), (0, 0));
+    assert_eq!(view(&b, Scope::Inbox), ["с файлом"]);
+    let got = b.attachments(t.id.clone()).unwrap();
+    assert_eq!((got.len(), got[0].local_path.as_ref()), (1, None));
+    assert_eq!(b.task(t.id.clone()).unwrap().attachments, 1);
+    assert_eq!(b.sync_status().unwrap().attachments_waiting, 1);
+
+    // B asks before A has uploaded: nothing to take yet, and no failure.
+    assert_eq!(
+        b.sync_attachments().unwrap(),
+        AttachmentReport {
+            uploaded: 0,
+            downloaded: 0,
+            waiting: 1
+        }
+    );
+    assert_eq!(
+        a.sync_attachments().unwrap(),
+        AttachmentReport {
+            uploaded: 1,
+            downloaded: 0,
+            waiting: 0
+        }
+    );
+    assert_eq!(
+        b.sync_attachments().unwrap(),
+        AttachmentReport {
+            uploaded: 0,
+            downloaded: 1,
+            waiting: 0
+        }
+    );
+    for d in [&a, &b] {
+        let status = d.sync_status().unwrap();
+        assert_eq!((status.attachments_waiting, status.last_error), (0, None));
+    }
+    assert!(b.attachments(t.id).unwrap()[0].local_path.is_some());
+}
+
+#[test]
+fn s34_refused_content_holds_back_neither_the_task_nor_the_other_files() {
+    let storage = tempfile::tempdir().unwrap();
+    let (a, b) = (device(), device());
+    let t = add(&a, "с двумя файлами");
+    let big = attach(&a, &t, "big.bin", b"refused by the storage");
+    let small = attach(&a, &t, "small.txt", b"accepted");
+    let refusing = NoBlobs::new(&storage, &big.sha256);
+
+    assert!(a.sync_with(&refusing).unwrap().pushed > 0);
+    let up = a.sync_attachments_with(&refusing).unwrap();
+    assert_eq!((up.uploaded, up.waiting), (1, 1));
+
+    assert!(b.sync_with(&refusing).unwrap().pulled > 0);
+    assert_eq!(view(&b, Scope::Inbox), ["с двумя файлами"]);
+    let down = b.sync_attachments_with(&refusing).unwrap();
+    assert_eq!((down.downloaded, down.waiting), (1, 1));
+    let present: Vec<String> = b
+        .attachments(t.id.clone())
+        .unwrap()
+        .into_iter()
+        .filter(|f| f.local_path.is_some())
+        .map(|f| f.sha256)
+        .collect();
+    assert_eq!(present, [small.sha256]);
+
+    // The storage takes the file after all: the next pass moves it without another edit.
+    assert_eq!(sync_files(&a, &storage).uploaded, 1);
+    let rest = sync_files(&b, &storage);
+    assert_eq!((rest.downloaded, rest.waiting), (1, 0));
+}
+
+/// A storage where reading attachment content waits until the test lets it go.
+struct Held {
+    inner: DirRemote,
+    entered: Mutex<mpsc::Sender<()>>,
+    release: Mutex<mpsc::Receiver<()>>,
+}
+
+impl Remote for Held {
+    fn id(&self) -> String {
+        self.inner.id()
+    }
+    fn list(&self, dir: &str) -> Result<Vec<String>> {
+        self.inner.list(dir)
+    }
+    fn get(&self, path: &str) -> Result<Option<Vec<u8>>> {
+        if path.contains("/blobs/") {
+            let _ = self.entered.lock().unwrap().send(());
+            // Goes on when the test sends a word or hangs up.
+            let _ = self.release.lock().unwrap().recv();
+        }
+        self.inner.get(path)
+    }
+    fn put(&self, path: &str, data: &[u8]) -> Result<()> {
+        self.inner.put(path, data)
+    }
+    fn delete(&self, path: &str) -> Result<()> {
+        self.inner.delete(path)
+    }
+    fn exists(&self, path: &str) -> Result<bool> {
+        self.inner.exists(path)
+    }
+}
+
+#[test]
+fn s34_s35_a_pass_under_way_holds_back_neither_the_fields_nor_a_request() {
+    let storage = tempfile::tempdir().unwrap();
+    let (a, b) = (device(), device());
+    b.set_sync_config(folder(&storage)).unwrap();
+    let t = add(&a, "с файлами");
+    let wanted = attach(&a, &t, "first.txt", b"first");
+    attach(&a, &t, "second.txt", b"second");
+    sync(&a, &storage);
+    sync_files(&a, &storage);
+    sync(&b, &storage);
+
+    let (entered, inside) = mpsc::channel();
+    let (go, release) = mpsc::channel::<()>();
+    let held = Held {
+        inner: DirRemote::new(storage.path()),
+        entered: Mutex::new(entered),
+        release: Mutex::new(release),
+    };
+    let store = b.store.clone();
+    let pass = std::thread::spawn(move || store.sync_attachments_with(&held).unwrap());
+    inside.recv().unwrap();
+
+    // The pass is in the middle of a download: a run for the fields goes through.
+    a.set_title(t.id.clone(), "переименовано".into()).unwrap();
+    sync(&a, &storage);
+    assert!(sync(&b, &storage).pulled > 0);
+    assert_eq!(view(&b, Scope::Inbox), ["переименовано"]);
+    // A second pass does not queue behind the first.
+    let second = sync_files(&b, &storage);
+    assert_eq!((second.downloaded, second.waiting), (0, 2));
+    // And a request for one file gets it.
+    let got = b.fetch_attachment(wanted.id).unwrap();
+    assert_eq!(std::fs::read(got.local_path.unwrap()).unwrap(), b"first");
+
+    drop(go);
+    assert_eq!(pass.join().unwrap().waiting, 0);
+    let files = b.attachments(t.id).unwrap();
+    assert!(files.iter().all(|f| f.local_path.is_some()));
+    // Each download wrote a file of its own and left nothing behind.
+    assert_eq!(std::fs::read_dir(b.data_dir().join("blobs")).unwrap().count(), 2);
+}
+
+#[test]
+fn s34_content_that_cannot_move_does_not_fail_configured_sync() {
+    let storage = tempfile::tempdir().unwrap();
+    let a = device();
+    a.set_sync_config(folder(&storage)).unwrap();
+    let t = add(&a, "с файлом");
+    let att = attach(&a, &t, "a.txt", b"content");
+    // A file where the folder of this content has to be: the upload cannot succeed.
+    std::fs::create_dir_all(storage.path().join("lists/v1/blobs")).unwrap();
+    std::fs::write(storage.path().join("lists/v1/blobs").join(&att.sha256[..2]), b"").unwrap();
+
+    assert!(a.sync_now().unwrap().pushed > 0);
+    let pass = a.sync_attachments().unwrap();
+    assert_eq!((pass.uploaded, pass.waiting), (0, 1));
+    let status = a.sync_status().unwrap();
+    assert_eq!((status.pending, status.attachments_waiting), (0, 1));
+    assert_eq!(status.last_error, None);
+    assert_eq!(status.last_ok.as_deref(), Some(NOW));
+}
+
+#[test]
+fn s34_attachments_of_deleted_tasks_and_removed_attachments_do_not_wait() {
+    let storage = tempfile::tempdir().unwrap();
+    let a = device();
+    a.set_sync_config(folder(&storage)).unwrap();
+    let t = add(&a, "с файлом");
+    let att = attach(&a, &t, "a.txt", b"content");
+    assert_eq!(a.sync_status().unwrap().attachments_waiting, 1);
+    a.remove_attachment(att.id).unwrap();
+    assert_eq!(a.sync_status().unwrap().attachments_waiting, 0);
+    assert_eq!(a.sync_attachments().unwrap(), AttachmentReport::default());
+
+    // Without a file storage nothing waits, whatever is attached.
+    attach(&a, &t, "b.txt", b"other");
+    a.set_sync_config(SyncConfig::Off).unwrap();
+    assert_eq!(a.sync_status().unwrap().attachments_waiting, 0);
+    assert_eq!(a.sync_attachments().unwrap(), AttachmentReport::default());
+    a.set_sync_config(SyncConfig::CalDav {
+        url: "http://127.0.0.1:9/dav".into(),
+        user: String::new(),
+    })
+    .unwrap();
+    assert_eq!(a.sync_status().unwrap().attachments_waiting, 0);
+    assert_eq!(a.sync_attachments().unwrap(), AttachmentReport::default());
+}
+
+#[test]
+fn s35_one_attachment_is_fetched_on_request() {
+    let storage = tempfile::tempdir().unwrap();
+    let (a, b) = (device(), device());
+    for d in [&a, &b] {
+        d.set_sync_config(folder(&storage)).unwrap();
+    }
+    let t = add(&a, "с двумя файлами");
+    let first = attach(&a, &t, "first.txt", b"first");
+    let second = attach(&a, &t, "second.txt", b"second");
+    a.sync_now().unwrap();
+    b.sync_now().unwrap();
+
+    // The content has not reached the storage: the request says so and changes nothing.
+    assert!(b.fetch_attachment(second.id.clone()).is_err());
+    assert_eq!(b.sync_status().unwrap().attachments_waiting, 2);
+
+    a.sync_attachments().unwrap();
+    let got = b.fetch_attachment(second.id.clone()).unwrap();
+    assert_eq!((got.id.as_str(), got.name.as_str()), (second.id.as_str(), "second.txt"));
+    assert_eq!(std::fs::read(got.local_path.as_ref().unwrap()).unwrap(), b"second");
+    let rest = b.attachments(t.id.clone()).unwrap();
+    assert_eq!(rest.iter().find(|f| f.id == first.id).unwrap().local_path, None);
+    assert_eq!(b.sync_status().unwrap().attachments_waiting, 1);
+
+    // Asking for what is already here costs nothing and gives the same file.
+    std::fs::remove_dir_all(storage.path().join("lists/v1/blobs")).unwrap();
+    assert_eq!(b.fetch_attachment(second.id).unwrap(), got);
+    assert!(b.fetch_attachment(first.id).is_err());
+    assert!(matches!(
+        b.fetch_attachment("no such attachment".into()),
+        Err(AppError::NotFound { .. })
+    ));
+}
+
+#[test]
+fn s35_content_that_does_not_match_its_hash_is_not_fetched() {
+    let storage = tempfile::tempdir().unwrap();
+    let (a, b) = (device(), device());
+    for d in [&a, &b] {
+        d.set_sync_config(folder(&storage)).unwrap();
+    }
+    let t = add(&a, "с файлом");
+    let att = attach(&a, &t, "a.txt", b"original");
+    a.sync_now().unwrap();
+    a.sync_attachments().unwrap();
+    b.sync_now().unwrap();
+    std::fs::write(
+        storage
+            .path()
+            .join("lists/v1/blobs")
+            .join(&att.sha256[..2])
+            .join(&att.sha256),
+        b"tampered",
+    )
+    .unwrap();
+
+    assert!(b.fetch_attachment(att.id).is_err());
     assert_eq!(b.attachments(t.id).unwrap()[0].local_path, None);
 }
 
@@ -673,13 +1009,9 @@ fn s13_attachment_hash_from_the_storage_never_becomes_a_path() {
     let storage = tempfile::tempdir().unwrap();
     let (a, b) = (device(), device());
     let t = add(&a, "с файлом");
-    let src = tempfile::tempdir().unwrap();
-    let file = src.path().join("a.txt");
-    std::fs::write(&file, b"content").unwrap();
-    let att = a
-        .add_attachment(t.id.clone(), file.to_string_lossy().into_owned(), None)
-        .unwrap();
+    let att = attach(&a, &t, "a.txt", b"content");
     sync(&a, &storage);
+    sync_files(&a, &storage);
 
     // A file that exists on B outside its blob folder, and a log in the storage
     // that points the attachment at it.
@@ -695,10 +1027,12 @@ fn s13_attachment_hash_from_the_storage_never_becomes_a_path() {
     }
 
     sync(&b, &storage);
-    let got = b.attachments(t.id).unwrap();
+    assert_eq!(sync_files(&b, &storage), AttachmentReport::default());
+    let got = b.attachments(t.id.clone()).unwrap();
     assert_eq!(got.len(), 1);
     assert_eq!(got[0].sha256, "", "a value that is not a hash is dropped");
     assert_eq!(got[0].local_path, None);
+    assert!(b.fetch_attachment(got[0].id.clone()).is_err());
 }
 
 #[test]
