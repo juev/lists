@@ -136,7 +136,11 @@
 "File or image…" = "Файл или изображение…";
 "File or image" = "Файл или изображение";
 "Add field" = "Добавить поле";
-"downloads on the next sync" = "загрузится при синхронизации";
+"not downloaded yet, click to download" = "ещё не загружено, нажмите, чтобы загрузить";
+"downloading…" = "загружается…";
+"could not download, try again later" = "не удалось загрузить, попробуйте позже";
+"Download now" = "Загрузить сейчас";
+"Attachments waiting to sync: %@" = "Вложения ждут синхронизации: %@";
 "Remove attachment" = "Открепить";
 "Quick Look" = "Быстрый просмотр";
 "Open in Default App" = "Открыть в программе по умолчанию";

@@ -17,7 +17,7 @@ use lists_core::{Scope, Store, SyncConfig};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let usage = "usage: lists <data folder> list | add <text> | note <task id> [text] | webdav <url> <user> | sync | sync-off | import <file>";
+    let usage = "usage: lists <data folder> list | add <text> | note <task id> [text] | webdav <url> <user> | folder <path> | attach <task id> <file> | files <task id> | sync | sync-off | import <file>";
     let (dir, command) = match args.as_slice() {
         [dir, command, ..] => (dir.clone(), command.as_str()),
         _ => return Err(usage.into()),
@@ -37,6 +37,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             url: url.clone(),
             user: user.clone(),
         })?,
+        ("folder", [path]) => store.set_sync_config(SyncConfig::Folder { path: path.clone() })?,
+        ("attach", [id, file]) => println!("{}", store.add_attachment(id.clone(), file.clone(), None)?.id),
+        ("files", [id]) => {
+            for file in store.attachments(id.clone())? {
+                println!("{}\t{}\t{}", file.id, file.name, file.local_path.unwrap_or_default());
+            }
+            println!("waiting: {}", store.sync_status()?.attachments_waiting);
+        }
         ("sync", []) => {
             // The password is never stored by the core; here it comes from the environment.
             store.set_sync_password(std::env::var("LISTS_PASSWORD").ok());

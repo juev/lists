@@ -67,7 +67,7 @@ struct SyncIndicator: View {
                 } else if status.lastError != nil {
                     Image(systemName: "exclamationmark.icloud").foregroundStyle(.orange)
                 } else {
-                    Image(systemName: status.pending > 0 ? "arrow.triangle.2.circlepath.icloud" : "checkmark.icloud")
+                    Image(systemName: status.pending > 0 || status.attachmentsWaiting > 0 ? "arrow.triangle.2.circlepath.icloud" : "checkmark.icloud")
                         .foregroundStyle(.secondary)
                 }
             }
@@ -78,6 +78,7 @@ struct SyncIndicator: View {
     private func help(_ status: SyncStatus) -> String {
         if let error = status.lastError { return L("Sync failed: %@\nClick to retry.", "\(error)") }
         if status.pending > 0 { return L("Waiting to upload: %@", "\(status.pending)") }
+        if status.attachmentsWaiting > 0 { return L("Attachments waiting to sync: %@", "\(status.attachmentsWaiting)") }
         if let ok = status.lastOk { return L("Synced: %@", "\(Moment.label(ok))") }
         return L("Sync now")
     }

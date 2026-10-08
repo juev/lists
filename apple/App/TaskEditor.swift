@@ -18,6 +18,9 @@ struct TaskEditor: View {
     @State private var popover: Popover?
     @State private var importing = false
     @State private var attachments: [Attachment] = []
+    /// Attachments being downloaded on request, and those the last request did not get (R76).
+    @State private var fetching: Set<String> = []
+    @State private var fetchFailed: Set<String> = []
     @State private var notesFocused = false
     @State private var wantsNotes = false
     @State private var menus = MenuAnchors()
@@ -50,6 +53,7 @@ struct TaskEditor: View {
         }
         .onAppear(perform: load)
         .onChange(of: task) { _, _ in load() }
+        .onChange(of: model.attachmentsArrived) { _, _ in load() }
         // A chip that is gone, a tag just removed for one, hands the keyboard to the chip that took its place.
         .onChange(of: stops) { before, now in
             guard let chip, !now.contains(chip), let index = before.firstIndex(of: chip) else { return }
@@ -264,10 +268,11 @@ struct TaskEditor: View {
             ForEach(attachments, id: \.id) { file in
                 HStack(spacing: 6) {
                     AttachmentIcon(file: file)
-                    Button(file.name) { show(file) }
+                    Button(file.name) { open(file) }
                         .buttonStyle(.link)
-                        .disabled(file.localPath == nil)
-                    Text(file.localPath == nil ? L("downloads on the next sync") : ByteCountFormatter.string(fromByteCount: Int64(file.size), countStyle: .file))
+                        .disabled(fetching.contains(file.id))
+                        .help(file.localPath == nil ? L("Download now") : "")
+                    Text(caption(file))
                         .font(AppFont.style(.caption))
                         .foregroundStyle(.tertiary)
                     Button {
@@ -306,9 +311,40 @@ struct TaskEditor: View {
         #if DEBUG
         .onReceive(NotificationCenter.default.publisher(for: DebugScript.showFile)) { note in
             guard model.selection == task.id, let index = note.object as? Int, attachments.indices.contains(index) else { return }
-            show(attachments[index])
+            open(attachments[index])
         }
         #endif
+    }
+
+    private func caption(_ file: Attachment) -> String {
+        if file.localPath != nil { return ByteCountFormatter.string(fromByteCount: Int64(file.size), countStyle: .file) }
+        if fetching.contains(file.id) { return L("downloading…") }
+        return fetchFailed.contains(file.id) ? L("could not download, try again later") : L("not downloaded yet, click to download")
+    }
+
+    private func open(_ file: Attachment) {
+        if file.localPath == nil { fetch(file) } else { show(file) }
+    }
+
+    /// R76: a file that has not arrived is downloaded ahead of the others and shown.
+    private func fetch(_ file: Attachment) {
+        guard let store = model.store, !fetching.contains(file.id) else { return }
+        let id = file.id
+        fetching.insert(id)
+        fetchFailed.remove(id)
+        _Concurrency.Task {
+            let arrived = await _Concurrency.Task.detached(priority: .userInitiated) {
+                (try? store.fetchAttachment(id: id))?.localPath != nil
+            }.value
+            fetching.remove(id)
+            guard arrived else {
+                fetchFailed.insert(id)
+                return
+            }
+            model.attachmentsMoved(arrived: true)
+            load()
+            if let got = attachments.first(where: { $0.id == id }) { show(got) }
+        }
     }
 
     /// Shows the file inside the app (R54); the system decides how from its name.
