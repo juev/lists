@@ -32,6 +32,8 @@ import UserNotifications
 /// `windows` (prints the windows of the app),
 /// `notes` (prints the note of the open card as it is drawn: what is hidden, what is replaced and which fonts differ),
 /// `shot:/path/to.png` (draws that note into a file, on screen or not),
+/// `winshot:/path/to.png` (draws the main window into a file, on screen or not; a hidden window draws no rows, those of the sidebar among them),
+/// `viewicons:/path/to.png` (draws the icons of the built-in views into a file in the light and the dark look and prints the symbol of each),
 /// `rowshot:/path/to.png` (draws the row of the selected task into a file, eight pixels to a point: a hidden window draws no rows;
 /// the launch arguments `-textScale 1.5 -fontDesign serif` choose the text for one run and save nothing),
 /// `caret:5` (puts the cursor of that note at the offset), `box:0` (clicks the checkbox with that number in it),
@@ -344,6 +346,31 @@ enum DebugScript {
                             try? NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: argument))
                             print("debug: row drawn, \(image.width)x\(image.height) pixels, text scale \(AppModel.shared.textScale), design \(AppModel.shared.fontDesign)")
                         }
+                    }
+                case "viewicons":
+                    let scopes: [Scope] = [.inbox, .today, .upcoming, .all, .completed, .wontDo, .trash]
+                    let icons = scopes.compactMap { scope in scope.viewIcon.map { (scope, $0) } }
+                    func column(_ scheme: ColorScheme) -> some View {
+                        VStack(alignment: .leading, spacing: 6) {
+                            ForEach(icons, id: \.1.symbol) { icon in
+                                Label { Text(icon.1.symbol) } icon: { Image(systemName: icon.1.symbol).foregroundStyle(icon.1.tint) }
+                            }
+                        }
+                        .padding(10).frame(width: 220, alignment: .leading)
+                        .background(scheme == .dark ? Color.black : Color.white).environment(\.colorScheme, scheme)
+                    }
+                    let renderer = ImageRenderer(content: HStack(spacing: 0) { column(.light); column(.dark) })
+                    renderer.scale = 4
+                    if let image = renderer.cgImage {
+                        try? NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: argument))
+                    }
+                    print("debug: view icons \(icons.map { "\($0.0): \($0.1.symbol)" })")
+                case "winshot":
+                    // The whole main window drawn into a file, hidden or not.
+                    if let view = target?.contentView?.superview ?? target?.contentView, let image = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
+                        view.cacheDisplay(in: view.bounds, to: image)
+                        try? image.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: argument))
+                        print("debug: window drawn, \(image.pixelsWide)x\(image.pixelsHigh) pixels")
                     }
                 case "shot":
                     // The note drawn into a file: it need not be on screen for that.
