@@ -147,6 +147,7 @@ struct AppCommands: Commands {
             // The menu may not have caught up with the setting yet.
             if scope == .completed || scope == .wontDo, !model.showCompletedView { return }
             model.search = ""
+            model.searchOpen = false
             model.scope = scope
             openWindow(id: "main")
         }

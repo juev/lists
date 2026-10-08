@@ -41,9 +41,16 @@ struct MainWindow: View {
                             .help(L("New task"))
                     }
                     ToolbarItem(placement: .primaryAction) { SyncIndicator() }
+                    ToolbarItem(placement: .primaryAction) {
+                        Button {
+                            model.searchOpen = true
+                            model.searchRequests += 1
+                        } label: { Image(systemName: "magnifyingglass") }
+                            .keyboardShortcut("f", modifiers: .command)
+                            .help(L("Search"))
+                    }
                 }
         }
-        .searchable(text: $model.search, placement: .toolbar, prompt: L("Search"))
         .onAppear { model.undoManager = undoManager }
         .onChange(of: undoManager) { _, new in model.undoManager = new }
         .alert(model.alertIsError ? L("That did not work") : "Lists", isPresented: Binding(get: { model.alert != nil }, set: { if !$0 { model.alert = nil } })) {
@@ -104,7 +111,8 @@ struct ViewTitle: View {
         HStack(spacing: 8) {
             Image(systemName: icon.symbol).foregroundStyle(icon.tint)
             Text(model.scopeTitle).lineLimit(1)
-            Spacer(minLength: 0)
+            Spacer(minLength: 8)
+            if model.searchOpen || model.isSearching { SearchField().font(AppFont.style(.body)) }
         }
         .font(AppFont.style(.title, weight: .bold))
         .padding(.horizontal, 20)
@@ -112,6 +120,37 @@ struct ViewTitle: View {
         .padding(.bottom, 8)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isHeader)
+    }
+}
+
+/// The field search opens into, at the right of the large title (R80): Esc clears the search and closes
+/// the field, and so does leaving it empty.
+struct SearchField: View {
+    @Environment(AppModel.self) private var model
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        @Bindable var model = model
+        HStack(spacing: 4) {
+            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+            TextField(L("Search"), text: $model.search)
+                .textFieldStyle(.plain)
+                .focused($focused)
+                .onExitCommand(perform: close)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .frame(width: 200)
+        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 7))
+        // On the next turn: the field is not in the window yet while it appears.
+        .onAppear { DispatchQueue.main.async { focused = true } }
+        .onChange(of: model.searchRequests) { _, _ in focused = true }
+        .onChange(of: focused) { _, now in if !now && model.search.isEmpty { model.searchOpen = false } }
+    }
+
+    private func close() {
+        model.search = ""
+        model.searchOpen = false
     }
 }
 
@@ -152,7 +191,7 @@ struct Sidebar: View {
 
     var body: some View {
         @Bindable var model = model
-        List(selection: Binding<Scope?>(get: { model.scope }, set: { if let s = $0 { model.search = ""; model.scope = s } })) {
+        List(selection: Binding<Scope?>(get: { model.scope }, set: { if let s = $0 { model.search = ""; model.searchOpen = false; model.scope = s } })) {
             Section {
                 row(.inbox, L("Inbox"), count: model.counts.inbox)
                     .dropDestination(for: String.self) { ids, _ in moveTasks(ids, to: "inbox") }
