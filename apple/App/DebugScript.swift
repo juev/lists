@@ -16,8 +16,9 @@ import SwiftUI
 /// and prints each value it applies: a hidden app shows no popovers), `datefield:time` and `datefield:calendar` (give the keyboard to its time field or to its calendar),
 /// `dateeditor` alone prints who has the keyboard in the date editor and the day selected in its calendar,
 /// `files` (prints the attachments of the selected task: the name of the copy made for Quick Look, the type the system sees in it and the size of the thumbnail;
-/// then the file whose row has the keyboard and how many times a card asked Quick Look for a file),
-/// `attach:/path` (attaches the file to the selected task), `showfile:0` (shows the attachment with that number the way a click on its name does;
+/// whether its content is on this device; then how many attachments wait to sync,
+/// the file whose row has the keyboard and how many times a card asked Quick Look for a file),
+/// `sync` (starts a sync the way the toolbar icon does), `attach:/path` (attaches the file to the selected task), `showfile:0` (shows the attachment with that number the way a click on its name does;
 /// a hidden app shows no panel), `preview` (prints whether the Quick Look panel is open) and `preview:close` (closes it),
 /// `inbox` (switches to the Inbox view), `open` (expands the selected task), `edit` (opens it with the caret in the title, the way Return does), `select:1` and `select:-1` (move the selection the way the arrow keys do),
 /// `pick:title` (selects a row the way a click does), `indent` and `outdent` (move the selected task under the one above and back),
@@ -147,12 +148,14 @@ enum DebugScript {
                         let named = AttachmentFiles.named(file)
                         let thumbnail = file.localPath.flatMap { AttachmentFiles.thumbnail(path: $0, pixels: 56) }
                         let type = named.flatMap { try? $0.resourceValues(forKeys: [.contentTypeKey]).contentType?.identifier } ?? "-"
-                        print("debug: file \(file.name) named=\(named?.lastPathComponent ?? "-") type=\(type) thumbnail=\(thumbnail.map { "\($0.width)x\($0.height)" } ?? "-")")
+                        print("debug: file \(file.name) named=\(named?.lastPathComponent ?? "-") type=\(type) thumbnail=\(thumbnail.map { "\($0.width)x\($0.height)" } ?? "-") content=\(file.localPath == nil ? "waiting" : "here")")
                     }
+                    print("debug: attachments waiting to sync \(AppModel.shared.syncStatus.attachmentsWaiting)")
                     print("debug: file row with the keyboard \(file ?? "none"), asked to show \(shows) times")
                 case "attach":
                     if let id = AppModel.shared.selection { AppModel.shared.attach([URL(fileURLWithPath: argument)], to: id) }
                 case "showfile": NotificationCenter.default.post(name: showFile, object: Int(argument) ?? 0)
+                case "sync": AppModel.shared.syncNow()
                 case "preview":
                     if step.contains(":") {
                         if QLPreviewPanel.sharedPreviewPanelExists() { QLPreviewPanel.shared().close() }

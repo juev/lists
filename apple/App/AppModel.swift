@@ -51,7 +51,9 @@ final class AppModel {
     var creatingList = false
     var creatingFilter = false
 
-    var syncStatus = SyncStatus(configured: false, pending: 0, lastOk: nil, lastError: nil)
+    var syncStatus = SyncStatus(configured: false, pending: 0, attachmentsWaiting: 0, lastOk: nil, lastError: nil)
+    /// Moves when attachment content has arrived: an open card reads its files again (R76).
+    var attachmentsArrived = 0
     var syncing = false
     /// Text size factor and font design chosen in Settings.
     /// A launch argument (`-textScale 1.5`) arrives as a string.
@@ -155,6 +157,7 @@ final class AppModel {
     }
 
     @ObservationIgnored private var syncDebounce: DispatchWorkItem?
+    @ObservationIgnored private var movingAttachments = false
     @ObservationIgnored private var timer: Timer?
     /// Fires when the first of the kept completed tasks is due to leave its view (R68).
     @ObservationIgnored private var keptTimer: Timer?
@@ -744,10 +747,32 @@ final class AppModel {
                 // A failure is kept in the status and shown by the toolbar icon, never as an alert.
                 if case .success(let report) = result, report.pulled > 0 || report.blobsDownloaded > 0 {
                     self.reload()
+                    if report.blobsDownloaded > 0 { self.attachmentsArrived += 1 }
                 } else if let status = try? store.syncStatus() {
                     self.syncStatus = status
                 }
+                if case .success = result { self.syncAttachments() }
             }
         }
+    }
+
+    /// S34: the content of attachments moves after the fields are on screen,
+    /// and the next run for the fields does not wait for it.
+    private func syncAttachments() {
+        guard let store, !movingAttachments else { return }
+        movingAttachments = true
+        _Concurrency.Task.detached(priority: .utility) {
+            let downloaded = (try? store.syncAttachments())?.downloaded ?? 0
+            await MainActor.run {
+                self.movingAttachments = false
+                self.attachmentsMoved(arrived: downloaded > 0)
+            }
+        }
+    }
+
+    /// The count of waiting attachments changed; with `arrived`, content is new on this device.
+    func attachmentsMoved(arrived: Bool) {
+        if let status = try? store?.syncStatus() { syncStatus = status }
+        if arrived { attachmentsArrived += 1 }
     }
 }

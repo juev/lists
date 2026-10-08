@@ -412,8 +412,9 @@ struct SettingsView: View {
     private var status: String? {
         let s = model.syncStatus
         if let error = s.lastError { return L("The last attempt failed: %@", "\(error)") }
-        if let ok = s.lastOk { return L("Synced: %@", "\(Moment.label(ok))") }
-        return nil
+        let waiting = s.attachmentsWaiting > 0 ? L("Attachments waiting to sync: %@", "\(s.attachmentsWaiting)") : nil
+        if let ok = s.lastOk { return [L("Synced: %@", "\(Moment.label(ok))"), waiting].compactMap { $0 }.joined(separator: "\n") }
+        return waiting
     }
 
     private func load() {
