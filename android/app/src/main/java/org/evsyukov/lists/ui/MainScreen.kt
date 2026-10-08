@@ -27,6 +27,13 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.List
 import androidx.compose.material.icons.automirrored.outlined.Notes
+import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.CheckBox
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DisabledByDefault
+import androidx.compose.material.icons.filled.Inbox
+import androidx.compose.material.icons.filled.Layers
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.CheckBox
@@ -35,17 +42,13 @@ import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.CloudDone
 import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.CloudSync
-import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DisabledByDefault
 import androidx.compose.material.icons.outlined.FilterList
 import androidx.compose.material.icons.outlined.Folder
-import androidx.compose.material.icons.outlined.Inbox
 import androidx.compose.material.icons.outlined.Inventory2
-import androidx.compose.material.icons.outlined.Layers
 import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material.icons.outlined.StarOutline
 import androidx.compose.material.icons.outlined.Tag
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -100,6 +103,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -765,14 +769,14 @@ private fun Drawer(
     ModalDrawerSheet {
         Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 8.dp)) {
             val inbox = state.list("inbox")
-            DrawerItem(str(R.string.inbox), Icons.Outlined.Inbox, state.counts.inbox, state.scope == Scope.Inbox, onLong = inbox?.let { { onEditList(it) } }) { onSelect(Scope.Inbox) }
-            DrawerItem(str(R.string.today), Icons.Outlined.StarOutline, state.counts.today, state.scope == Scope.Today, alert = state.counts.overdue > 0u) { onSelect(Scope.Today) }
-            DrawerItem(str(R.string.upcoming), Icons.Outlined.CalendarMonth, state.counts.upcoming, state.scope == Scope.Upcoming) { onSelect(Scope.Upcoming) }
-            DrawerItem(str(R.string.all), Icons.Outlined.Layers, 0u, state.scope == Scope.All) { onSelect(Scope.All) }
-            DrawerItem(str(R.string.completed), Icons.Outlined.CheckBox, 0u, state.scope == Scope.Completed) { onSelect(Scope.Completed) }
-            DrawerItem(str(R.string.wont_do), Icons.Outlined.DisabledByDefault, 0u, state.scope == Scope.WontDo) { onSelect(Scope.WontDo) }
+            DrawerItem(str(R.string.inbox), Icons.Filled.Inbox, state.counts.inbox, state.scope == Scope.Inbox, tint = viewTint(ViewTint.Blue), onLong = inbox?.let { { onEditList(it) } }) { onSelect(Scope.Inbox) }
+            DrawerItem(str(R.string.today), Icons.Filled.Star, state.counts.today, state.scope == Scope.Today, alert = state.counts.overdue > 0u, tint = viewTint(ViewTint.Yellow)) { onSelect(Scope.Today) }
+            DrawerItem(str(R.string.upcoming), Icons.Filled.CalendarMonth, state.counts.upcoming, state.scope == Scope.Upcoming, tint = viewTint(ViewTint.Pink)) { onSelect(Scope.Upcoming) }
+            DrawerItem(str(R.string.all), Icons.Filled.Layers, 0u, state.scope == Scope.All, tint = viewTint(ViewTint.Teal)) { onSelect(Scope.All) }
+            DrawerItem(str(R.string.completed), Icons.Filled.CheckBox, 0u, state.scope == Scope.Completed, tint = viewTint(ViewTint.Green)) { onSelect(Scope.Completed) }
+            DrawerItem(str(R.string.wont_do), Icons.Filled.DisabledByDefault, 0u, state.scope == Scope.WontDo, tint = viewTint(ViewTint.Gray)) { onSelect(Scope.WontDo) }
             if (state.counts.trash > 0u) {
-                DrawerItem(str(R.string.trash), Icons.Outlined.Delete, state.counts.trash, state.scope == Scope.Trash) { onSelect(Scope.Trash) }
+                DrawerItem(str(R.string.trash), Icons.Filled.Delete, state.counts.trash, state.scope == Scope.Trash, tint = viewTint(ViewTint.Gray)) { onSelect(Scope.Trash) }
             }
 
             DrawerHeading(str(R.string.lists))
@@ -818,6 +822,21 @@ private fun Drawer(
         }
     }
 }
+
+// The colours of the icons of the built-in views (R79): the same as on macOS, a lighter shade in the dark look.
+// They come neither from a list nor from the dynamic palette.
+internal enum class ViewTint(val light: Long, val dark: Long) {
+    Blue(0xFF007AFF, 0xFF0A84FF),
+    Yellow(0xFFFFCC00, 0xFFFFD60A),
+    Pink(0xFFFF2D55, 0xFFFF375F),
+    Teal(0xFF30B0C7, 0xFF40C8E0),
+    Green(0xFF34C759, 0xFF30D158),
+    Gray(0xFF8E8E93, 0xFF98989D),
+}
+
+@Composable
+private fun viewTint(tint: ViewTint): Color =
+    Color(if (MaterialTheme.colorScheme.surface.luminance() < 0.5f) tint.dark else tint.light)
 
 @Composable
 private fun DrawerHeading(text: String) {
