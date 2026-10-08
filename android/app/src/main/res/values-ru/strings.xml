@@ -39,6 +39,8 @@
     <string name="duplicate">Дублировать</string>
     <string name="delete">Удалить</string>
     <string name="subtask">Подзадача</string>
+    <string name="subtasks">Подзадачи</string>
+    <string name="attachments">Вложения</string>
     <string name="due_today">Срок — сегодня</string>
     <string name="inbox">Входящие</string>
     <string name="upcoming">Предстоящие</string>

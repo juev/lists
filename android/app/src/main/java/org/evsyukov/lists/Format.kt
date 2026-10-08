@@ -66,6 +66,18 @@ fun dateLabel(value: String): String {
     return if (hasTime(value)) "$text, ${value.takeLast(5)}" else text
 }
 
+/**
+ * The due date as the row of a task shows it (R72), and whether it is late: an overdue date always with
+ * its day; otherwise without the day when the heading of the group names it, which leaves the time or nothing.
+ */
+fun rowDate(due: String?, open: Boolean, dayInHeading: Boolean, label: (String) -> String = ::dateLabel): Pair<String, Boolean>? {
+    if (due == null) return null
+    val late = open && isOverdue(due)
+    if (late && dayOf(due) < today()) return label(due) to true
+    if (!dayInHeading) return label(due) to late
+    return if (hasTime(due)) due.takeLast(5) to late else null
+}
+
 /** Section title for a day in the Upcoming view. */
 fun dayHeading(day: String): String {
     val date = runCatching { LocalDate.parse(day) }.getOrNull() ?: return day
