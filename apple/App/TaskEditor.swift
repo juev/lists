@@ -368,11 +368,16 @@ struct TaskTitleField: View {
     @FocusState private var focused: Bool
 
     var body: some View {
-        TextField(L("Title"), text: $title)
+        // A long title wraps and is read in full (R73); Return still finishes the edit.
+        TextField(L("Title"), text: $title, axis: .vertical)
             .textFieldStyle(.plain)
             .font(AppFont.style(.body))
             .focused($focused)
             .onSubmit(commit)
+            // Pasted text of several lines becomes one line: a title has no line breaks.
+            .onChange(of: title) { _, new in
+                if new.contains(where: \.isNewline) { title = new.split(whereSeparator: \.isNewline).joined(separator: " ") }
+            }
             .onAppear {
                 title = task.title
                 takeKeyboard()
