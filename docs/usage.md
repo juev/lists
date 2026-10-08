@@ -28,6 +28,8 @@ Search looks through titles and notes in all lists.
 
 Only the title is required. A task can also have notes, a start date, a due date, a priority, tags, a repeat rule, a reminder, attachments and subtasks.
 
+In the list on macOS and Android a line under the title shows what is set: the dates, a repeat sign, the count of subtasks, the number of attachments, a mark for a note, the tags, and in views that mix lists the list of the task. The mark only tells that the task has a note; the note is read in the card.
+
 - **Dates** are a day or a day with a time, without a time zone: "tomorrow at 9:00" stays nine in the morning after a flight. A task with a start date in the future is hidden from Today until that day.
 - **Priority** is none, low, medium or high.
 - **Tags** are created by typing them. A tag that no task carries disappears from the sidebar.
