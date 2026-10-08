@@ -68,6 +68,7 @@ data class UiState(
             Scope.Upcoming -> str(R.string.upcoming)
             Scope.All -> str(R.string.all)
             Scope.Completed -> str(R.string.completed)
+            Scope.WontDo -> str(R.string.wont_do)
             Scope.Trash -> str(R.string.trash)
             is Scope.List -> list(s.id)?.displayName() ?: str(R.string.list)
             is Scope.Tag -> "#${s.name}"
@@ -86,7 +87,7 @@ data class UiState(
 
     val readOnly: Boolean
         get() = when (effectiveScope) {
-            Scope.Completed, Scope.Trash, is Scope.Search -> true
+            Scope.Completed, Scope.WontDo, Scope.Trash, is Scope.Search -> true
             else -> false
         }
 }
@@ -168,7 +169,7 @@ class MainViewModel : ViewModel() {
         }
         Scope.Upcoming -> runs(tasks, { dayOf(it.due ?: it.start ?: "") }, ::dayHeading)
         Scope.All -> runs(tasks, { it.listId }, { id -> state.list(id)?.displayName().orEmpty() })
-        Scope.Completed -> runs(tasks, { dayOf(it.done ?: "") }, ::dateLabel)
+        Scope.Completed, Scope.WontDo -> runs(tasks, { dayOf(it.done ?: "") }, ::dateLabel)
         else -> listOf(TaskSection("all", null, tasks))
     }
 
@@ -249,6 +250,17 @@ class MainViewModel : ViewModel() {
             else -> null
         }
         act(notice) { it.completeTask(task.id) }
+    }
+
+    /** Closes the task as "won't do" (R69); what follows is the same as after completing it. */
+    fun wontDo(task: TaskItem) {
+        if (task.done != null) return
+        val notice = when {
+            task.repeat != null -> Notice(str(R.string.moved_to_next))
+            _state.value.keepDone == 0u -> Notice(str(R.string.wont_do_notice)) { it.reopenTask(task.id) }
+            else -> null
+        }
+        act(notice) { it.wontDoTask(task.id) }
     }
 
     fun delete(task: TaskItem) {

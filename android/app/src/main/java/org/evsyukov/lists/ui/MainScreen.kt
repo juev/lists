@@ -34,6 +34,7 @@ import androidx.compose.material.icons.outlined.CloudDone
 import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.CloudSync
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.DisabledByDefault
 import androidx.compose.material.icons.outlined.FilterList
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Inbox
@@ -374,6 +375,7 @@ private fun EmptyState(scope: Scope) {
         Scope.Inbox -> str(R.string.empty_inbox) to str(R.string.empty_inbox_hint)
         Scope.Upcoming -> str(R.string.empty_upcoming) to str(R.string.empty_upcoming_hint)
         Scope.Completed -> str(R.string.empty_completed) to ""
+        Scope.WontDo -> str(R.string.empty_wont_do) to ""
         Scope.Trash -> str(R.string.empty_trash_view) to ""
         is Scope.Search -> str(R.string.empty_search) to ""
         else -> str(R.string.empty_list) to str(R.string.empty_list_hint)
@@ -511,7 +513,7 @@ private fun SwipeRow(task: TaskItem, state: UiState, onToggle: () -> Unit, onOpe
 }
 
 private fun UiState.showsOrigin(): Boolean = when (effectiveScope) {
-    Scope.Today, Scope.Upcoming, Scope.Completed, Scope.Trash, is Scope.Tag, is Scope.Search, is Scope.Filter -> true
+    Scope.Today, Scope.Upcoming, Scope.Completed, Scope.WontDo, Scope.Trash, is Scope.Tag, is Scope.Search, is Scope.Filter -> true
     else -> false
 }
 
@@ -529,7 +531,11 @@ fun TaskRow(task: TaskItem, state: UiState, onToggle: () -> Unit, onOpen: () -> 
     ) {
         IconButton(onClick = onToggle, enabled = !task.deleted && !task.isLog) {
             Icon(
-                if (done) Icons.Outlined.CheckBox else Icons.Outlined.CheckBoxOutlineBlank,
+                when {
+                    task.wont -> Icons.Outlined.DisabledByDefault
+                    done -> Icons.Outlined.CheckBox
+                    else -> Icons.Outlined.CheckBoxOutlineBlank
+                },
                 contentDescription = if (done) str(R.string.reopen) else str(R.string.complete),
                 tint = if (done) MaterialTheme.colorScheme.onSurfaceVariant else state.list(task.listId)?.tint() ?: MaterialTheme.colorScheme.primary,
             )
@@ -631,6 +637,9 @@ private fun TaskMenu(task: TaskItem, state: UiState, model: MainViewModel, onOpe
                 )
             }
             DropdownMenuItem(text = { Text(str(R.string.duplicate)) }, onClick = { run { model.act { it.duplicateTask(task.id) } } })
+            if (task.done == null) {
+                DropdownMenuItem(text = { Text(str(R.string.wont_do)) }, onClick = { run { model.wontDo(task) } })
+            }
             HorizontalDivider()
             DropdownMenuItem(
                 text = { Text(str(R.string.delete), color = MaterialTheme.colorScheme.error) },
@@ -658,6 +667,7 @@ private fun Drawer(
             DrawerItem(str(R.string.upcoming), Icons.Outlined.CalendarMonth, state.counts.upcoming, state.scope == Scope.Upcoming) { onSelect(Scope.Upcoming) }
             DrawerItem(str(R.string.all), Icons.Outlined.Layers, 0u, state.scope == Scope.All) { onSelect(Scope.All) }
             DrawerItem(str(R.string.completed), Icons.Outlined.CheckBox, 0u, state.scope == Scope.Completed) { onSelect(Scope.Completed) }
+            DrawerItem(str(R.string.wont_do), Icons.Outlined.DisabledByDefault, 0u, state.scope == Scope.WontDo) { onSelect(Scope.WontDo) }
             if (state.counts.trash > 0u) {
                 DrawerItem(str(R.string.trash), Icons.Outlined.Delete, state.counts.trash, state.scope == Scope.Trash) { onSelect(Scope.Trash) }
             }

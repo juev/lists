@@ -239,4 +239,7 @@
     <string name="leave_at_once">at once</string>
     <string name="leave_after_minutes">after %1$d min</string>
     <string name="leave_after_hour">after an hour</string>
+    <string name="wont_do">Won\'t do</string>
+    <string name="wont_do_notice">Marked \"won\'t do\"</string>
+    <string name="empty_wont_do">No tasks marked \"won\'t do\"</string>
 </resources>

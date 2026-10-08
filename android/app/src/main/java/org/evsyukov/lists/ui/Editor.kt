@@ -39,6 +39,7 @@ import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.CheckBox
 import androidx.compose.material.icons.outlined.CheckBoxOutlineBlank
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.DisabledByDefault
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
@@ -214,7 +215,11 @@ fun EditorSheet(editing: Editing, state: UiState, model: MainViewModel, onRemind
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 4.dp, end = 4.dp)) {
                 IconButton(onClick = { model.toggleDone(task) }, enabled = !locked) {
                     Icon(
-                        if (task.done != null) Icons.Outlined.CheckBox else Icons.Outlined.CheckBoxOutlineBlank,
+                        when {
+                            task.wont -> Icons.Outlined.DisabledByDefault
+                            task.done != null -> Icons.Outlined.CheckBox
+                            else -> Icons.Outlined.CheckBoxOutlineBlank
+                        },
                         if (task.done != null) str(R.string.reopen) else str(R.string.complete),
                         tint = state.list(task.listId)?.tint() ?: MaterialTheme.colorScheme.primary,
                     )
@@ -236,6 +241,9 @@ fun EditorSheet(editing: Editing, state: UiState, model: MainViewModel, onRemind
                         } else {
                             DropdownMenuItem(text = { Text(str(R.string.move_to_list)) }, onClick = { menu = false; dialog = "list" })
                             DropdownMenuItem(text = { Text(str(R.string.duplicate)) }, onClick = { menu = false; model.act { it.duplicateTask(task.id) } })
+                            if (task.done == null && !task.isLog) {
+                                DropdownMenuItem(text = { Text(str(R.string.wont_do)) }, onClick = { menu = false; model.wontDo(task) })
+                            }
                             DropdownMenuItem(
                                 text = { Text(str(R.string.delete), color = MaterialTheme.colorScheme.error) },
                                 onClick = { menu = false; model.delete(task) },
@@ -1124,7 +1132,7 @@ fun FilterDialog(filter: SavedFilter?, state: UiState, model: MainViewModel, onD
                 }
                 Text(str(R.string.status), style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 12.dp))
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    for ((value, label) in listOf(FilterStatus.OPEN to R.string.status_open, FilterStatus.DONE to R.string.completed, FilterStatus.ALL to R.string.all)) {
+                    for ((value, label) in listOf(FilterStatus.OPEN to R.string.status_open, FilterStatus.DONE to R.string.completed, FilterStatus.WONT to R.string.wont_do, FilterStatus.ALL to R.string.all)) {
                         FilterChip(selected = status == value, onClick = { status = value }, label = { Text(str(label)) })
                     }
                 }
