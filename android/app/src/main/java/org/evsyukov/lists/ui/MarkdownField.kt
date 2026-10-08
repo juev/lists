@@ -327,6 +327,7 @@ fun MarkdownField(
         onValueChange = { next -> field = continued(field, next) ?: next },
         enabled = enabled,
         textStyle = shownStyle,
+        keyboardOptions = SentenceKeyboard,
         cursorBrush = SolidColor(scheme.primary),
         visualTransformation = transformation,
         interactionSource = interaction,

@@ -222,7 +222,7 @@ fun NewTaskCard(
                 placeholder = { Text(str(R.string.new_task)) },
                 singleLine = true,
                 colors = transparentField(),
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                keyboardOptions = SentenceKeyboard.copy(imeAction = ImeAction.Done),
                 keyboardActions = KeyboardActions(onDone = { submit() }),
                 modifier = Modifier.weight(1f).focusRequester(focus),
             )
@@ -251,6 +251,7 @@ fun NewTaskCard(
                 maxLines = if (full) Int.MAX_VALUE else 1,
                 textStyle = MaterialTheme.typography.bodyMedium,
                 colors = transparentField(),
+                keyboardOptions = SentenceKeyboard,
                 modifier = Modifier.fillMaxWidth(),
             )
             // The same fields as in the editor, so that nothing has to be typed as text.
