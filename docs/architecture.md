@@ -15,8 +15,8 @@
 | Слой | Язык | Что в нём живёт |
 |---|---|---|
 | Ядро | Rust | модель данных, SQLite, слияние изменений, синхронизация, повторы, разбор строки быстрого ввода |
-| macOS | Swift, SwiftUI | окна, строка меню, глобальная горячая клавиша, Share Extension |
-| Android | Kotlin, Jetpack Compose | экраны, share target, плитка быстрых настроек, ярлыки |
+| macOS | Swift, SwiftUI | окна, строка меню, глобальная горячая клавиша, Share Extension, события календаря системы (EventKit) |
+| Android | Kotlin, Jetpack Compose | экраны, share target, плитка быстрых настроек, ярлыки, события календаря системы (`CalendarContract`) |
 
 Ядро подключается к обеим оболочкам через UniFFI: он генерирует Swift- и Kotlin-обёртки по аннотациям в Rust-коде.
 
