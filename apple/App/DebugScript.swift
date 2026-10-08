@@ -23,7 +23,9 @@ import SwiftUI
 /// `pick:title` (selects a row the way a click does), `indent` and `outdent` (move the selected task under the one above and back),
 /// `newtask` (opens the card of a new task), `title:text` (fills its title), `finish` (closes it the way Esc does),
 /// `due:2026-10-05` and `repeat:2` (give the new-task card a due date and the preset with that index, the way its popovers do),
-/// `task` (prints the due date and the repeat of the selected task), `done` (completes it),
+/// `due` alone (takes the due date away the way ⌫ in its popover does), `priority:3` (chooses the priority with that index in the card, 0 for none),
+/// `mklist:Name` (creates a list whose defaults for new tasks are the high priority and "due today"), `draftlist:Name` (chooses that list in the card, `draftlist:inbox` the Inbox), `start:2026-10-05` (gives the card a start date); `draft` also prints the due date, the priority, the tags and the list the card shows,
+/// `task` (prints the due date, the priority, the tags and the repeat of the selected task), `done` (completes it),
 /// `cards` (prints the open cards and the selected row), `rows` (prints the rows in the order they are drawn), `panel` (prints whether quick entry is on screen and what runs modally),
 /// `windows` (prints the windows of the app),
 /// `notes` (prints the note of the open card as it is drawn: what is hidden, what is replaced and which fonts differ),
@@ -35,7 +37,7 @@ import SwiftUI
 /// `chips` (prints which chip of the card has the keyboard and which of its popovers is open; `key:backtab+shift` is ⇧Tab),
 /// `ghost` (puts the windows of a hidden app on screen transparent, deaf to the mouse and without the keyboard, popovers that open later among them:
 /// a hidden app shows no popovers; key presses then go to the open popover first, as they do when it has the keyboard),
-/// `wont` (closes the selected task as "won't do"; `task` prints the state of the selected task), `go:completed` and `go:wontdo` (switch to those views),
+/// `wont` (closes the selected task as "won't do"; `task` prints the state of the selected task), `go:completed`, `go:wontdo`, `go:today`, `go:#tag` and `go:List name` (switch to those views),
 /// `completedview:on` and `completedview:off` (flip the setting that offers the Completed view), `scope` (prints the current view),
 /// `keepdone:5` (sets for how many minutes a completed task stays in view) and `keepdone` alone (prints it),
 /// `appearance:dark`, `appearance:light` and `appearance:system` (choose the look the way Settings does),
@@ -119,6 +121,10 @@ enum DebugScript {
                 case "draft":
                     let draft = AppModel.shared.draft
                     print("debug: draft files \(draft?.files.map(\.lastPathComponent) ?? []), start \(draft?.start ?? "none"), due \(draft?.due ?? "none")")
+                    if let draft {
+                        let model = AppModel.shared
+                        print("debug: draft shows due \(model.shownDue(draft) ?? "none"), priority \(model.shownPriority(draft).title), tags \(draft.tags), list \(model.list(draft.listId).map(model.listName) ?? "none")")
+                    }
                 case "code":
                     // A press on the keyboard comes with the window a popover hangs on, not with the popover.
                     if let code = UInt16(argument) { post(code: code, to: popoverWindow.map { $0.parent ?? $0 } ?? dateEditor) }
@@ -166,17 +172,38 @@ enum DebugScript {
                 case "title": AppModel.shared.draft?.title = argument
                 case "finish": AppModel.shared.finishDraft()
                 case "due":
-                    AppModel.shared.draft?.due = argument
-                    AppModel.shared.draft?.dueIsDefault = false
+                    AppModel.shared.draft?.due = argument.isEmpty ? nil : argument
+                    AppModel.shared.draft?.dueRemoved = argument.isEmpty
+                case "priority":
+                    if let index = Int(argument), Priority.all.indices.contains(index) {
+                        AppModel.shared.draft?.priority = Priority.all[index]
+                        AppModel.shared.draft?.priorityChosen = true
+                    }
+                case "mklist":
+                    AppModel.shared.perform { store in
+                        let id = try store.createList(name: argument).id
+                        try store.setListDefaults(id: id, priority: .high, dueToday: true)
+                    }
+                case "draftlist":
+                    if let list = AppModel.shared.lists.first(where: { $0.name == argument || $0.id == argument }) { AppModel.shared.draft?.listId = list.id }
+                case "start": AppModel.shared.draft?.start = argument.isEmpty ? nil : argument
                 case "repeat":
                     if let index = Int(argument), Repeat.presets.indices.contains(index) { AppModel.shared.draft?.repeat = Repeat.presets[index].1 }
                 case "done": AppModel.shared.selectedTask.map(AppModel.shared.toggleDone)
                 case "wont": AppModel.shared.selectedTask.map(AppModel.shared.wontDo)
                 case "task":
                     let task = AppModel.shared.selectedTask
-                    print("debug: task \(task?.title ?? "none"), due \(task?.due ?? "none"), repeat \(task?.repeat?.summary ?? "none"), state \(task.map { $0.wont ? "wont do" : $0.done != nil ? "completed" : "open" } ?? "none")")
+                    print("debug: task \(task?.title ?? "none"), due \(task?.due ?? "none"), priority \(task?.priority.title ?? "none"), tags \(task?.tags ?? []), repeat \(task?.repeat?.summary ?? "none"), state \(task.map { $0.wont ? "wont do" : $0.done != nil ? "completed" : "open" } ?? "none")")
                 case "inbox": AppModel.shared.scope = .inbox
-                case "go": AppModel.shared.scope = argument == "wontdo" ? .wontDo : argument == "completed" ? .completed : .inbox
+                case "go":
+                    let model = AppModel.shared
+                    switch argument {
+                    case "wontdo": model.scope = .wontDo
+                    case "completed": model.scope = .completed
+                    case "today": model.scope = .today
+                    case _ where argument.hasPrefix("#"): model.scope = .tag(name: String(argument.dropFirst()))
+                    default: model.scope = model.lists.first { $0.name == argument }.map { .list(id: $0.id) } ?? .inbox
+                    }
                 case "completedview": AppModel.shared.showCompletedView = argument != "off"
                 case "keepdone":
                     if let minutes = UInt32(argument) { AppModel.shared.setKeepDone(minutes) }
