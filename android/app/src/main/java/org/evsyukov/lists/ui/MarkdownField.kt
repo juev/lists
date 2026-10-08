@@ -351,13 +351,11 @@ fun MarkdownField(
                                 val shown = current
                                 fun hit(offset: Int) = offset < result.layoutInput.text.length && result.getBoundingBox(offset).contains(at)
                                 val box = shown.boxes.firstOrNull { hit(it.first) }
-                                // A link opens from a note that is being read; in one being typed a tap places the cursor.
-                                val link = if (focused) null else shown.links.firstOrNull { (range, _) -> range.any(::hit) }
-                                if (box == null && link == null) return@awaitEachGesture
-                                down.consume()
-                                val up = waitForUpOrCancellation(PointerEventPass.Initial) ?: return@awaitEachGesture
-                                up.consume()
+                                val link = shown.links.firstOrNull { (range, _) -> range.any(::hit) }
                                 if (box != null) {
+                                    down.consume()
+                                    val up = waitForUpOrCancellation(PointerEventPass.Initial) ?: return@awaitEachGesture
+                                    up.consume()
                                     val mark = box.second
                                     val text = field.text
                                     if (mark < text.length) {
@@ -366,6 +364,12 @@ fun MarkdownField(
                                         save()
                                     }
                                 } else if (link != null) {
+                                    // R71: a tap opens the link, with the keyboard in the note or not. The press stays
+                                    // with the field, so a long press selects; the lift is taken, so the cursor stays.
+                                    val up = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
+                                        waitForUpOrCancellation(PointerEventPass.Initial)
+                                    } ?: return@awaitEachGesture
+                                    up.consume()
                                     runCatching { uriHandler.openUri(link.second) }
                                 }
                             }
