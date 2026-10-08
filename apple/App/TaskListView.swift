@@ -288,7 +288,7 @@ struct TaskRow: View {
                         .font(AppFont.style(.body))
                         .strikethrough(task.done != nil)
                         .foregroundStyle(task.done != nil ? .secondary : .primary)
-                        .lineLimit(2)
+                        .lineLimit(1)
                     if !isExpanded { summary }
                 }
             }
