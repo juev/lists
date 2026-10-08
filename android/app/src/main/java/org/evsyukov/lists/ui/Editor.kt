@@ -253,9 +253,6 @@ fun EditorSheet(editing: Editing, state: UiState, model: MainViewModel, onRemind
                         } else {
                             DropdownMenuItem(text = { Text(str(R.string.move_to_list)) }, onClick = { menu = false; dialog = "list" })
                             DropdownMenuItem(text = { Text(str(R.string.duplicate)) }, onClick = { menu = false; model.act { it.duplicateTask(task.id) } })
-                            if (task.done == null && !task.isLog) {
-                                DropdownMenuItem(text = { Text(str(R.string.wont_do)) }, onClick = { menu = false; model.wontDo(task) })
-                            }
                             DropdownMenuItem(
                                 text = { Text(str(R.string.delete), color = MaterialTheme.colorScheme.error) },
                                 onClick = { menu = false; model.delete(task) },
