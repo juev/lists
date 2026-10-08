@@ -26,6 +26,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.List
+import androidx.compose.material.icons.automirrored.outlined.Notes
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.CheckBox
@@ -94,6 +95,7 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -581,16 +583,18 @@ fun TaskRow(task: TaskItem, state: UiState, onToggle: () -> Unit, onOpen: () -> 
     }
 }
 
-/** One line under the title: only what is set. */
+/** One line under the title: only what is set (R72). */
 @Composable
 private fun Summary(task: TaskItem, state: UiState, showOrigin: Boolean) {
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
-    val parts = buildList {
+    // A part without text is the mark of a note: an icon, not the text of the note.
+    val parts = buildList<Pair<String?, Color>> {
         task.due?.let { add(dateLabel(it) to (if (task.done == null && isOverdue(it)) MaterialTheme.colorScheme.error else muted)) }
             ?: task.start?.let { add(str(R.string.from_date, dateLabel(it).lowercase()) to muted) }
         if (task.repeat != null) add("↻" to muted)
         if (task.subtasksTotal > 0u) add("☑ ${task.subtasksDone}/${task.subtasksTotal}" to muted)
         if (task.attachments > 0u) add("📎 ${task.attachments}" to muted)
+        if (task.notes.isNotEmpty()) add(null to muted)
         task.tags.forEach { add("#$it" to muted) }
         if (showOrigin) {
             val list = state.list(task.listId)?.displayName().orEmpty()
@@ -598,9 +602,15 @@ private fun Summary(task: TaskItem, state: UiState, showOrigin: Boolean) {
         }
     }
     if (parts.isEmpty()) return
-    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+    val style = MaterialTheme.typography.bodySmall
+    val line = with(LocalDensity.current) { style.lineHeight.toDp() }
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
         for ((text, color) in parts) {
-            Text(text, style = MaterialTheme.typography.bodySmall, color = color, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (text == null) {
+                Icon(Icons.AutoMirrored.Outlined.Notes, str(R.string.notes), Modifier.size(line), tint = color)
+            } else {
+                Text(text, style = style, color = color, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
         }
     }
 }
