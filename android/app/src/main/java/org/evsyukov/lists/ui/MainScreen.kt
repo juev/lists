@@ -424,8 +424,6 @@ private fun NewTaskSheet(state: UiState, onAdd: (TaskDraft) -> Unit, onDismiss: 
             onSubmit = onAdd,
             modifier = Modifier.navigationBarsPadding().padding(start = 8.dp, end = 8.dp, bottom = 8.dp),
             keepOpen = true,
-            // A task added in Today belongs to today unless the card or the line says otherwise.
-            viewDue = today().takeIf { state.scope == Scope.Today },
         )
     }
 }

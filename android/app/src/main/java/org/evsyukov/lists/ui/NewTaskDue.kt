@@ -1,15 +1,17 @@
 package org.evsyukov.lists.ui
 
-/**
- * The due date a new task gets without the person picking one (R57): the date
- * of the view, or today in a list whose default is "due today" (R2). The list
- * gives its date only to a task without a start date, as in the core.
- */
-internal fun presetDue(viewDue: String?, listDueToday: Boolean, start: String?, today: String): String? =
-    viewDue ?: today.takeIf { listDueToday && start == null }
+import uniffi.lists_core.Priority
 
 /**
- * The due date a task just created is to end up with (R41, R57).
+ * The due date a new task gets without the person picking one (R75): today in
+ * a list whose default is "due today" (R2). The list gives its date only to a
+ * task without a start date, as in the core. The view gives none.
+ */
+internal fun presetDue(listDueToday: Boolean, start: String?, today: String): String? =
+    today.takeIf { listDueToday && start == null }
+
+/**
+ * The due date a task just created is to end up with (R41, R75).
  *
  * `due` is what stood next to the due icon. A date picked there wins over
  * everything; one that was only preset yields to `created`, the date the core
@@ -21,4 +23,19 @@ internal fun finalDue(due: String?, isPreset: Boolean, removed: Boolean, created
     due != null -> created ?: due
     removed -> typed
     else -> created
+}
+
+/**
+ * The priority a task just created is to end up with (R41, R75).
+ *
+ * `picked` is what the person chose next to the flag, null while the field is
+ * untouched: the task then keeps `created`, the priority the core gave it
+ * from its title or its list. A chosen priority wins over both. Choosing
+ * "none" takes the default of the list away and leaves `typed`, the priority
+ * the title names.
+ */
+internal fun finalPriority(picked: Priority?, created: Priority, typed: Priority): Priority = when (picked) {
+    null -> created
+    Priority.NONE -> typed
+    else -> picked
 }

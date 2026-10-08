@@ -85,12 +85,13 @@ data class TaskDraft(
     val start: String?,
     /** What stood next to the due icon. */
     val due: String?,
-    /** The view or the list put the date there, the person did not pick it: a date in the title wins over it (R41). */
+    /** The list put the date there, the person did not pick it: a date in the title wins over it (R41). */
     val dueIsPreset: Boolean,
-    /** The person took the date away in the card: the task gets none from the view or the list (R57). */
+    /** The person took the date away in the card: the task gets none from the list (R75). */
     val dueRemoved: Boolean,
     val repeat: Repeat?,
-    val priority: Priority,
+    /** What was chosen next to the flag; null while the field is untouched, and the title or the list decides (R75). */
+    val priority: Priority?,
     /** Null where the place the task goes to decides the list, as under a project. */
     val listId: String?,
     /** Whether dates, priority, tags and a list are picked out of the title. */
@@ -121,7 +122,9 @@ fun Store.createFrom(context: Context, draft: TaskDraft, parentId: String? = nul
     if (due != task.due) setDue(task.id, due)
     // After the dates: the rule is counted from them.
     draft.repeat?.let { setRepeat(task.id, it) }
-    if (draft.priority != Priority.NONE) setPriority(task.id, draft.priority)
+    val typedPriority = if (draft.priority == Priority.NONE && draft.parse) parseQuick(line).priority else Priority.NONE
+    val priority = finalPriority(draft.priority, task.priority, typedPriority)
+    if (priority != task.priority) setPriority(task.id, priority)
     attach(context, this, task.id, draft.files)
     return task(task.id)
 }
@@ -177,8 +180,6 @@ fun NewTaskCard(
     keepOpen: Boolean = false,
     /** The note taken from the clipboard (R58); it may arrive after the card is shown. */
     pastedNotes: String? = null,
-    /** The due date the view gives a task added in it, as Today does (R57). */
-    viewDue: String? = null,
 ) {
     // Saved, not just remembered: the card keeps what was entered when the screen is turned (R63).
     var text by rememberSaveable { mutableStateOf(title) }
@@ -195,7 +196,8 @@ fun NewTaskCard(
     var due by rememberSaveable { mutableStateOf<String?>(null) }
     var dueRemoved by rememberSaveable { mutableStateOf(false) }
     var repeat by rememberSaveable(stateSaver = repeatSaver) { mutableStateOf<Repeat?>(null) }
-    var priority by rememberSaveable { mutableStateOf(Priority.NONE) }
+    // Null until the person chooses: the default of the list shows through and follows the chosen list.
+    var priority by rememberSaveable { mutableStateOf<Priority?>(null) }
     var chosenList by rememberSaveable { mutableStateOf(listId) }
     var dialog by rememberSaveable { mutableStateOf<String?>(null) }
     // Files picked here join the ones the card was opened with.
@@ -211,12 +213,14 @@ fun NewTaskCard(
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { focus.requestFocus() }
 
-    // The date the task gets unless one is picked; shown like a picked one, so that it can be changed or removed (R57).
-    val listDueToday = lists.firstOrNull { it.id == chosenList }?.defaultDueToday == true
-    val preset = presetDue(viewDue, listDueToday, start, today()).takeIf { due == null && !dueRemoved }
-    // A date in the title wins over an untouched preset (R41), and the icon says so.
-    val typedDue = remember(text, parse) { if (parse && text.isNotBlank()) Repo.store.parseQuick(text).due else null }
-    val shownDue = due ?: preset?.let { typedDue ?: it }
+    // What the task gets from its list unless the person chooses; shown like a chosen value, so that it can be changed or removed (R75).
+    val chosen = lists.firstOrNull { it.id == chosenList }
+    val preset = presetDue(chosen?.defaultDueToday == true, start, today()).takeIf { due == null && !dueRemoved }
+    val presetPriority = chosen?.defaultPriority?.takeIf { priority == null && it != Priority.NONE }
+    // What the title says wins over an untouched preset (R41), and the icon says so.
+    val typed = remember(text, parse) { if (parse && text.isNotBlank()) Repo.store.parseQuick(text) else null }
+    val shownDue = due ?: preset?.let { typed?.due ?: it }
+    val shownPriority = priority ?: presetPriority?.let { typed?.priority?.takeIf { p -> p != Priority.NONE } ?: it } ?: Priority.NONE
 
     fun submit() {
         if (text.isBlank()) return
@@ -228,7 +232,7 @@ fun NewTaskCard(
         due = null
         dueRemoved = false
         repeat = null
-        priority = Priority.NONE
+        priority = null
         picked = emptyList()
         focus.requestFocus()
     }
@@ -284,7 +288,7 @@ fun NewTaskCard(
                 FieldRow(Icons.Outlined.PlayArrow, str(R.string.start), startText) { dialog = "start" }
                 FieldRow(Icons.Outlined.Event, str(R.string.due), dueText) { dialog = "due" }
                 FieldRow(Icons.Outlined.Repeat, str(R.string.repeat), repeat?.summary()) { dialog = "repeat" }
-                FieldRow(Icons.Outlined.Flag, str(R.string.priority), priority.takeIf { it != Priority.NONE }?.title()) { dialog = "priority" }
+                FieldRow(Icons.Outlined.Flag, str(R.string.priority), shownPriority.takeIf { it != Priority.NONE }?.title()) { dialog = "priority" }
                 FieldRow(Icons.Outlined.AttachFile, str(R.string.file_or_image), filesText) { pickFiles.launch("*/*") }
                 // Under a project there is nothing to choose: the parent decides the list.
                 if (listName != null) FieldRow(Icons.AutoMirrored.Outlined.List, str(R.string.list), listName) { dialog = "list" }
@@ -293,7 +297,7 @@ fun NewTaskCard(
                     FieldIcon(Icons.Outlined.PlayArrow, str(R.string.start), startText) { dialog = "start" }
                     FieldIcon(Icons.Outlined.Event, str(R.string.due), dueText) { dialog = "due" }
                     FieldIcon(Icons.Outlined.Repeat, str(R.string.repeat), repeat?.summary()) { dialog = "repeat" }
-                    FieldIcon(Icons.Outlined.Flag, str(R.string.priority), priority.marks().ifEmpty { null }) { dialog = "priority" }
+                    FieldIcon(Icons.Outlined.Flag, str(R.string.priority), shownPriority.marks().ifEmpty { null }) { dialog = "priority" }
                     FieldIcon(Icons.Outlined.AttachFile, str(R.string.file_or_image), filesText) { pickFiles.launch("*/*") }
                     if (listName != null) FieldIcon(Icons.AutoMirrored.Outlined.List, str(R.string.list), listName) { dialog = "list" }
                 }
@@ -304,7 +308,7 @@ fun NewTaskCard(
         "start" -> MomentDialog(str(R.string.start_title), start, onPick = { start = it }) { dialog = null }
         "due" -> MomentDialog(str(R.string.due), shownDue, onPick = { due = it; dueRemoved = it == null }) { dialog = null }
         "repeat" -> RepeatDialog(repeat, onPick = { repeat = it }) { dialog = null }
-        "priority" -> ChoiceDialog(str(R.string.priority), priorities.map { it.title() }, priorities.indexOf(priority), { dialog = null }) { priority = priorities[it] }
+        "priority" -> ChoiceDialog(str(R.string.priority), priorities.map { it.title() }, priorities.indexOf(shownPriority), { dialog = null }) { priority = priorities[it] }
         "list" -> ChoiceDialog(str(R.string.list), lists.map { it.displayName() }, lists.indexOfFirst { it.id == chosenList }, { dialog = null }) { chosenList = lists[it].id }
     }
 }

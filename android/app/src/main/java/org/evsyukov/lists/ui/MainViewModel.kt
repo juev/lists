@@ -216,7 +216,7 @@ class MainViewModel : ViewModel() {
         if (id == null) _state.update { it.copy(editing = null) } else viewModelScope.launch { reload() }
     }
 
-    /** Adds what the new-task card collected, with the defaults of the view on screen. */
+    /** Adds what the new-task card collected. The view gives the task its place and nothing else (R75). */
     fun add(draft: TaskDraft) {
         if (draft.title.isBlank()) return
         val scope = _state.value.scope
@@ -224,7 +224,6 @@ class MainViewModel : ViewModel() {
             val context = ListsApp.instance
             val task = store.createFrom(context, draft, parentId = (scope as? Scope.Project)?.id)
             if (scope !is Scope.Project) EntryPrefs.noteUsedList(context, task.listId)
-            (scope as? Scope.Tag)?.let { store.addTag(task.id, it.name) }
         }
     }
 
