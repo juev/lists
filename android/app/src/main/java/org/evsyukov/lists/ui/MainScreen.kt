@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -654,16 +655,18 @@ fun TaskRow(task: TaskItem, state: UiState, onToggle: () -> Unit, onOpen: () -> 
                 modifier = Modifier.padding(end = 6.dp).semantics { contentDescription = task.priority.title() },
             )
         }
-        Text(
-            task.title,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            textDecoration = if (done) TextDecoration.LineThrough else null,
-            color = if (done) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.weight(1f, fill = false),
-        )
-        Marks(task, parent = task.parentTitle.takeIf { showOrigin })
-        Spacer(Modifier.weight(1f))
+        // The title gives way to the marks and the date: it is what gets the ellipsis (R73).
+        Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                task.title,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                textDecoration = if (done) TextDecoration.LineThrough else null,
+                color = if (done) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            Marks(task, parent = task.parentTitle.takeIf { showOrigin })
+        }
         val scope = state.effectiveScope
         val dayInHeading = scope == Scope.Upcoming || (scope == Scope.Today && task.due?.let(::dayOf) == today())
         rowDate(task.due, open = !done, dayInHeading = dayInHeading)?.let { (text, late) ->
@@ -695,7 +698,7 @@ private fun Marks(task: TaskItem, parent: String?) {
     }
     for ((icon, name) in marks) Icon(icon, name, Modifier.padding(start = 6.dp).size(16.dp), tint = muted)
     if (parent != null) {
-        Text(parent, Modifier.padding(start = 8.dp), style = MaterialTheme.typography.bodySmall, color = muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(parent, Modifier.padding(start = 8.dp).widthIn(max = 120.dp), style = MaterialTheme.typography.bodySmall, color = muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
