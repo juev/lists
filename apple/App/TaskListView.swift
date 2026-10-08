@@ -294,16 +294,22 @@ struct TaskRow: View {
             if isExpanded && !inTrash && !task.isLog {
                 TaskTitleField(task: task)
             } else {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(task.title)
-                        .font(AppFont.style(.body))
-                        .strikethrough(task.done != nil)
-                        .foregroundStyle(task.done != nil ? .secondary : .primary)
-                        .lineLimit(1)
-                    if !isExpanded { summary }
-                }
+                Text(task.title)
+                    .font(AppFont.style(.body))
+                    .strikethrough(task.done != nil)
+                    .foregroundStyle(task.done != nil ? .secondary : .primary)
+                    .lineLimit(1)
+                if !isExpanded { marks }
             }
             Spacer(minLength: 8)
+            if !isExpanded, let date = Moment.rowDate(due: task.due, open: task.done == nil, dayInHeading: dayInHeading) {
+                Text(date.text)
+                    .font(AppFont.style(.caption))
+                    .monospacedDigit()
+                    .foregroundStyle(date.late ? .red : .secondary)
+                    .lineLimit(1)
+                    .fixedSize()
+            }
             Button {
                 model.selection = task.id
                 model.toggleExpanded(task.id)
@@ -317,7 +323,7 @@ struct TaskRow: View {
             .buttonStyle(.plain)
             .accessibilityLabel(isExpanded ? L("Collapse") : L("Expand"))
         }
-        .padding(.vertical, 3)
+        .padding(.vertical, 6)
         .padding(.horizontal, 6)
         .background(
             model.selection == task.id ? Color.primary.opacity(0.07) : .clear,
@@ -327,32 +333,27 @@ struct TaskRow: View {
         .simultaneousGesture(TapGesture().onEnded { model.selection = task.id })
     }
 
-    /// One line under the title: only what is set.
+    /// Marks after the title, only for what is set, without text or numbers (R72).
     @ViewBuilder
-    private var summary: some View {
-        let hasAny = task.due != nil || task.start != nil || task.repeat != nil || !task.tags.isEmpty
-            || task.subtasksTotal > 0 || task.attachments > 0 || !task.notes.isEmpty || showsOrigin
-        if hasAny {
-            HStack(spacing: 8) {
-                if let start = task.start {
-                    Label(L("from ") + Moment.label(start).lowercased(), systemImage: "calendar.badge.clock")
-                }
-                if let due = task.due {
-                    Label(Moment.label(due), systemImage: "calendar")
-                        .foregroundStyle(task.done == nil && Moment.isOverdue(due) ? .red : .secondary)
-                }
-                if task.repeat != nil { Image(systemName: "repeat") }
-                if task.subtasksTotal > 0 {
-                    Label("\(task.subtasksDone)/\(task.subtasksTotal)", systemImage: "checklist")
-                }
-                if task.attachments > 0 { Label("\(task.attachments)", systemImage: "paperclip") }
-                if !task.notes.isEmpty { Image(systemName: "text.alignleft") }
-                ForEach(task.tags, id: \.self) { Text("#\($0)") }
-                if showsOrigin { Text(origin).lineLimit(1) }
-            }
-            .font(AppFont.style(.caption))
-            .foregroundStyle(.secondary)
-            .labelStyle(.titleAndIcon)
+    private var marks: some View {
+        HStack(spacing: 6) {
+            if task.repeat != nil { Image(systemName: "repeat").accessibilityLabel(L("Repeat")) }
+            if !task.notes.isEmpty { Image(systemName: "text.alignleft").accessibilityLabel(L("Notes")) }
+            if task.attachments > 0 { Image(systemName: "paperclip").accessibilityLabel(L("Attachments")) }
+            if task.subtasksTotal > 0 { Image(systemName: "checklist").accessibilityLabel(L("Subtasks")) }
+            // A subtask shown on its own says whose it is (R12).
+            if showsOrigin, let parent = task.parentTitle { Text(parent).lineLimit(1) }
+        }
+        .font(AppFont.style(.caption))
+        .foregroundStyle(.tertiary)
+    }
+
+    /// Whether the heading of the group already names the day of the due date.
+    private var dayInHeading: Bool {
+        switch model.effectiveScope {
+        case .today: return task.due.map { Moment.day($0) == Moment.today() } ?? false
+        case .upcoming: return true
+        default: return false
         }
     }
 
@@ -363,12 +364,6 @@ struct TaskRow: View {
         case .today, .upcoming, .tag, .search, .completed, .wontDo, .trash, .filter: return true
         default: return false
         }
-    }
-
-    private var origin: String {
-        let list = model.list(task.listId).map(model.listName) ?? ""
-        if let parent = task.parentTitle { return "\(list) › \(parent)" }
-        return list
     }
 
     @ViewBuilder

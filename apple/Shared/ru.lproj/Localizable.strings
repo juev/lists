@@ -201,6 +201,7 @@
 "Add" = "Добавить";
 "Files: %@" = "Файлов: %@";
 "File" = "Файл";
+"Attachments" = "Вложения";
 "Added" = "Добавлено";
 "Task completed" = "Выполнено";
 "Moved to the next occurrence" = "Перенесено на следующий повтор";

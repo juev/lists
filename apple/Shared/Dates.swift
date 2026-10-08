@@ -36,6 +36,16 @@ enum Moment {
         return hasTime(value) ? date < Date() : day(value) < today()
     }
 
+    /// The due date as the row of a task shows it (R72): overdue always with its day; otherwise without
+    /// the day when the heading of the group names it, which leaves the time or nothing.
+    static func rowDate(due: String?, open: Bool, dayInHeading: Bool) -> (text: String, late: Bool)? {
+        guard let due else { return nil }
+        if open && isOverdue(due) && day(due) < today() { return (label(due), true) }
+        let late = open && isOverdue(due)
+        if !dayInHeading { return (label(due), late) }
+        return hasTime(due) ? (String(due.suffix(5)), late) : nil
+    }
+
     /// "Сегодня", "Завтра, 18:30", "пт, 9 окт".
     static func label(_ value: String) -> String {
         guard let date = date(value) else { return value }
