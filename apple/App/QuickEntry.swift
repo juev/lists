@@ -12,12 +12,15 @@ struct QuickEntryField: View {
     @Environment(AppModel.self) private var model
     var onDone: () -> Void
     var onResize: () -> Void
+    /// The floating panel: the card pads itself and ends with the strip of the list and the buttons (R82).
+    var footer: Bool
     @State private var draft: TaskDraft
 
     /// `notes` is what the card starts with when it was taken from the clipboard (R58).
-    init(notes: String? = nil, onDone: @escaping () -> Void, onResize: @escaping () -> Void = {}) {
+    init(notes: String? = nil, footer: Bool = false, onDone: @escaping () -> Void, onResize: @escaping () -> Void = {}) {
         self.onDone = onDone
         self.onResize = onResize
+        self.footer = footer
         _draft = State(initialValue: TaskDraft(notes: notes ?? "", pastedNotes: notes))
     }
 
@@ -25,7 +28,7 @@ struct QuickEntryField: View {
         DraftEditor(draft: $draft, onClose: {
             draft = TaskDraft(listId: model.defaultListId)
             onDone()
-        }, onResize: onResize)
+        }, onResize: onResize, footer: footer)
             .onAppear { draft.listId = model.defaultListId }
     }
 }
@@ -68,11 +71,9 @@ final class QuickEntryPanel: NSPanel {
         // A fresh view each time: the field starts empty and focused.
         // R58: what was copied since the panel was last shown becomes the note.
         let notes = AppModel.shared.clipboardNotes ? ClipboardNote.take() : nil
-        let view = QuickEntryField(notes: notes, onDone: { [weak self] in self?.close() }, onResize: { [weak self] in self?.refit() })
+        let view = QuickEntryField(notes: notes, footer: true, onDone: { [weak self] in self?.close() }, onResize: { [weak self] in self?.refit() })
             .environment(AppModel.shared)
             .font(AppFont.style(.body))
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
             .frame(width: 520)
         let hosting = NSHostingView(rootView: view)
         // The panel keeps a hidden title bar; without this the card would

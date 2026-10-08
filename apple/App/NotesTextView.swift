@@ -15,6 +15,8 @@ struct NotesTextView: NSViewRepresentable {
     @Binding var wantsFocus: Bool
     var onEditingChanged: (Bool) -> Void
     var onFinish: () -> Void
+    /// Esc, where it means something else than finishing: the card of a new task is thrown away by it (R37).
+    var onCancel: (() -> Void)?
     /// A checkbox in the note was clicked; the text is already changed.
     var onToggle: () -> Void = {}
     /// Tab was pressed: the keyboard moves on to the chips of the card (R62). ⌥Tab still types a tab.
@@ -90,8 +92,10 @@ struct NotesTextView: NSViewRepresentable {
 
         func textView(_ view: NSTextView, doCommandBy selector: Selector) -> Bool {
             switch selector {
-            case #selector(NSResponder.insertNewline(_:)) where !parent.returnAddsLine,
-                 #selector(NSResponder.cancelOperation(_:)):
+            case #selector(NSResponder.cancelOperation(_:)):
+                (parent.onCancel ?? parent.onFinish)()
+                return true
+            case #selector(NSResponder.insertNewline(_:)) where !parent.returnAddsLine:
                 parent.onFinish()
                 return true
             case #selector(NSResponder.insertNewline(_:)), #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)),
