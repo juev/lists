@@ -318,7 +318,7 @@ impl App {
             "projects": s.projects()?.iter().map(task_json).collect::<Vec<_>>(),
             "filters": s.filters()?.iter().map(|f| json!({ "id": f.id, "name": f.name, "open": f.open_count, "spec": serde_json::to_value(&f.spec).unwrap_or(Value::Null) })).collect::<Vec<_>>(),
             "counts": { "inbox": counts.inbox, "today": counts.today, "overdue": counts.overdue, "upcoming": counts.upcoming, "trash": counts.trash },
-            "sync": { "configured": status.configured, "pending": status.pending, "lastOk": status.last_ok, "lastError": status.last_error },
+            "sync": { "configured": status.configured, "pending": status.pending, "attachmentsWaiting": status.attachments_waiting, "lastOk": status.last_ok, "lastError": status.last_error },
             // Seconds, or "day" for the end of the day (R68).
             "keepDone": match s.keep_done()? {
                 KeepDone::Seconds { seconds } => json!(seconds),
@@ -621,6 +621,12 @@ impl App {
                         query(&url, "id").unwrap_or_default(),
                     );
                     let found = self.store.attachments(task)?.into_iter().find(|a| a.id == id);
+                    // R76: content that has not arrived is fetched from the storage now (S35);
+                    // when it is not there either, the error says so and the page shows it.
+                    let found = match found {
+                        Some(a) if a.local_path.is_none() => Some(self.store.fetch_attachment(a.id)?),
+                        other => other,
+                    };
                     match found.as_ref().and_then(|a| a.local_path.as_ref().map(|p| (a, p))) {
                         Some((a, path)) => {
                             let data = std::fs::read(path).map_err(|e| AppError::Storage { msg: e.to_string() })?;
@@ -643,7 +649,7 @@ impl App {
                                 )),
                             }
                         }
-                        None => fail(404, "the file is not on the server yet"),
+                        None => fail(404, "no such attachment"),
                     }
                 }
                 (Method::Post, "/api/upload") => {
