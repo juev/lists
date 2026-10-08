@@ -99,6 +99,38 @@ fn s18_s21_through_a_folder() {
 }
 
 #[test]
+fn s34_uploaded_content_nudges_the_others_once_more() {
+    let storage = tempfile::tempdir().unwrap();
+    let inbox = Inbox::start();
+    let (a, b) = (device(), device());
+    a.set_sync_config(folder(&storage)).unwrap();
+    b.set_sync_config(folder(&storage)).unwrap();
+    a.set_push_endpoint(inbox.address("a")).unwrap();
+    b.set_push_endpoint(inbox.address("b")).unwrap();
+    a.sync_now().unwrap();
+    b.sync_now().unwrap();
+    a.sync_now().unwrap();
+    inbox.take();
+
+    let task = add(&a, "с файлом");
+    let src = tempfile::tempdir().unwrap();
+    let file = src.path().join("a.txt");
+    std::fs::write(&file, b"content").unwrap();
+    a.add_attachment(task.id, file.to_string_lossy().into_owned(), None)
+        .unwrap();
+    a.sync_now().unwrap();
+    assert_eq!(inbox.take(), ["POST /b sync"]);
+    assert_eq!(a.sync_attachments().unwrap().uploaded, 1);
+    assert_eq!(inbox.take(), ["POST /b sync"]);
+
+    // Taking the content and a pass with nothing to move nudge nobody.
+    b.sync_now().unwrap();
+    assert_eq!(b.sync_attachments().unwrap().downloaded, 1);
+    a.sync_attachments().unwrap();
+    assert_eq!(inbox.take(), Vec::<String>::new());
+}
+
+#[test]
 fn s18_record_in_the_storage_follows_the_address() {
     let storage = tempfile::tempdir().unwrap();
     let a = device();

@@ -331,11 +331,22 @@ pub struct SyncReport {
     pub blobs_downloaded: u32,
 }
 
+/// Result of one pass over attachment content (S34).
+#[derive(Debug, Clone, PartialEq, Default, uniffi::Record)]
+pub struct AttachmentReport {
+    pub uploaded: u32,
+    pub downloaded: u32,
+    /// Attachments whose content is still to be moved after this pass.
+    pub waiting: u32,
+}
+
 #[derive(Debug, Clone, PartialEq, Default, uniffi::Record)]
 pub struct SyncStatus {
     pub configured: bool,
     /// Local changes not uploaded yet.
     pub pending: u32,
+    /// Attachments whose content is not on this device or not known to be in the storage (S34).
+    pub attachments_waiting: u32,
     /// `YYYY-MM-DDTHH:MM` of the last successful run.
     pub last_ok: Option<String>,
     pub last_error: Option<String>,

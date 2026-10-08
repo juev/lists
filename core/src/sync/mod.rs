@@ -22,7 +22,7 @@ use sha2::{Digest, Sha256};
 
 use crate::db::{self, is_sha256, Change, Touched};
 use crate::error::{AppError, Result};
-use crate::model::{ConnectionCheck, SyncConfig, SyncReport, SyncStatus};
+use crate::model::{Attachment, AttachmentReport, ConnectionCheck, SyncConfig, SyncReport, SyncStatus};
 use crate::store::{hex, Store};
 use remote::{DirRemote, Remote};
 use webdav::WebDavRemote;
@@ -395,49 +395,95 @@ impl Store {
         Ok(())
     }
 
-    fn sync_blobs(&self, remote: &dyn Remote, report: &mut SyncReport) -> Result<()> {
-        let wanted: Vec<(String, bool)> = {
-            let inner = self.lock();
-            let mut stmt = inner.conn.prepare(
-                "SELECT DISTINCT a.sha256, EXISTS (SELECT 1 FROM blobs_uploaded b WHERE b.sha256 = a.sha256)
-                 FROM attachments a JOIN tasks t ON t.id = a.task_id
-                 WHERE a.deleted = 0 AND t.purged = 0",
-            )?;
-            let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
-            rows.collect::<rusqlite::Result<_>>()?
-        };
-        for (sha256, uploaded) in wanted.into_iter().filter(|(s, _)| is_sha256(s)) {
-            let local = self.blob_path(&sha256);
-            let remote_path = blob_remote_path(&sha256);
-            if local.exists() {
-                if uploaded {
-                    continue;
-                }
-                if !remote.exists(&remote_path)? {
-                    remote.put(&remote_path, &std::fs::read(&local)?)?;
-                    report.blobs_uploaded += 1;
-                }
-                self.lock()
-                    .conn
-                    .execute("INSERT OR IGNORE INTO blobs_uploaded (sha256) VALUES (?1)", [&sha256])?;
-            } else if let Some(data) = remote.get(&remote_path)? {
-                // The name is the hash: content that does not match is dropped, not stored.
-                if hex(&Sha256::digest(&data)) != sha256 {
-                    continue;
-                }
-                let tmp = local.with_extension("part");
-                std::fs::write(&tmp, &data)?;
-                std::fs::rename(&tmp, &local)?;
-                self.lock()
-                    .conn
-                    .execute("INSERT OR IGNORE INTO blobs_uploaded (sha256) VALUES (?1)", [&sha256])?;
-                report.blobs_downloaded += 1;
-            }
-        }
+    /// Content the storage and this device may still owe each other: hash and
+    /// whether the storage is known to hold it.
+    fn blobs_wanted(&self) -> Result<Vec<(String, bool)>> {
+        let inner = self.lock();
+        let mut stmt = inner.conn.prepare(
+            "SELECT DISTINCT a.sha256, EXISTS (SELECT 1 FROM blobs_uploaded b WHERE b.sha256 = a.sha256)
+             FROM attachments a JOIN tasks t ON t.id = a.task_id
+             WHERE a.deleted = 0 AND t.purged = 0",
+        )?;
+        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        let wanted: Vec<(String, bool)> = rows.collect::<rusqlite::Result<_>>()?;
+        Ok(wanted.into_iter().filter(|(s, _)| is_sha256(s)).collect())
+    }
+
+    /// S34: how many of them are not in both places yet.
+    fn blobs_waiting(&self) -> Result<u32> {
+        let wanted = self.blobs_wanted()?;
+        Ok(wanted
+            .iter()
+            .filter(|(sha256, uploaded)| !uploaded || !self.blob_path(sha256).exists())
+            .count() as u32)
+    }
+
+    fn blob_uploaded(&self, sha256: &str) -> Result<()> {
+        self.lock()
+            .conn
+            .execute("INSERT OR IGNORE INTO blobs_uploaded (sha256) VALUES (?1)", [sha256])?;
         Ok(())
     }
 
-    /// One full sync run against the given storage.
+    /// Whether the content was sent; it is not when the storage already has it.
+    fn upload_blob(&self, remote: &dyn Remote, sha256: &str) -> Result<bool> {
+        let remote_path = blob_remote_path(sha256);
+        let sent = !remote.exists(&remote_path)?;
+        if sent {
+            remote.put(&remote_path, &std::fs::read(self.blob_path(sha256))?)?;
+        }
+        self.blob_uploaded(sha256)?;
+        Ok(sent)
+    }
+
+    /// Whether the content arrived; it does not when the storage has none or has something else.
+    fn download_blob(&self, remote: &dyn Remote, sha256: &str) -> Result<bool> {
+        let Some(data) = remote.get(&blob_remote_path(sha256))? else {
+            return Ok(false);
+        };
+        // The name is the hash: content that does not match is dropped, not stored.
+        if hex(&Sha256::digest(&data)) != sha256 {
+            return Ok(false);
+        }
+        let local = self.blob_path(sha256);
+        // A pass and a request (S35) may fetch the same content at once: each writes its own file.
+        let tmp = local.with_extension(format!("{}.part", uuid::Uuid::now_v7().simple()));
+        std::fs::write(&tmp, &data)?;
+        std::fs::rename(&tmp, &local)?;
+        self.blob_uploaded(sha256)?;
+        Ok(true)
+    }
+
+    /// S34: one pass over attachment content against the given storage. A file
+    /// that fails is left waiting and the rest go on.
+    pub fn sync_attachments_with(&self, remote: &dyn Remote) -> Result<AttachmentReport> {
+        let mut report = AttachmentReport::default();
+        let _running = match self.blob_lock.try_lock() {
+            Ok(guard) => guard,
+            Err(std::sync::TryLockError::Poisoned(p)) => p.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => {
+                report.waiting = self.blobs_waiting()?;
+                return Ok(report);
+            }
+        };
+        for (sha256, uploaded) in self.blobs_wanted()? {
+            if self.blob_path(&sha256).exists() {
+                if !uploaded && self.upload_blob(remote, &sha256).unwrap_or(false) {
+                    report.uploaded += 1;
+                }
+            } else if self.download_blob(remote, &sha256).unwrap_or(false) {
+                report.downloaded += 1;
+            }
+        }
+        report.waiting = self.blobs_waiting()?;
+        if report.uploaded > 0 {
+            self.poke_peers(remote, &self.device_id());
+        }
+        Ok(report)
+    }
+
+    /// One run for the fields against the given storage. Attachment content is
+    /// left to `sync_attachments_with` (S34).
     pub fn sync_with(&self, remote: &dyn Remote) -> Result<SyncReport> {
         let _running = self.sync_lock.lock().unwrap_or_else(|p| p.into_inner());
         let me = self.device_id();
@@ -473,9 +519,8 @@ impl Store {
             db::meta_del(&self.lock().conn, "force_snapshot")?;
         }
 
-        self.sync_blobs(remote, &mut report)?;
         self.publish_push(remote, &me)?;
-        if report.pushed > 0 || report.blobs_uploaded > 0 {
+        if report.pushed > 0 {
             self.poke_peers(remote, &me);
         }
         Ok(report)
@@ -491,18 +536,30 @@ impl Store {
         }
     }
 
+    /// The configured file storage; `None` when sync is off or goes through CalDAV.
+    fn file_storage(&self) -> Result<Option<Box<dyn Remote>>> {
+        Ok(match self.sync_config()? {
+            SyncConfig::Off | SyncConfig::CalDav { .. } => None,
+            SyncConfig::Folder { path } => Some(Box::new(DirRemote::new(path))),
+            SyncConfig::WebDav { url, user } => Some(Box::new(WebDavRemote::new(&url, &user, &self.password(&user)?)?)),
+        })
+    }
+
     /// Runs the configured kind of sync; `None` when sync is off.
     fn run_configured(&self) -> Result<Option<SyncReport>> {
-        Ok(Some(match self.sync_config()? {
+        let config = self.sync_config()?;
+        Ok(Some(match config {
             SyncConfig::Off => return Ok(None),
-            SyncConfig::Folder { path } => {
-                let report = self.sync_with(&DirRemote::new(path))?;
-                // What this run wrote is not news to it.
-                self.folder_changed();
+            SyncConfig::Folder { .. } | SyncConfig::WebDav { .. } => {
+                let Some(remote) = self.file_storage()? else {
+                    return Ok(None);
+                };
+                let report = self.sync_with(remote.as_ref())?;
+                if matches!(config, SyncConfig::Folder { .. }) {
+                    // What this run wrote is not news to it.
+                    self.folder_changed();
+                }
                 report
-            }
-            SyncConfig::WebDav { url, user } => {
-                self.sync_with(&WebDavRemote::new(&url, &user, &self.password(&user)?)?)?
             }
             SyncConfig::CalDav { url, user } => {
                 let _running = self.sync_lock.lock().unwrap_or_else(|p| p.into_inner());
@@ -654,8 +711,61 @@ impl Store {
         result
     }
 
+    /// S34: moves attachment content after a run of `sync_now`: uploads what
+    /// the storage lacks and downloads what this device lacks. A file that
+    /// fails stays waiting and does not fail the call. Does nothing with
+    /// CalDAV, where the content travels inside the task, and while another
+    /// pass is going.
+    pub fn sync_attachments(&self) -> Result<AttachmentReport> {
+        match self.file_storage()? {
+            Some(remote) => self.sync_attachments_with(remote.as_ref()),
+            None => Ok(AttachmentReport::default()),
+        }
+    }
+
+    /// S35: downloads the content of one attachment now, ahead of the pass.
+    pub fn fetch_attachment(&self, id: String) -> Result<Attachment> {
+        let found = |store: &Store| -> Result<Attachment> {
+            let task: Option<String> = store
+                .lock()
+                .conn
+                .query_row(
+                    "SELECT task_id FROM attachments WHERE id = ?1 AND deleted = 0",
+                    [&id],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            let all = match task {
+                Some(task) => store.attachments(task)?,
+                None => vec![],
+            };
+            all.into_iter()
+                .find(|a| a.id == id)
+                .ok_or_else(|| AppError::not_found("attachment"))
+        };
+        let attachment = found(self)?;
+        if attachment.local_path.is_some() {
+            return Ok(attachment);
+        }
+        if !is_sha256(&attachment.sha256) {
+            return Err(AppError::sync("the attachment has no content to download"));
+        }
+        let Some(remote) = self.file_storage()? else {
+            return Err(AppError::sync("the content of this attachment is not in the storage"));
+        };
+        if !self.download_blob(remote.as_ref(), &attachment.sha256)? {
+            return Err(AppError::sync(
+                "the content of this attachment has not reached the storage yet",
+            ));
+        }
+        found(self)
+    }
+
     pub fn sync_status(&self) -> Result<SyncStatus> {
-        let configured = self.sync_config()? != SyncConfig::Off;
+        let config = self.sync_config()?;
+        let configured = config != SyncConfig::Off;
+        let files = matches!(config, SyncConfig::Folder { .. } | SyncConfig::WebDav { .. });
+        let attachments_waiting = if files { self.blobs_waiting()? } else { 0 };
         let inner = self.lock();
         let pending: u32 = inner.conn.query_row(
             "SELECT (SELECT count(*) FROM fields WHERE dirty = 1) + (SELECT coalesce(sum(changes), 0) FROM outbox)",
@@ -665,6 +775,7 @@ impl Store {
         Ok(SyncStatus {
             configured,
             pending: if configured { pending } else { 0 },
+            attachments_waiting,
             last_ok: db::meta_get(&inner.conn, "sync_ok")?,
             last_error: db::meta_get(&inner.conn, "sync_error")?,
         })

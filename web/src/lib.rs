@@ -298,6 +298,15 @@ fn optional(args: &Value, name: &str) -> Option<String> {
         .map(str::to_string)
 }
 
+/// S34: attachment content moves on a thread of its own, so that the next run
+/// for the fields does not wait for it. The core lets one pass go at a time.
+fn move_attachments(store: &Arc<Store>) {
+    let store = store.clone();
+    std::thread::spawn(move || {
+        let _ = store.sync_attachments();
+    });
+}
+
 impl App {
     fn overview(&self) -> Result<Value, AppError> {
         let s = &self.store;
@@ -435,6 +444,7 @@ impl App {
                 "removeAttachment" => s.remove_attachment(id()?).map(|_| done)?,
                 "sync" => {
                     let report = s.sync_now()?;
+                    move_attachments(&self.store);
                     json!({ "pulled": report.pulled, "pushed": report.pushed })
                 }
                 other => {
@@ -780,7 +790,9 @@ pub fn start(config: Config) -> Result<Running, Box<dyn std::error::Error>> {
             if app.dirty.swap(false, Ordering::Relaxed) || idle >= 60 || app.store.folder_changed() {
                 idle = 0;
                 // A failure is kept in the sync status, which the page shows.
-                let _ = app.store.sync_now();
+                if app.store.sync_now().is_ok() {
+                    move_attachments(&app.store);
+                }
             }
         }
     });

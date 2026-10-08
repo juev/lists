@@ -40,7 +40,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ("sync", []) => {
             // The password is never stored by the core; here it comes from the environment.
             store.set_sync_password(std::env::var("LISTS_PASSWORD").ok());
-            println!("{:?}", store.sync_now()?)
+            println!("{:?}", store.sync_now()?);
+            println!("{:?}", store.sync_attachments()?)
         }
         ("sync-off", []) => store.set_sync_config(SyncConfig::Off)?,
         ("import", [file]) => {

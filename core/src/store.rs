@@ -34,6 +34,8 @@ pub struct Store {
     pub(crate) inner: Mutex<Inner>,
     /// Serialises sync runs without blocking local edits during network calls.
     pub(crate) sync_lock: Mutex<()>,
+    /// One pass over attachment content at a time; runs of the fields do not wait for it (S34).
+    pub(crate) blob_lock: Mutex<()>,
     pub(crate) dir: PathBuf,
     pub(crate) compact_after: Mutex<u32>,
     pub(crate) sync_password: Mutex<Option<String>>,
@@ -531,6 +533,7 @@ impl Store {
         Ok(Arc::new(Store {
             inner: Mutex::new(Inner { conn, clock, now: None }),
             sync_lock: Mutex::new(()),
+            blob_lock: Mutex::new(()),
             dir,
             compact_after: Mutex::new(64),
             sync_password: Mutex::new(None),
