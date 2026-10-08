@@ -238,6 +238,7 @@ fun EditorSheet(editing: Editing, state: UiState, model: MainViewModel, onRemind
                     placeholder = str(R.string.title),
                     enabled = !locked,
                     singleLine = true,
+                    wraps = true,
                     textStyle = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.weight(1f),
                 ) { value -> if (value.isNotBlank()) model.act { it.setTitle(task.id, value) } }
@@ -412,6 +413,8 @@ private fun CommittedField(
     singleLine: Boolean,
     textStyle: androidx.compose.ui.text.TextStyle,
     modifier: Modifier,
+    // A one-line value shown over as many lines as it needs (R73): it wraps, and holds no line break.
+    wraps: Boolean = false,
     onCommit: (String) -> Unit,
 ) {
     var text by remember(key) { mutableStateOf(value) }
@@ -427,10 +430,18 @@ private fun CommittedField(
     DisposableEffect(key) { onDispose { if (focused) save() } }
     TextField(
         value = text,
-        onValueChange = { text = it },
+        onValueChange = {
+            // Enter in a wrapping field finishes the edit, as Done does; pasted lines become one line.
+            if (singleLine && '\n' in it) {
+                text = oneLine(text, it)
+                save()
+            } else {
+                text = it
+            }
+        },
         placeholder = { Text(placeholder) },
         enabled = enabled,
-        singleLine = singleLine,
+        singleLine = singleLine && !wraps,
         textStyle = textStyle,
         colors = transparentField(),
         keyboardOptions = if (singleLine) SentenceKeyboard.copy(imeAction = ImeAction.Done) else SentenceKeyboard,
@@ -441,6 +452,12 @@ private fun CommittedField(
         },
     )
 }
+
+// The text of a one-line field after an edit that brought line breaks (R73). Enter alone leaves the
+// text as it was; pasted lines are joined with spaces.
+internal fun oneLine(before: String, after: String): String =
+    if (after.replace("\n", "") == before) before
+    else after.lines().map(String::trim).filter(String::isNotEmpty).joinToString(" ")
 
 @Composable
 private fun SubtaskField(onAdd: (String) -> Unit) {
