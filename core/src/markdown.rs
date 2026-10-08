@@ -361,11 +361,14 @@ fn is_inline(tag: &Tag) -> bool {
     )
 }
 
-fn allowed(url: &str) -> bool {
-    let lower = url.to_ascii_lowercase();
-    ["http://", "https://", "mailto:"]
-        .iter()
-        .any(|scheme| lower.starts_with(scheme))
+/// The address of a link with its scheme in lower case, or nothing when the
+/// scheme is not one a note may lead to. The rest stays as typed.
+fn address(url: &str) -> Option<String> {
+    ["http://", "https://", "mailto:"].iter().find_map(|scheme| {
+        let head = url.get(..scheme.len())?;
+        head.eq_ignore_ascii_case(scheme)
+            .then(|| format!("{scheme}{}", &url[scheme.len()..]))
+    })
 }
 
 fn trimmed(text: &str, range: &Range<usize>) -> Range<usize> {
@@ -545,10 +548,13 @@ fn flush(frame: Option<&mut Frame>, leaves: &mut Vec<Range<usize>>) {
 
 fn bare_links(text: &str, range: &Range<usize>, found: &mut Vec<(Range<usize>, MarkdownKind)>) {
     let slice = &text[range.clone()];
+    // A keyboard starts a sentence with a capital: `Https://` is an address too.
+    // Lower case of ASCII alone keeps every byte offset.
+    let lower = slice.to_ascii_lowercase();
     let mut from = 0;
     while let Some(i) = ["https://", "http://"]
         .iter()
-        .filter_map(|scheme| slice[from..].find(scheme))
+        .filter_map(|scheme| lower[from..].find(scheme))
         .min()
     {
         let start = from + i;
@@ -557,12 +563,10 @@ fn bare_links(text: &str, range: &Range<usize>, found: &mut Vec<(Range<usize>, M
         while slice[start..end].ends_with(['.', ',', ';', ':', '!', '?', ')', '"', '\'', '>']) {
             end -= 1;
         }
-        let url = &slice[start..end];
-        if boundary && url.split_once("://").is_some_and(|(_, rest)| !rest.is_empty()) {
-            found.push((
-                range.start + start..range.start + end,
-                MarkdownKind::Link { url: url.to_string() },
-            ));
+        let url = address(&slice[start..end])
+            .filter(|url| boundary && url.split_once("://").is_some_and(|(_, rest)| !rest.is_empty()));
+        if let Some(url) = url {
+            found.push((range.start + start..range.start + end, MarkdownKind::Link { url }));
         }
         from = end.max(start + 1);
     }
@@ -646,16 +650,16 @@ fn close(
                 LinkType::Email => format!("mailto:{dest_url}"),
                 _ => dest_url.to_string(),
             };
-            match (allowed(&url), inside.is_some()) {
-                (true, true) => styled(MarkdownKind::Link { url }, found),
+            match (address(&url), inside.is_some()) {
+                (Some(url), true) => styled(MarkdownKind::Link { url }, found),
                 // Nothing to show but the address: it stays visible.
-                (true, false) => found.push((range.clone(), MarkdownKind::Link { url })),
-                (false, true) => found.extend(
+                (Some(url), false) => found.push((range.clone(), MarkdownKind::Link { url })),
+                (None, true) => found.extend(
                     gaps(&range, &frame.children)
                         .into_iter()
                         .map(|gap| (gap, MarkdownKind::Markup)),
                 ),
-                (false, false) => {}
+                (None, false) => {}
             }
         }
         Tag::CodeBlock(kind) => {
