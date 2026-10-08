@@ -34,6 +34,9 @@ fun plusDays(days: Long): String = LocalDate.now().plusDays(days).toString()
 
 fun hasTime(value: String) = value.length > 10
 
+/** Whether a task belongs to the Overdue group of Today (R84): its due day has passed. A start date does not count. */
+fun dueDayPassed(due: String?, today: String = today()): Boolean = due != null && dayOf(due) < today
+
 fun dayOf(value: String): String = value.take(10)
 
 fun momentString(date: LocalDate, hour: Int?, minute: Int?): String =
