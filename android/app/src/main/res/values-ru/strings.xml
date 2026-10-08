@@ -95,6 +95,7 @@
     <string name="open_in_another_app">Открыть в другой программе</string>
     <string name="cannot_show_file">Этот файл не получается показать здесь.</string>
     <string name="time">Время</string>
+    <string name="time_off">Нет</string>
     <string name="remove">Убрать</string>
     <string name="custom">Свой вариант…</string>
     <string name="no_repeat">Не повторять</string>
