@@ -118,7 +118,7 @@ The share extension and the app share one database through an App Group, which n
 Android app (JDK 17 or newer, Android SDK with platform 36 and an NDK, `rustup target add aarch64-linux-android x86_64-linux-android`, `cargo install cargo-ndk`):
 
 ```sh
-make android           # android/app/build/outputs/apk/debug/app-debug.apk
+make android           # unit tests, then android/app/build/outputs/apk/debug/app-debug.apk
 make android-install   # onto the connected device or emulator
 ```
 

@@ -79,4 +79,5 @@ dependencies {
     implementation("org.unifiedpush.android:connector:3.3.5")
     // Runtime of the UniFFI bindings to the Rust core.
     implementation("net.java.dev.jna:jna:5.17.0@aar")
+    testImplementation("junit:junit:4.13.2")
 }

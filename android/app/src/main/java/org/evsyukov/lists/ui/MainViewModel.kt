@@ -222,13 +222,7 @@ class MainViewModel : ViewModel() {
         val scope = _state.value.scope
         act { store ->
             val context = ListsApp.instance
-            val task = store.createFrom(
-                context,
-                draft,
-                parentId = (scope as? Scope.Project)?.id,
-                // A task added in Today belongs to today unless the card or the line says otherwise.
-                dueIfNone = today().takeIf { scope == Scope.Today },
-            )
+            val task = store.createFrom(context, draft, parentId = (scope as? Scope.Project)?.id)
             if (scope !is Scope.Project) EntryPrefs.noteUsedList(context, task.listId)
             (scope as? Scope.Tag)?.let { store.addTag(task.id, it.name) }
         }

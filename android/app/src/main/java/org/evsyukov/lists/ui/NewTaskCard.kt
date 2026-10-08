@@ -61,6 +61,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import org.evsyukov.lists.R
+import org.evsyukov.lists.Repo
 import org.evsyukov.lists.dateLabel
 import org.evsyukov.lists.displayName
 import org.evsyukov.lists.marks
@@ -68,6 +69,7 @@ import org.evsyukov.lists.priorities
 import org.evsyukov.lists.str
 import org.evsyukov.lists.summary
 import org.evsyukov.lists.title
+import org.evsyukov.lists.today
 import uniffi.lists_core.Freq
 import uniffi.lists_core.NewTask
 import uniffi.lists_core.Priority
@@ -81,7 +83,12 @@ data class TaskDraft(
     val title: String,
     val notes: String,
     val start: String?,
+    /** What stood next to the due icon. */
     val due: String?,
+    /** The view or the list put the date there, the person did not pick it: a date in the title wins over it (R41). */
+    val dueIsPreset: Boolean,
+    /** The person took the date away in the card: the task gets none from the view or the list (R57). */
+    val dueRemoved: Boolean,
     val repeat: Repeat?,
     val priority: Priority,
     /** Null where the place the task goes to decides the list, as under a project. */
@@ -93,10 +100,10 @@ data class TaskDraft(
 
 /**
  * Creates the task a draft describes, as a subtask when a parent is given.
- * What the fields say wins over what the title says; `dueIfNone` is the date
- * the view implies, and it yields to both.
+ * What the fields say wins over what the title says; a due date the card only
+ * preset yields to both.
  */
-fun Store.createFrom(context: Context, draft: TaskDraft, parentId: String? = null, dueIfNone: String? = null): TaskItem {
+fun Store.createFrom(context: Context, draft: TaskDraft, parentId: String? = null): TaskItem {
     val line = draft.title.trim()
     val task = when {
         parentId != null && draft.parse -> quickAddUnder(line, parentId)
@@ -107,7 +114,11 @@ fun Store.createFrom(context: Context, draft: TaskDraft, parentId: String? = nul
     val notes = draft.notes.trim()
     if (notes.isNotEmpty()) setNotes(task.id, notes)
     draft.start?.let { setStart(task.id, it) }
-    (draft.due ?: dueIfNone.takeIf { task.due == null })?.let { setDue(task.id, it) }
+    // The list gives its date only to a task without a start date, and this one was created before its start was written.
+    val bare = draft.dueRemoved || draft.start != null
+    val typed = if (bare && draft.parse) parseQuick(line).due else null
+    val due = finalDue(draft.due, draft.dueIsPreset, bare, task.due, typed)
+    if (due != task.due) setDue(task.id, due)
     // After the dates: the rule is counted from them.
     draft.repeat?.let { setRepeat(task.id, it) }
     if (draft.priority != Priority.NONE) setPriority(task.id, draft.priority)
@@ -166,6 +177,8 @@ fun NewTaskCard(
     keepOpen: Boolean = false,
     /** The note taken from the clipboard (R58); it may arrive after the card is shown. */
     pastedNotes: String? = null,
+    /** The due date the view gives a task added in it, as Today does (R57). */
+    viewDue: String? = null,
 ) {
     // Saved, not just remembered: the card keeps what was entered when the screen is turned (R63).
     var text by rememberSaveable { mutableStateOf(title) }
@@ -180,6 +193,7 @@ fun NewTaskCard(
     }
     var start by rememberSaveable { mutableStateOf<String?>(null) }
     var due by rememberSaveable { mutableStateOf<String?>(null) }
+    var dueRemoved by rememberSaveable { mutableStateOf(false) }
     var repeat by rememberSaveable(stateSaver = repeatSaver) { mutableStateOf<Repeat?>(null) }
     var priority by rememberSaveable { mutableStateOf(Priority.NONE) }
     var chosenList by rememberSaveable { mutableStateOf(listId) }
@@ -197,14 +211,22 @@ fun NewTaskCard(
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { focus.requestFocus() }
 
+    // The date the task gets unless one is picked; shown like a picked one, so that it can be changed or removed (R57).
+    val listDueToday = lists.firstOrNull { it.id == chosenList }?.defaultDueToday == true
+    val preset = presetDue(viewDue, listDueToday, start, today()).takeIf { due == null && !dueRemoved }
+    // A date in the title wins over an untouched preset (R41), and the icon says so.
+    val typedDue = remember(text, parse) { if (parse && text.isNotBlank()) Repo.store.parseQuick(text).due else null }
+    val shownDue = due ?: preset?.let { typedDue ?: it }
+
     fun submit() {
         if (text.isBlank()) return
-        onSubmit(TaskDraft(text, note, start, due, repeat, priority, chosenList, parse, attached))
+        onSubmit(TaskDraft(text, note, start, due ?: preset, due == null && preset != null, dueRemoved, repeat, priority, chosenList, parse, attached))
         if (!keepOpen) return
         text = ""
         note = ""
         start = null
         due = null
+        dueRemoved = false
         repeat = null
         priority = Priority.NONE
         picked = emptyList()
@@ -256,7 +278,7 @@ fun NewTaskCard(
             )
             // The same fields as in the editor, so that nothing has to be typed as text.
             val startText = start?.let { dateLabel(it).lowercase() }
-            val dueText = due?.let { dateLabel(it).lowercase() }
+            val dueText = shownDue?.let { dateLabel(it).lowercase() }
             val filesText = attached.size.takeIf { it > 0 }?.toString()
             if (full) {
                 FieldRow(Icons.Outlined.PlayArrow, str(R.string.start), startText) { dialog = "start" }
@@ -280,7 +302,7 @@ fun NewTaskCard(
     }
     when (dialog) {
         "start" -> MomentDialog(str(R.string.start_title), start, onPick = { start = it }) { dialog = null }
-        "due" -> MomentDialog(str(R.string.due), due, onPick = { due = it }) { dialog = null }
+        "due" -> MomentDialog(str(R.string.due), shownDue, onPick = { due = it; dueRemoved = it == null }) { dialog = null }
         "repeat" -> RepeatDialog(repeat, onPick = { repeat = it }) { dialog = null }
         "priority" -> ChoiceDialog(str(R.string.priority), priorities.map { it.title() }, priorities.indexOf(priority), { dialog = null }) { priority = priorities[it] }
         "list" -> ChoiceDialog(str(R.string.list), lists.map { it.displayName() }, lists.indexOfFirst { it.id == chosenList }, { dialog = null }) { chosenList = lists[it].id }
