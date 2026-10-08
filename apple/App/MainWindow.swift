@@ -84,6 +84,22 @@ struct SyncIndicator: View {
     }
 }
 
+extension Scope {
+    /// The icon of a built-in view: filled, in a colour of its own that no list decides (R79).
+    var viewIcon: (symbol: String, tint: Color)? {
+        switch self {
+        case .inbox: return ("tray.fill", .blue)
+        case .today: return ("star.fill", .yellow)
+        case .upcoming: return ("calendar", .pink)
+        case .all: return ("square.stack.fill", .teal)
+        case .completed: return ("checkmark.square.fill", .green)
+        case .wontDo: return ("xmark.square.fill", .gray)
+        case .trash: return ("trash.fill", .gray)
+        default: return nil
+        }
+    }
+}
+
 struct Sidebar: View {
     @Environment(AppModel.self) private var model
     @State private var editing: TaskList?
@@ -93,18 +109,18 @@ struct Sidebar: View {
         @Bindable var model = model
         List(selection: Binding<Scope?>(get: { model.scope }, set: { if let s = $0 { model.search = ""; model.scope = s } })) {
             Section {
-                row(.inbox, L("Inbox"), "tray", count: model.counts.inbox)
+                row(.inbox, L("Inbox"), count: model.counts.inbox)
                     .dropDestination(for: String.self) { ids, _ in moveTasks(ids, to: "inbox") }
                     .contextMenu { Button(L("Configure…")) { editing = model.list("inbox") } }
-                row(.today, L("Today"), "star", count: model.counts.today, alert: model.counts.overdue > 0)
-                row(.upcoming, L("Upcoming"), "calendar", count: model.counts.upcoming)
-                row(.all, L("All"), "square.stack", count: 0)
+                row(.today, L("Today"), count: model.counts.today, alert: model.counts.overdue > 0)
+                row(.upcoming, L("Upcoming"), count: model.counts.upcoming)
+                row(.all, L("All"), count: 0)
                 if model.showCompletedView {
-                    row(.completed, L("Completed"), "checkmark.square", count: 0)
-                    row(.wontDo, L("Won't do"), "xmark.square", count: 0)
+                    row(.completed, L("Completed"), count: 0)
+                    row(.wontDo, L("Won't do"), count: 0)
                 }
                 if model.counts.trash > 0 {
-                    row(.trash, L("Trash"), "trash", count: model.counts.trash)
+                    row(.trash, L("Trash"), count: model.counts.trash)
                 }
             }
             Section {
@@ -246,7 +262,7 @@ struct Sidebar: View {
         }
     }
 
-    private func row(_ scope: Scope, _ title: String, _ symbol: String, count: UInt32, alert: Bool = false) -> some View {
+    private func row(_ scope: Scope, _ title: String, count: UInt32, alert: Bool = false) -> some View {
         Label {
             HStack {
                 Text(title).font(AppFont.style(.body))
@@ -256,7 +272,7 @@ struct Sidebar: View {
                 }
             }
         } icon: {
-            Image(systemName: symbol)
+            if let icon = scope.viewIcon { Image(systemName: icon.symbol).foregroundStyle(icon.tint) }
         }
         .font(AppFont.style(.body))
         .tag(scope)
