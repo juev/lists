@@ -33,7 +33,8 @@ fn twodo_backup(dir: &std::path::Path) -> String {
          UPDATE tasks SET repeatvalue = 1, recurrenceendtype = 2, recurrenceendrepeats = 4 WHERE uid = 't7';
          UPDATE tasks SET repeatvalue = 3 WHERE uid = 't1';
          UPDATE tasks SET repeattype = 258, repeatvalue = 1, recurrence = 2, recurrenceendtype = 1, recurrenceenddate = 1792497600 WHERE uid = 't2';
-         INSERT INTO taskattachments VALUES ('t2', 'План.jpg', 'jpg', 'aa/bb/payload.jpg', 0, 0), ('t2', 'evil', 'txt', '../../2do.db', 0, 1);",
+         INSERT INTO taskattachments VALUES ('t2', 'План.jpg', 'jpg', 'aa/bb/payload.jpg', 0, 0), ('t2', 'evil', 'txt', '../../2do.db', 0, 1),
+            ('t1', 'Image', 'jpg', 'cc/dd/payload.jpg', 0, 0);",
     )
     .unwrap();
     drop(conn);
@@ -45,6 +46,9 @@ fn twodo_backup(dir: &std::path::Path) -> String {
     zip.start_file("2DoBackupPayload/Attachments/aa/bb/payload.jpg", options)
         .unwrap();
     zip.write_all(b"jpeg bytes").unwrap();
+    zip.start_file("2DoBackupPayload/Attachments/cc/dd/payload.jpg", options)
+        .unwrap();
+    zip.write_all(b"photo bytes").unwrap();
     zip.finish().unwrap();
     path.to_string_lossy().into_owned()
 }
@@ -56,7 +60,7 @@ fn twodo_backup_brings_lists_tasks_subtasks_tags_and_attachments() {
     let report = d.import_file(twodo_backup(dir.path())).unwrap();
     assert_eq!(
         (report.source.as_str(), report.lists, report.tasks, report.attachments),
-        ("2Do", 1, 6, 1)
+        ("2Do", 1, 6, 2)
     );
     assert!(
         report
@@ -304,4 +308,25 @@ fn unknown_files_are_refused_with_a_reason() {
     std::fs::write(&zip, b"PK not really").unwrap();
     assert!(d.import_file(zip.to_string_lossy().into_owned()).is_err());
     assert!(view(&d, Scope::Inbox).is_empty());
+}
+
+#[test]
+fn i8_twodo_attachment_gets_the_extension_kept_beside_its_name() {
+    let d = device();
+    let dir = tempfile::tempdir().unwrap();
+    d.import_file(twodo_backup(dir.path())).unwrap();
+    let all = d.tasks(Scope::All).unwrap();
+    let files = |title: &str| {
+        let task = all.iter().find(|t| t.title == title).unwrap();
+        d.attachments(task.id.clone()).unwrap()
+    };
+    // 2Do names a photo "Image" and keeps "jpg" in a column of its own.
+    let photo = files("Полить цветы");
+    assert_eq!(
+        (photo[0].name.as_str(), photo[0].mime.as_str()),
+        ("Image.jpg", "image/jpeg")
+    );
+    // A name that already ends with the extension is left as it is.
+    let plan = files("Ремонт");
+    assert_eq!(plan[0].name, "План.jpg");
 }
