@@ -113,7 +113,8 @@ struct TaskEditor: View {
     }
 
     private func attach(_ urls: [URL]) {
-        model.attach(urls, to: task.id)
+        // A file of a card dragged out and dropped back is not a new attachment.
+        model.attach(urls.filter { !AttachmentFiles.isCopy($0) }, to: task.id)
         load()
     }
 
@@ -295,7 +296,18 @@ struct TaskEditor: View {
                         Button(L("Open in Default App")) {
                             if let url = AttachmentFiles.named(file) { NSWorkspace.shared.open(url) }
                         }
+                        Divider()
+                        Button(L("Save As…")) {
+                            AttachmentFiles.saveAs(file) { reason in
+                                model.alertIsError = true
+                                model.alert = reason
+                            }
+                        }
                     }
+                }
+                // R86: the file leaves the card by a drag as well, under its own name.
+                .onDrag {
+                    AttachmentFiles.named(file).flatMap { NSItemProvider(contentsOf: $0) } ?? NSItemProvider()
                 }
             }
         }

@@ -29,6 +29,29 @@ enum AttachmentFiles {
         }
     }
 
+    /// Whether the file is one of the named copies: a file dragged out of a card and dropped on a card is not a new attachment.
+    static func isCopy(_ url: URL) -> Bool {
+        url.standardizedFileURL.path.hasPrefix(root.standardizedFileURL.path + "/")
+    }
+
+    /// Writes the content of an attachment where the person asked for it (R86), in place of a file that is there.
+    static func save(_ file: Attachment, to target: URL) throws {
+        guard let path = file.localPath else { throw CocoaError(.fileNoSuchFile) }
+        let fm = FileManager.default
+        if fm.fileExists(atPath: target.path) { try fm.removeItem(at: target) }
+        try fm.copyItem(at: URL(fileURLWithPath: path), to: target)
+    }
+
+    /// Asks where to save the attachment, under its own name, and saves it there.
+    @MainActor
+    static func saveAs(_ file: Attachment, failed: (String) -> Void) {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = fileName(file.name)
+        panel.canCreateDirectories = true
+        guard panel.runModal() == .OK, let target = panel.url else { return }
+        do { try save(file, to: target) } catch { failed(error.localizedDescription) }
+    }
+
     /// Removes the named copies; they are made again when asked for.
     static func clear() {
         try? FileManager.default.removeItem(at: root)

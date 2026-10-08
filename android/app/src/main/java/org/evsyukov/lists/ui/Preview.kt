@@ -29,6 +29,8 @@ import androidx.compose.material.icons.automirrored.outlined.InsertDriveFile
 import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Image
+import androidx.compose.material.icons.outlined.SaveAlt
+import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -130,12 +132,14 @@ fun AttachmentIcon(file: Attachment) {
  * file to another app, which is also the way out when it cannot be shown.
  */
 @Composable
-fun AttachmentViewer(file: Attachment, kind: PreviewKind, onOpenOutside: () -> Unit, onClose: () -> Unit) {
+fun AttachmentViewer(file: Attachment, kind: PreviewKind, onOpenOutside: () -> Unit, onSave: () -> Unit, onShare: () -> Unit, onClose: () -> Unit) {
     val path = file.localPath ?: return
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         Column(Modifier.fillMaxSize().background(Color.Black).systemBarsPadding().testTag("viewer")) {
             Row(Modifier.fillMaxWidth().padding(start = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(file.name, Modifier.weight(1f), color = Color.White, maxLines = 1, overflow = TextOverflow.MiddleEllipsis)
+                IconButton(onClick = onSave) { Icon(Icons.Outlined.SaveAlt, str(R.string.save_to), tint = Color.White) }
+                IconButton(onClick = onShare) { Icon(Icons.Outlined.Share, str(R.string.share), tint = Color.White) }
                 IconButton(onClick = onOpenOutside) { Icon(Icons.AutoMirrored.Outlined.OpenInNew, str(R.string.open_in_another_app), tint = Color.White) }
                 IconButton(onClick = onClose) { Icon(Icons.Outlined.Close, str(R.string.close), tint = Color.White) }
             }
