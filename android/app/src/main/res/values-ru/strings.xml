@@ -98,6 +98,10 @@
     <string name="attachments_waiting">Вложения ждут синхронизации: %1$s</string>
     <string name="detach">Открепить</string>
     <string name="open_in_another_app">Открыть в другой программе</string>
+    <string name="save_to">Сохранить в…</string>
+    <string name="share">Поделиться</string>
+    <string name="file_saved">Сохранено</string>
+    <string name="file_not_saved">Не удалось сохранить файл</string>
     <string name="cannot_show_file">Этот файл не получается показать здесь.</string>
     <string name="time">Время</string>
     <string name="time_off">Нет</string>

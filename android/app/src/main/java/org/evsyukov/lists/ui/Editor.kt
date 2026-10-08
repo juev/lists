@@ -7,6 +7,7 @@ import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.provider.Settings
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -179,6 +180,24 @@ fun attach(context: Context, store: Store, taskId: String, uris: List<Uri>) {
     }
 }
 
+/** Writes the content of an attachment to the place the user picked (R86). */
+internal fun copyAttachment(context: Context, file: Attachment, target: Uri): Boolean = runCatching {
+    val path = file.localPath ?: return false
+    val out = context.contentResolver.openOutputStream(target, "w") ?: return false
+    out.use { File(path).inputStream().use { input -> input.copyTo(out) } }
+    true
+}.getOrDefault(false)
+
+/** Hands the file to another app through the share sheet (R86). */
+private fun shareAttachment(context: Context, file: Attachment) {
+    val path = file.localPath ?: return
+    runCatching {
+        val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", File(path), file.name)
+        val intent = Intent(Intent.ACTION_SEND).setType(file.mime).putExtra(Intent.EXTRA_STREAM, uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        context.startActivity(Intent.createChooser(intent, file.name))
+    }
+}
+
 private fun openAttachment(context: Context, file: Attachment) {
     val path = file.localPath ?: return
     runCatching {
@@ -212,6 +231,23 @@ fun EditorSheet(editing: Editing, state: UiState, model: MainViewModel, onRemind
     val fetchScope = rememberCoroutineScope()
     val pickFiles = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
         if (uris.isNotEmpty()) model.act { store -> attach(context, store, task.id, uris) }
+    }
+    // R86: the attachment waiting for the place the system picker returns, and the row whose menu is open.
+    var saving by remember(task.id) { mutableStateOf<Attachment?>(null) }
+    var fileMenu by remember(task.id) { mutableStateOf<String?>(null) }
+    val saveFile = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("*/*")) { uri ->
+        val file = saving
+        saving = null
+        if (uri != null && file != null) {
+            fetchScope.launch {
+                val saved = withContext(Dispatchers.IO) { copyAttachment(context, file, uri) }
+                Toast.makeText(context, if (saved) R.string.file_saved else R.string.file_not_saved, Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+    fun save(file: Attachment) {
+        saving = file
+        saveFile.launch(file.name)
     }
 
     ModalBottomSheet(onDismissRequest = { model.open(null) }, sheetState = sheet) {
@@ -358,6 +394,16 @@ fun EditorSheet(editing: Editing, state: UiState, model: MainViewModel, onRemind
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
+                    if (file.localPath != null) {
+                        Box {
+                            IconButton(onClick = { fileMenu = file.id }) { Icon(Icons.Outlined.MoreVert, str(R.string.more)) }
+                            DropdownMenu(expanded = fileMenu == file.id, onDismissRequest = { fileMenu = null }) {
+                                DropdownMenuItem(text = { Text(str(R.string.save_to)) }, onClick = { fileMenu = null; save(file) })
+                                DropdownMenuItem(text = { Text(str(R.string.share)) }, onClick = { fileMenu = null; shareAttachment(context, file) })
+                                DropdownMenuItem(text = { Text(str(R.string.open_in_another_app)) }, onClick = { fileMenu = null; openAttachment(context, file) })
+                            }
+                        }
+                    }
                     if (!locked) {
                         IconButton(onClick = { model.act { it.removeAttachment(file.id) } }) { Icon(Icons.Outlined.Close, str(R.string.detach)) }
                     }
@@ -375,7 +421,7 @@ fun EditorSheet(editing: Editing, state: UiState, model: MainViewModel, onRemind
 
     editing.attachments.firstOrNull { it.id == viewing }?.let { file ->
         previewKind(file.mime)?.let { kind ->
-            AttachmentViewer(file, kind, onOpenOutside = { openAttachment(context, file) }) { viewing = null }
+            AttachmentViewer(file, kind, onOpenOutside = { openAttachment(context, file) }, onSave = { save(file) }, onShare = { shareAttachment(context, file) }) { viewing = null }
         }
     }
 

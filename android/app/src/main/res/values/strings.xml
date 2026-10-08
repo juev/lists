@@ -99,6 +99,10 @@
     <string name="attachments_waiting">Attachments waiting to sync: %1$s</string>
     <string name="detach">Remove attachment</string>
     <string name="open_in_another_app">Open in another app</string>
+    <string name="save_to">Save to…</string>
+    <string name="share">Share</string>
+    <string name="file_saved">Saved</string>
+    <string name="file_not_saved">Could not save the file</string>
     <string name="cannot_show_file">This file cannot be shown here.</string>
     <string name="time">Time</string>
     <string name="time_off">Off</string>
