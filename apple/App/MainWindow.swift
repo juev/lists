@@ -31,7 +31,10 @@ struct MainWindow: View {
         } detail: {
             TaskListView()
                 .font(AppFont.style(.body))
+                // The window keeps its name for the system; the content shows it large instead (R80).
                 .navigationTitle(model.scopeTitle)
+                .withoutToolbarTitle()
+                .toolbarBackground(.hidden, for: .windowToolbar)
                 .toolbar {
                     ToolbarItem(placement: .primaryAction) {
                         Button { model.startDraft() } label: { Image(systemName: "plus") }
@@ -81,6 +84,48 @@ struct SyncIndicator: View {
         if status.attachmentsWaiting > 0 { return L("Attachments waiting to sync: %@", "\(status.attachmentsWaiting)") }
         if let ok = status.lastOk { return L("Synced: %@", "\(Moment.label(ok))") }
         return L("Sync now")
+    }
+}
+
+private extension View {
+    /// Takes the title out of the toolbar where the system can: the large title of the content replaces it (R80).
+    @ViewBuilder
+    func withoutToolbarTitle() -> some View {
+        if #available(macOS 15.0, *) { toolbar(removing: .title) } else { self }
+    }
+}
+
+/// The large title the content of the window begins with: the icon of the view and its name (R80).
+struct ViewTitle: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        let icon = model.scopeIcon
+        HStack(spacing: 8) {
+            Image(systemName: icon.symbol).foregroundStyle(icon.tint)
+            Text(model.scopeTitle).lineLimit(1)
+            Spacer(minLength: 0)
+        }
+        .font(AppFont.style(.title, weight: .bold))
+        .padding(.horizontal, 20)
+        .padding(.top, 4)
+        .padding(.bottom, 8)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
+    }
+}
+
+extension AppModel {
+    /// The icon the current view has in the sidebar, for its large title.
+    var scopeIcon: (symbol: String, tint: Color) {
+        switch effectiveScope {
+        case .list(let id): return (list(id)?.symbol ?? "list.bullet", list(id)?.tint ?? .accentColor)
+        case .tag: return ("number", .secondary)
+        case .project(let id): return ("folder", projects.first { $0.id == id }.flatMap { list($0.listId) }?.tint ?? .accentColor)
+        case .filter: return ("line.3.horizontal.decrease.circle", .secondary)
+        case .search: return ("magnifyingglass", .secondary)
+        case let scope: return scope.viewIcon ?? ("checklist", .secondary)
+        }
     }
 }
 

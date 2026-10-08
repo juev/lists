@@ -9,6 +9,7 @@ struct TaskListView: View {
     var body: some View {
         @Bindable var model = model
         VStack(spacing: 0) {
+            ViewTitle()
             if model.draft != nil {
                 DraftEditor(
                     draft: Binding(get: { model.draft ?? TaskDraft() }, set: { if model.draft != nil { model.draft = $0 } }),
