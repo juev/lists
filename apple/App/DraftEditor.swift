@@ -8,12 +8,15 @@ struct TaskDraft: Equatable {
     /// The note as it came from the clipboard (R58); nil when it was typed.
     var pastedNotes: String?
     var start: String?
+    /// The due date chosen in the card; nil while the title or the list decides (R75).
     var due: String?
-    /// The due date came from the view (Today), not from the user: a date
-    /// typed in the title replaces it.
-    var dueIsDefault = false
+    /// The date was taken away in the card: the task gets none from its list.
+    var dueRemoved = false
     var `repeat`: Repeat?
     var priority = Priority.none
+    /// The priority was chosen in the card, "none" included: the default of
+    /// the list no longer applies.
+    var priorityChosen = false
     var tags: [String] = []
     var listId = "inbox"
     /// Set when the task is typed inside a project: it becomes a subtask of it.
@@ -178,7 +181,12 @@ struct DraftEditor: View {
     }
 
     private var priorityChoices: [MenuChoice] {
-        Priority.all.map { priority in MenuChoice(title: priority.title, on: draft.priority == priority) { draft.priority = priority } }
+        Priority.all.map { priority in
+            MenuChoice(title: priority.title, on: shownPriority == priority) {
+                draft.priority = priority
+                draft.priorityChosen = true
+            }
+        }
     }
 
     private var listChoices: [MenuChoice] {
@@ -203,7 +211,7 @@ struct DraftEditor: View {
                 .popover(isPresented: isOpen(.due)) {
                     DateEditor(title: L("Due"), value: shownDue) {
                         draft.due = $0
-                        draft.dueIsDefault = false
+                        draft.dueRemoved = $0 == nil
                     }
                 }
                 .help(L("Due date (⌘D)"))
@@ -218,7 +226,7 @@ struct DraftEditor: View {
             Menu {
                 ChoiceItems(choices: priorityChoices)
             } label: {
-                Chip(symbol: "flag", text: draft.priority == .none ? "" : draft.priority.title, tint: draft.priority == .none ? .secondary : .orange)
+                Chip(symbol: "flag", text: shownPriority == .none ? "" : shownPriority.title, tint: shownPriority == .none ? .secondary : .orange)
             }
             .menuStyle(.button)
             .buttonStyle(.plain)
@@ -269,12 +277,9 @@ struct DraftEditor: View {
         }
     }
 
-    /// What the task will be due on: the field, unless it only holds the
-    /// view's default and the title names a date.
-    private var shownDue: String? {
-        if draft.dueIsDefault, model.parseQuickText, let typed = model.store?.parseQuick(text: draft.title).due { return typed }
-        return draft.due
-    }
+    private var shownDue: String? { model.shownDue(draft) }
+
+    private var shownPriority: Priority { model.shownPriority(draft) }
 
     private func isOpen(_ which: Popover) -> Binding<Bool> {
         Binding(get: { popover == which }, set: { if !$0 && popover == which { popover = nil } })

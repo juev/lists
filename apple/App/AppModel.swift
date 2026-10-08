@@ -378,21 +378,14 @@ final class AppModel {
             if case .project(let id) = scope {
                 return try store.quickAddUnder(text: line, parentId: id)
             }
-            var task = try store.quickAdd(text: line, listId: targetListId)
-            // A task typed into Today belongs to today unless the line says otherwise.
-            if case .today = scope, task.due == nil {
-                try store.setDue(id: task.id, due: Moment.today())
-                task = try store.task(id: task.id)
-            }
-            if case .tag(let name) = scope {
-                try store.addTag(id: task.id, tag: name)
-            }
+            let task = try store.quickAdd(text: line, listId: targetListId)
             noteUsedList(task.listId)
             return task
         }
     }
 
-    /// Opens the card of a new task, filled with what the current view implies.
+    /// Opens the card of a new task. The view gives it its list or its parent
+    /// and nothing else (R75).
     func startDraft() {
         search = ""
         switch scope {
@@ -400,16 +393,36 @@ final class AppModel {
         default: break
         }
         var new = TaskDraft(listId: targetListId)
-        switch scope {
-        case .today:
-            new.due = Moment.today()
-            new.dueIsDefault = true
-        case .tag(let name): new.tags = [name]
-        case .project(let id): new.parentId = id
-        default: break
-        }
+        if case .project(let id) = scope { new.parentId = id }
         expanded.removeAll()
         draft = new
+    }
+
+    /// What the title of a draft says, when titles are parsed.
+    private func typed(_ draft: TaskDraft) -> QuickParse? {
+        parseQuickText && !draft.isBlank ? store?.parseQuick(text: draft.title) : nil
+    }
+
+    /// The list whose defaults a draft is to get (R2); a subtask gets none.
+    private func defaults(_ draft: TaskDraft) -> TaskList? {
+        draft.parentId == nil ? list(draft.listId) : nil
+    }
+
+    /// The due date next to the icon of a new task (R75): the chosen one, or
+    /// the one the list is going to give. The list gives its date only to a
+    /// task without a start date, and a date in the title wins over it (R41).
+    func shownDue(_ draft: TaskDraft) -> String? {
+        if let due = draft.due { return due }
+        guard !draft.dueRemoved, draft.start == nil, defaults(draft)?.defaultDueToday == true else { return nil }
+        return typed(draft)?.due ?? Moment.today()
+    }
+
+    /// The priority next to the icon of a new task (R75), by the same rule.
+    func shownPriority(_ draft: TaskDraft) -> Priority {
+        if draft.priorityChosen { return draft.priority }
+        guard let preset = defaults(draft)?.defaultPriority, preset != .none else { return .none }
+        if let typed = typed(draft)?.priority, typed != .none { return typed }
+        return preset
     }
 
     /// Closes the card of a new task the way Esc does: a task with a title is created, an empty card is dropped.
@@ -423,7 +436,8 @@ final class AppModel {
         draft = nil
     }
 
-    /// Creates the task of a draft. What the fields say wins over what the title says.
+    /// Creates the task of a draft. What the fields say wins over what the
+    /// title says, and the title wins over the defaults of the list.
     @discardableResult
     func save(_ draft: TaskDraft) -> TaskItem? {
         let title = draft.title.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -439,10 +453,16 @@ final class AppModel {
             }
             if !draft.notes.isEmpty { try store.setNotes(id: created.id, notes: draft.notes) }
             if let start = draft.start { try store.setStart(id: created.id, start: start) }
-            if let due = draft.due, !(draft.dueIsDefault && created.due != nil) { try store.setDue(id: created.id, due: due) }
+            // The list gives its date only to a task without a start date, and this one was created before its start was written.
+            let bare = draft.dueRemoved || draft.start != nil
+            let named = (bare || (draft.priorityChosen && draft.priority == .none)) && parse ? store.parseQuick(text: title) : nil
+            let due = draft.due ?? (bare ? named?.due : created.due)
+            if due != created.due { try store.setDue(id: created.id, due: due) }
             // After the dates: the rule is counted from them.
             if let rule = draft.repeat { try store.setRepeat(id: created.id, repeat: rule) }
-            if draft.priority != .none { try store.setPriority(id: created.id, priority: draft.priority) }
+            // Untouched, the field leaves what the core set; "none" takes the default of the list away.
+            let priority = !draft.priorityChosen ? created.priority : draft.priority == .none ? named?.priority ?? Priority.none : draft.priority
+            if priority != created.priority { try store.setPriority(id: created.id, priority: priority) }
             for tag in draft.tags where !created.tags.contains(tag) { try store.addTag(id: created.id, tag: tag) }
             return try store.task(id: created.id)
         }
