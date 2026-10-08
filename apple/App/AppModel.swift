@@ -506,6 +506,14 @@ final class AppModel {
         listFocusRequests += 1
     }
 
+    /// Esc while the list has the keyboard: closes the card the selected row is in, the innermost open one.
+    /// False when the selected row is in no open card.
+    func closeSelectedCard() -> Bool {
+        guard let selection, let open = ([selection] + ancestors(of: selection)).first(where: expanded.contains) else { return false }
+        closeCard(open)
+        return true
+    }
+
     /// Closes a card together with the cards of the subtasks inside it.
     func collapse(_ id: String) {
         if titleFocus == id { titleFocus = nil }

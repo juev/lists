@@ -45,7 +45,7 @@ import SwiftUI
 /// `quicktrace` (shows quick entry transparent and without the keyboard, and prints its geometry frame by frame:
 /// a line that differs from the next one is a card that moved after it was shown).
 /// With `LISTS_DEBUG_QUIET` set the script leaves the app in the background instead of bringing its window forward;
-/// key presses then go straight to the main window, which takes them hidden as well.
+/// key presses then go straight to the main window, which takes them hidden as well, and so do clicks after `ghost`.
 @MainActor
 enum DebugScript {
     /// The chip of the card that has the keyboard and the popover it has open, as the cards report them.
@@ -90,9 +90,9 @@ enum DebugScript {
                     let key = codes[parts[0]] ?? (0, parts[0])
                     press(key.1, code: key.0, flags: flags)
                 case "click":
-                    // Points from the top left corner of the key window.
+                    // Points from the top left corner of the window the script types into.
                     let xy = argument.split(separator: ",").compactMap { Double($0) }
-                    if xy.count == 2, let window = NSApp.keyWindow {
+                    if xy.count == 2, let window = target {
                         let point = NSPoint(x: xy[0], y: Double(window.frame.height) - xy[1])
                         for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
                             if let event = NSEvent.mouseEvent(

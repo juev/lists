@@ -61,6 +61,11 @@ struct TaskListView: View {
                         model.toggleDone(task)
                         return .handled
                     }
+                    // A click inside an open card can leave the keyboard with the list: Esc still closes the card (R44).
+                    .onKeyPress(.escape) {
+                        guard !typing, model.closeSelectedCard() else { return .ignored }
+                        return .handled
+                    }
                     .onDeleteCommand { if !typing { model.selectedTask.map(model.delete) } }
                     .onChange(of: model.selection) { _, new in
                         guard let new else { return }
