@@ -19,7 +19,7 @@ import UserNotifications
 /// `files` (prints the attachments of the selected task: the name of the copy made for Quick Look, the type the system sees in it and the size of the thumbnail;
 /// whether its content is on this device; then how many attachments wait to sync,
 /// the file whose row has the keyboard and how many times a card asked Quick Look for a file),
-/// `sync` (starts a sync the way the toolbar icon does), `attach:/path` (attaches the file to the selected task), `savefile:/path` (saves the first attachment of the selected task there, the way "Save As…" does once a place is chosen), `showfile:0` (shows the attachment with that number the way a click on its name does;
+/// `sync` (starts a sync the way the toolbar icon does), `attach:/path` (attaches the file to the selected task), `filepointer` (prints the size of the layer the pointer works on over the first file of the open card, the items of its right-click menu and the file a drag would carry; `filepointer:click` also clicks it), `savefile:/path` (saves the first attachment of the selected task there, the way "Save As…" does once a place is chosen), `showfile:0` (shows the attachment with that number the way a click on its name does;
 /// a hidden app shows no panel), `preview` (prints whether the Quick Look panel is open) and `preview:close` (closes it),
 /// `inbox` (switches to the Inbox view), `open` (expands the selected task), `edit` (opens it with the caret in the title, the way Return does), `select:1` and `select:-1` (move the selection the way the arrow keys do),
 /// `pick:title` (selects a row the way a click does), `indent` and `outdent` (move the selected task under the one above and back),
@@ -162,6 +162,20 @@ enum DebugScript {
                     print("debug: file row with the keyboard \(file ?? "none"), asked to show \(shows) times")
                 case "attach":
                     if let id = AppModel.shared.selection { AppModel.shared.attach([URL(fileURLWithPath: argument)], to: id) }
+                case "filepointer":
+                    // The layer over a file of the open card: what its right click offers and what a drag would carry.
+                    func find(_ view: NSView?) -> FilePointerView? {
+                        guard let view else { return nil }
+                        if let found = view as? FilePointerView { return found }
+                        for sub in view.subviews { if let found = find(sub) { return found } }
+                        return nil
+                    }
+                    if let pointer = find(target?.contentView) {
+                        print("debug: file pointer \(Int(pointer.frame.width))x\(Int(pointer.frame.height)), menu \(pointer.fileMenu().items.map(\.title)), drags \(pointer.url()?.lastPathComponent ?? "nothing")")
+                        if argument == "click" { pointer.clicked() }
+                    } else {
+                        print("debug: file pointer none")
+                    }
                 case "savefile":
                     // Saves the first attachment of the selected task the way "Save As…" does once a place is chosen.
                     if let task = AppModel.shared.selectedTask, let file = (try? AppModel.shared.store?.attachments(taskId: task.id))?.first {

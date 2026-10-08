@@ -260,18 +260,29 @@ struct TaskEditor: View {
         VStack(alignment: .leading, spacing: 4) {
             ForEach(attachments, id: \.id) { file in
                 HStack(spacing: 6) {
-                    AttachmentIcon(file: file)
-                    Button(file.name) { open(file) }
-                        .buttonStyle(.link)
-                        .disabled(fetching.contains(file.id))
-                        .help(file.localPath == nil ? L("Download now") : "")
+                    HStack(spacing: 6) {
+                        AttachmentIcon(file: file)
+                        Button(file.name) { open(file) }
+                            .buttonStyle(.link)
+                            .disabled(fetching.contains(file.id))
+                            .help(file.localPath == nil ? L("Download now") : "")
+                    }
+                    // R86: over a file that is here lies a layer of its own for the pointer. Inside a list row
+                    // SwiftUI hands a drag and a right click to the row of the task, whatever the file asks for.
+                    .overlay {
+                        if file.localPath != nil {
+                            FilePointer(
+                                url: { AttachmentFiles.named(file) }, choices: { fileChoices(file) },
+                                click: { open(file) })
+                        }
+                    }
                     Text(caption(file))
                         .font(AppFont.style(.caption))
                         .foregroundStyle(.tertiary)
                     if file.localPath != nil {
                         // What can be done with the file, where a click finds it: a right click here belongs to the row of the task.
                         Menu {
-                            fileActions(file)
+                            ChoiceItems(choices: fileChoices(file))
                         } label: {
                             Image(systemName: "ellipsis.circle").foregroundStyle(.secondary)
                         }
@@ -303,13 +314,6 @@ struct TaskEditor: View {
                     finish()
                     return .handled
                 }
-                .contextMenu {
-                    if file.localPath != nil { fileActions(file) }
-                }
-                // R86: the file leaves the card by a drag as well, under its own name.
-                .onDrag {
-                    AttachmentFiles.named(file).flatMap { NSItemProvider(contentsOf: $0) } ?? NSItemProvider()
-                }
             }
         }
         .quickLookPreview($previewed, in: previewable)
@@ -321,20 +325,20 @@ struct TaskEditor: View {
         #endif
     }
 
-    /// The actions of a file that is on this device: the same in its menu button and in its context menu (R54, R86).
-    @ViewBuilder
-    private func fileActions(_ file: Attachment) -> some View {
-        Button(L("Quick Look")) { show(file) }
-        Button(L("Open in Default App")) {
-            if let url = AttachmentFiles.named(file) { NSWorkspace.shared.open(url) }
-        }
-        Divider()
-        Button(L("Save As…")) {
-            AttachmentFiles.saveAs(file) { reason in
-                model.alertIsError = true
-                model.alert = reason
-            }
-        }
+    /// The actions of a file that is on this device: the same under its menu button and its right click (R54, R86).
+    private func fileChoices(_ file: Attachment) -> [MenuChoice] {
+        [
+            MenuChoice(title: L("Quick Look")) { show(file) },
+            MenuChoice(title: L("Open in Default App")) {
+                if let url = AttachmentFiles.named(file) { NSWorkspace.shared.open(url) }
+            },
+            MenuChoice(title: L("Save As…")) {
+                AttachmentFiles.saveAs(file) { reason in
+                    model.alertIsError = true
+                    model.alert = reason
+                }
+            },
+        ]
     }
 
     private func caption(_ file: Attachment) -> String {
