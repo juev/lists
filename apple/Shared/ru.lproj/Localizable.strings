@@ -313,3 +313,6 @@
 "at once" = "сразу";
 "after an hour" = "через час";
 "after %d min" = "через %d мин";
+"Won't do" = "Не буду делать";
+"No tasks marked won't do" = "Нет задач «не буду делать»";
+"Close the task without doing it" = "Закрыть задачу, не выполняя её";

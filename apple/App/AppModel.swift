@@ -122,7 +122,7 @@ final class AppModel {
     var showCompletedView: Bool = UserDefaults.standard.object(forKey: "showCompletedView") == nil || UserDefaults.standard.bool(forKey: "showCompletedView") {
         didSet {
             UserDefaults.standard.set(showCompletedView, forKey: "showCompletedView")
-            if !showCompletedView, scope == .completed { scope = .inbox }
+            if !showCompletedView, scope == .completed || scope == .wontDo { scope = .inbox }
         }
     }
 
@@ -246,6 +246,7 @@ final class AppModel {
         case .upcoming: return L("Upcoming")
         case .all: return L("All")
         case .completed: return L("Completed")
+        case .wontDo: return L("Won't do")
         case .trash: return L("Trash")
         case .list(let id): return list(id).map(listName) ?? L("List")
         case .tag(let name): return "#\(name)"
@@ -326,7 +327,7 @@ final class AppModel {
             return sectioned(tasks, key: { Moment.day($0.due ?? $0.start ?? "") }, title: Moment.heading)
         case .all:
             return sectioned(tasks, key: \.listId, title: { id in self.list(id).map(self.listName) ?? "" })
-        case .completed:
+        case .completed, .wontDo:
             return sectioned(tasks, key: { Moment.day($0.done ?? "") }, title: { Moment.label($0) })
         default:
             return [TaskSection(id: "all", title: nil, tasks: tasks)]
@@ -395,7 +396,7 @@ final class AppModel {
     func startDraft() {
         search = ""
         switch scope {
-        case .completed, .trash: scope = .inbox
+        case .completed, .wontDo, .trash: scope = .inbox
         default: break
         }
         var new = TaskDraft(listId: targetListId)
@@ -545,6 +546,18 @@ final class AppModel {
                 model.perform { try $0.reopenTask(id: task.id) }
             }
             undoManager?.setActionName(L("Complete Task"))
+        }
+    }
+
+    /// Closes the task as "won't do" (R69); undone the way a completion is.
+    func wontDo(_ task: TaskItem) {
+        guard task.done == nil else { return }
+        perform { _ = try $0.wontDoTask(id: task.id) }
+        if task.repeat == nil {
+            undoManager?.registerUndo(withTarget: self) { model in
+                model.perform { try $0.reopenTask(id: task.id) }
+            }
+            undoManager?.setActionName(L("Won't do"))
         }
     }
 
