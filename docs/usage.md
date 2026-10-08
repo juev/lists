@@ -165,7 +165,7 @@ Each device has its own notification settings, and they do not sync:
 - how long before a timed due date to remind: at the time, from 5 minutes to a day before. Several can be on at once, for example a day before and again 15 minutes before;
 - at what time to remind about tasks due on a day;
 - an optional summary of the day and its time;
-- on macOS, the sound.
+- the sound. On macOS turn it on or off and choose the standard notification sound or one of the system alert sounds; a sound plays when you choose it. On Android tap "Sound" to open the system settings of the "Reminders" channel and choose the sound there.
 
 A reminder set on a task itself replaces the one derived from its due date. The web interface does not notify.
 
