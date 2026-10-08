@@ -233,6 +233,10 @@
     <string name="new_tasks_setting">Новые задачи</string>
     <string name="default_list">Список по умолчанию</string>
     <string name="last_used_list">Последний использованный</string>
+    <string name="calendar_events">События календаря</string>
+    <string name="show_calendar_events">Показывать события календаря в «Сегодня»</string>
+    <string name="calendar_events_hint">События читаются из календарей этого устройства и показаны над задачами. Они не синхронизируются, и настройка действует только на этом устройстве.</string>
+    <string name="calendar_no_access">У Lists нет доступа к календарю</string>
     <string name="parse_title">Распознавать в названии даты, приоритет, теги и список</string>
     <string name="clipboard_note">Заметка из буфера обмена в быстром вводе</string>
     <string name="remove_clipboard_note">Убрать текст из буфера обмена</string>

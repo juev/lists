@@ -113,6 +113,20 @@ import androidx.compose.ui.unit.dp
 import androidx.core.graphics.toColorInt
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.evsyukov.lists.R
+import android.database.ContentObserver
+import android.os.Handler
+import android.os.Looper
+import android.provider.CalendarContract
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.runtime.DisposableEffect
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
+import org.evsyukov.lists.DayEvent
+import org.evsyukov.lists.SystemCalendars
+import kotlinx.coroutines.delay
+import java.time.Duration
+import java.time.LocalDateTime
 import org.evsyukov.lists.EntryPrefs
 import org.evsyukov.lists.str
 import org.evsyukov.lists.Repo
@@ -143,6 +157,8 @@ fun TaskList.tint(): Color = parseColor(color) ?: MaterialTheme.colorScheme.prim
 fun MainScreen(model: MainViewModel, onReminderSet: () -> Unit) {
     val state by model.state.collectAsStateWithLifecycle()
     val syncing by Repo.syncing.collectAsStateWithLifecycle()
+    val events by SystemCalendars.events.collectAsStateWithLifecycle()
+    WatchCalendars()
     val drawer = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
@@ -245,11 +261,18 @@ fun MainScreen(model: MainViewModel, onReminderSet: () -> Unit) {
                     }
                     .edgeSwipe { scope.launch { drawer.open() } },
             ) {
+                // R78: the block stands in Today only, and only while there is an event to show.
+                val eventsShown = state.effectiveScope == Scope.Today && events.isNotEmpty()
                 if (state.loaded && state.sections.all { it.tasks.isEmpty() }) {
-                    EmptyState(state.effectiveScope)
+                    Column(Modifier.fillMaxSize()) {
+                        // R78: the events of the day are shown on a day without tasks as well.
+                        if (eventsShown) EventsBlock(events)
+                        EmptyState(state.effectiveScope)
+                    }
                 } else {
                     // Room below the last row, so that the add button does not cover it.
                     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 88.dp)) {
+                        if (eventsShown) item(key = "events") { EventsBlock(events) }
                         for (section in state.sections) {
                             section.title?.let { title ->
                                 item(key = "h:${section.key}") {
@@ -375,6 +398,67 @@ private fun SyncIcon(state: UiState, syncing: Boolean, onSync: () -> Unit) {
             state.sync.pending > 0u -> Icon(Icons.Outlined.CloudSync, str(R.string.has_pending))
             state.sync.attachmentsWaiting > 0u -> Icon(Icons.Outlined.CloudSync, str(R.string.attachments_waiting, state.sync.attachmentsWaiting.toString()))
             else -> Icon(Icons.Outlined.CloudDone, str(R.string.synced), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+/** R78: reads the events again when the app comes back, when the calendars change and when the next day begins. */
+@Composable
+private fun WatchCalendars() {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { scope.launch { SystemCalendars.refresh(context) } }
+    LaunchedEffect(Unit) {
+        while (true) {
+            val now = LocalDateTime.now()
+            delay(Duration.between(now, now.toLocalDate().plusDays(1).atStartOfDay()).toMillis() + 1000)
+            SystemCalendars.refresh(context)
+        }
+    }
+    val enabled by SystemCalendars.readable.collectAsStateWithLifecycle()
+    DisposableEffect(enabled) {
+        val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
+            override fun onChange(selfChange: Boolean) { scope.launch { SystemCalendars.refresh(context) } }
+        }
+        // Without the permission the provider refuses an observer.
+        if (enabled) runCatching { context.contentResolver.registerContentObserver(CalendarContract.CONTENT_URI, true, observer) }
+        onDispose { context.contentResolver.unregisterContentObserver(observer) }
+    }
+}
+
+/** The events of the day above the tasks of Today (R78): muted, without a mark, because an event is not a task. */
+@Composable
+private fun EventsBlock(events: List<DayEvent>) {
+    val context = LocalContext.current
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+            .padding(vertical = 4.dp),
+    ) {
+        for (event in events) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clickable { runCatching { context.startActivity(SystemCalendars.view(event)) } }
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(Modifier.width(3.dp).height(16.dp).background(Color(event.color), RoundedCornerShape(2.dp)))
+                event.time?.let {
+                    Text(it, Modifier.padding(start = 8.dp), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Text(
+                    event.title,
+                    Modifier.padding(start = 8.dp),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }
