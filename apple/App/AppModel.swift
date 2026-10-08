@@ -28,6 +28,9 @@ final class AppModel {
 
     var scope: Scope = .today { didSet { if scope != oldValue { expanded.removeAll(); subtasksShown.removeAll(); draft = nil; selection = nil; reload() } } }
     var search = "" { didSet { if search != oldValue { reload() } } }
+    /// Search is an icon until it is asked for (R80); each request, the first one and ⌘F after it, gives the field the keyboard.
+    var searchRequests = 0
+    var searchOpen = false
     var sections: [TaskSection] = []
     /// Minutes a completed task stays in its view; shared by all devices (R68).
     private(set) var keepDone: KeepDone = .seconds(seconds: 5)
@@ -441,6 +444,7 @@ final class AppModel {
     /// and nothing else (R75).
     func startDraft() {
         search = ""
+        searchOpen = false
         switch scope {
         case .completed, .wontDo, .trash: scope = .inbox
         default: break
@@ -661,6 +665,7 @@ final class AppModel {
         guard let store, var task = try? store.task(id: id) else { return }
         finishDraft()
         search = ""
+        searchOpen = false
         scope = task.listId == "inbox" ? .inbox : .list(id: task.listId)
         var path = [task.id]
         while let parent = task.parentId, let next = try? store.task(id: parent) {
