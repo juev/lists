@@ -772,3 +772,51 @@ fn s32_the_shared_setting_merges_like_any_field_and_reaches_a_new_device() {
     settle(&b, &a, &storage);
     assert!(view(&a, Scope::Inbox).is_empty());
 }
+
+#[test]
+fn s33_the_wont_do_outcome_merges_with_completion_and_survives_an_unaware_version() {
+    let storage = tempfile::tempdir().unwrap();
+    let (a, b) = (device(), device());
+    let plain = add(&a, "брошенная");
+    let first = add(&a, "сначала выполнена");
+    let second = add(&a, "сначала брошена");
+    settle(&a, &b, &storage);
+
+    a.wont_do_task(plain.id.clone()).unwrap();
+    // Both close the same task offline: the later `done` decides.
+    a.complete_task(first.id.clone()).unwrap();
+    a.wont_do_task(second.id.clone()).unwrap();
+    b.set_now_for_tests("2026-10-05T11:00");
+    b.wont_do_task(first.id.clone()).unwrap();
+    b.complete_task(second.id.clone()).unwrap();
+    settle(&a, &b, &storage);
+    for d in [&a, &b] {
+        assert!(d.task(plain.id.clone()).unwrap().wont);
+        assert!(d.task(first.id.clone()).unwrap().wont, "marked later");
+        let got = d.task(second.id.clone()).unwrap();
+        assert!(got.done.is_some() && !got.wont, "completed later");
+        assert_eq!(view(d, Scope::WontDo).len(), 2);
+    }
+
+    // A version that does not know `wont` reopens by clearing `done` alone.
+    b.set_now_for_tests("2026-10-05T12:00");
+    b.set_task_field_for_tests(&plain.id, "done", serde_json::Value::Null);
+    settle(&a, &b, &storage);
+    for d in [&a, &b] {
+        let got = d.task(plain.id.clone()).unwrap();
+        assert!(got.done.is_none() && !got.wont, "open again");
+    }
+    // It completes the task in another minute: the moments differ.
+    b.set_task_field_for_tests(&plain.id, "done", serde_json::json!("2026-10-05T12:00"));
+    settle(&a, &b, &storage);
+    for d in [&a, &b] {
+        let got = d.task(plain.id.clone()).unwrap();
+        assert!(got.done.is_some() && !got.wont, "completed");
+    }
+    // Reopened and completed here in the minute the mark was made at: the
+    // leftover `wont` is cleared, so the task is completed all the same.
+    a.set_now_for_tests("2026-10-05T12:30");
+    a.set_task_field_for_tests(&plain.id, "done", serde_json::Value::Null);
+    a.set_now_for_tests("2026-10-05T10:00");
+    assert!(!a.complete_task(plain.id.clone()).unwrap().wont);
+}

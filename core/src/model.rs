@@ -129,6 +129,8 @@ pub struct TaskItem {
     pub remind: Option<String>,
     /// Completion moment, `YYYY-MM-DDTHH:MM`.
     pub done: Option<String>,
+    /// Closed as "won't do" rather than completed (R69); `done` then holds the moment.
+    pub wont: bool,
     pub deleted: bool,
     /// A record of one completed occurrence of a repeating task.
     pub is_log: bool,
@@ -165,6 +167,8 @@ pub enum Scope {
     Upcoming,
     All,
     Completed,
+    /// The part of the Completed log that was closed as "won't do" (R69).
+    WontDo,
     Trash,
     List {
         id: String,
@@ -206,7 +210,9 @@ pub enum DueWindow {
 pub enum FilterStatus {
     #[default]
     Open,
+    /// Completed, not "won't do".
     Done,
+    Wont,
     All,
 }
 

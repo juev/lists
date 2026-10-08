@@ -1202,3 +1202,165 @@ fn r68_the_time_runs_to_the_second_and_the_store_tells_when_it_ends() {
         "at once: nothing to wait for"
     );
 }
+
+#[test]
+fn r69_a_task_closed_as_wont_do_is_kept_then_logged_and_can_be_reopened() {
+    let d = device();
+    let a = add(&d, "а");
+    let b = add(&d, "б");
+    add(&d, "в");
+
+    let closed = d.wont_do_task(b.id.clone()).unwrap();
+    assert!(closed.wont && closed.done.is_some());
+    d.set_now_for_tests("2026-10-05T10:04");
+    let inbox = d.tasks(Scope::Inbox).unwrap();
+    assert_eq!(titles(&inbox), ["а", "б", "в"], "kept where it was (R68)");
+    assert!(inbox[1].wont);
+    assert_eq!(d.counts().unwrap().inbox, 2, "not counted as open");
+
+    d.complete_task(a.id.clone()).unwrap();
+    d.set_now_for_tests("2026-10-05T10:30");
+    assert_eq!(view(&d, Scope::Inbox), ["в"]);
+    assert_eq!(view(&d, Scope::Completed), ["а", "б"], "both outcomes are in the log");
+    assert_eq!(view(&d, Scope::WontDo), ["б"]);
+    assert!(!d.task(a.id.clone()).unwrap().wont);
+
+    // Closing a closed task either way changes nothing.
+    assert!(d.complete_task(b.id.clone()).unwrap().wont);
+    assert!(!d.wont_do_task(a.id).unwrap().wont);
+
+    d.reopen_task(b.id.clone()).unwrap();
+    let back = d.task(b.id.clone()).unwrap();
+    assert!(back.done.is_none() && !back.wont);
+    assert_eq!(view(&d, Scope::Inbox), ["б", "в"]);
+    assert!(view(&d, Scope::WontDo).is_empty());
+
+    // Completed after that, it is completed.
+    assert!(!d.complete_task(b.id).unwrap().wont);
+    assert!(view(&d, Scope::WontDo).is_empty());
+}
+
+#[test]
+fn r69_open_subtasks_get_the_same_outcome_and_completed_ones_keep_theirs() {
+    let d = device();
+    let top = add(&d, "родитель");
+    let done = add_sub(&d, &top, "сделана");
+    let open = add_sub(&d, &top, "открыта");
+    let deep = add_sub(&d, &open, "глубже");
+    d.complete_task(done.id.clone()).unwrap();
+
+    d.wont_do_task(top.id.clone()).unwrap();
+    assert!(d.task(open.id.clone()).unwrap().wont);
+    assert!(d.task(deep.id).unwrap().wont);
+    let kept = d.task(done.id).unwrap();
+    assert!(kept.done.is_some() && !kept.wont);
+    assert_eq!(view(&d, Scope::WontDo), ["родитель"], "subtasks go with their task");
+
+    // Reopening the parent leaves the subtasks alone (R11).
+    d.reopen_task(top.id).unwrap();
+    assert!(d.task(open.id).unwrap().wont);
+}
+
+#[test]
+fn r69_r17_a_repeating_task_skips_the_occurrence() {
+    let d = device();
+    let t = add(&d, "зарядка");
+    d.set_due(t.id.clone(), Some("2026-10-05".into())).unwrap();
+    d.set_repeat(t.id.clone(), Some(weekly())).unwrap();
+    let sub = add_sub(&d, &t, "разминка");
+    d.wont_do_task(sub.id.clone()).unwrap();
+
+    let after = d.wont_do_task(t.id.clone()).unwrap();
+    assert!(after.done.is_none() && !after.wont, "the task stays open");
+    assert_eq!(after.due.as_deref(), Some("2026-10-12"));
+    let sub = d.task(sub.id).unwrap();
+    assert!(
+        sub.done.is_none() && !sub.wont,
+        "subtasks are reopened for the next round"
+    );
+
+    let log = d.tasks(Scope::WontDo).unwrap();
+    assert_eq!(titles(&log), ["зарядка"]);
+    assert!(log[0].is_log && log[0].wont);
+    assert_eq!(log[0].due.as_deref(), Some("2026-10-05"));
+    assert_eq!(view(&d, Scope::Completed), ["зарядка"]);
+
+    // The next occurrence is completed: its record is a completed one.
+    d.complete_task(t.id).unwrap();
+    assert_eq!(view(&d, Scope::Completed).len(), 2);
+    assert_eq!(view(&d, Scope::WontDo).len(), 1);
+}
+
+#[test]
+fn r69_r30_wont_do_tasks_leave_both_numbers_of_the_counter() {
+    let d = device();
+    let project = add(&d, "проект");
+    d.set_project(project.id.clone(), true).unwrap();
+    let one = add_sub(&d, &project, "раз");
+    let two = add_sub(&d, &project, "два");
+    let three = add_sub(&d, &project, "три");
+    d.complete_task(one.id).unwrap();
+    d.complete_task(two.id).unwrap();
+    assert_eq!(d.projects().unwrap()[0].subtasks_total, 3);
+
+    d.wont_do_task(three.id.clone()).unwrap();
+    let p = &d.projects().unwrap()[0];
+    assert_eq!((p.subtasks_done, p.subtasks_total), (2, 2));
+
+    d.reopen_task(three.id).unwrap();
+    let p = &d.projects().unwrap()[0];
+    assert_eq!((p.subtasks_done, p.subtasks_total), (2, 3));
+}
+
+#[test]
+fn r69_r33_a_filter_tells_the_two_outcomes_apart() {
+    let d = device();
+    add(&d, "открыта");
+    let done = add(&d, "выполнена");
+    let wont = add(&d, "не буду");
+    d.complete_task(done.id).unwrap();
+    d.wont_do_task(wont.id).unwrap();
+    d.set_now_for_tests("2026-10-05T10:30");
+
+    let show = |status: FilterStatus| {
+        let mut got = view_of(&d.preview_filter(FilterSpec { status, ..spec() }).unwrap());
+        got.sort();
+        got
+    };
+    assert_eq!(show(FilterStatus::Open), ["открыта"]);
+    assert_eq!(show(FilterStatus::Done), ["выполнена"]);
+    assert_eq!(show(FilterStatus::Wont), ["не буду"]);
+    assert_eq!(show(FilterStatus::All), ["выполнена", "не буду", "открыта"]);
+
+    // The value is stored and read back under its own name.
+    let saved = d
+        .create_filter(
+            "брошенное".into(),
+            FilterSpec {
+                status: FilterStatus::Wont,
+                ..spec()
+            },
+        )
+        .unwrap();
+    assert_eq!(view(&d, Scope::Filter { id: saved.id }), ["не буду"]);
+}
+
+fn view_of(tasks: &[TaskItem]) -> Vec<String> {
+    tasks.iter().map(|t| t.title.clone()).collect()
+}
+
+#[test]
+fn r69_r46_clearing_completed_removes_both_outcomes() {
+    let d = device();
+    d.set_now_for_tests("2026-09-01T09:00");
+    let done = add(&d, "выполнена");
+    let wont = add(&d, "не буду");
+    d.complete_task(done.id).unwrap();
+    d.wont_do_task(wont.id).unwrap();
+    d.set_now_for_tests(NOW);
+    assert_eq!(view(&d, Scope::Completed).len(), 2);
+
+    assert_eq!(d.clear_completed(Some("2026-10-01".into())).unwrap(), 2);
+    assert!(view(&d, Scope::Completed).is_empty());
+    assert!(view(&d, Scope::WontDo).is_empty());
+}

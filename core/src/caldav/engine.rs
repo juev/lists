@@ -19,7 +19,7 @@ use crate::db::{self, Change, Touched, KIND_ATTACHMENT, KIND_FILTER, KIND_LIST, 
 use crate::error::{AppError, Result};
 use crate::hlc;
 use crate::model::{Repeat, SyncReport, INBOX_ID};
-use crate::store::{append_pos_in_list, complete_in, Store, Writer};
+use crate::store::{append_pos_in_list, complete_in, reopen_in, Store, Writer};
 
 const INBOX_SLUG: &str = "lists-inbox";
 const MAX_ID: usize = 200;
@@ -442,14 +442,30 @@ impl Store {
                     .unwrap_or(false);
                 if open_and_repeating {
                     // C11: completing one occurrence moves the task on.
-                    complete_in(w, id)?;
+                    complete_in(w, id, seen.wont)?;
                     n += 1;
                 } else {
                     let moment = remote.completed.clone().unwrap_or_else(|| w.moment());
                     set(w, "done", json!(moment))?;
+                    if seen.wont {
+                        set(w, "wont", json!(moment))?;
+                    }
                 }
             } else if !seen.done && reference.done {
-                set(w, "done", Value::Null)?;
+                reopen_in(w, id)?;
+                n += 1;
+            } else if seen.done && seen.wont != reference.wont {
+                // C27: the outcome changed, the closing moment stays.
+                let closed: Option<String> =
+                    w.tx.query_row("SELECT done FROM tasks WHERE id = ?1", [id], |r| r.get(0))
+                        .optional()?
+                        .flatten();
+                // A version that does not know the outcome writes COMPLETED with the
+                // moment the task was closed at: that is not an edit.
+                let unaware = !seen.wont && remote.completed.is_some() && remote.completed == closed;
+                if let (Some(closed), false) = (closed, unaware) {
+                    set(w, "wont", if seen.wont { json!(closed) } else { Value::Null })?;
+                }
             }
             Ok(n)
         })?;
