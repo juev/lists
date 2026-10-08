@@ -376,7 +376,7 @@ struct TaskTitleField: View {
             .onSubmit(commit)
             // Pasted text of several lines becomes one line: a title has no line breaks.
             .onChange(of: title) { _, new in
-                if new.contains(where: \.isNewline) { title = new.split(whereSeparator: \.isNewline).joined(separator: " ") }
+                if new.contains(where: \.isNewline) { title = Self.oneLine(new) }
             }
             .onAppear {
                 title = task.title
@@ -405,9 +405,14 @@ struct TaskTitleField: View {
 
     private func commit() {
         let value = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard value != task.title else { return }
+        // A title that came with line breaks is shown without them; showing it is not an edit.
+        guard value != task.title, value != Self.oneLine(task.title) else { return }
         if value.isEmpty { title = task.title; return }
         model.perform { try $0.setTitle(id: task.id, title: value) }
+    }
+
+    private static func oneLine(_ text: String) -> String {
+        text.split(whereSeparator: \.isNewline).joined(separator: " ")
     }
 }
 
