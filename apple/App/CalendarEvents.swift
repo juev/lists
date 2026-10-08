@@ -86,8 +86,9 @@ final class SystemCalendars {
         let dayStart = Calendar.current.startOfDay(for: Date())
         guard !shown.isEmpty, let dayEnd = Calendar.current.date(byAdding: .day, value: 1, to: dayStart) else { return [] }
         let found = store.events(matching: store.predicateForEvents(withStart: dayStart, end: dayEnd, calendars: shown))
+        // The search is by overlap and takes its bounds in: an all-day event of tomorrow begins at the very end of today.
         // Every occurrence of a repeating event carries the same identifier.
-        let raw = found.map {
+        let raw = found.filter { $0.startDate < dayEnd && ($0.endDate > dayStart || $0.startDate >= dayStart) }.map {
             RawEvent(
                 id: "\($0.calendarItemIdentifier)@\($0.startDate.timeIntervalSinceReferenceDate)",
                 title: $0.title ?? "", start: $0.startDate, allDay: $0.isAllDay, color: Color(nsColor: $0.calendar.color))
