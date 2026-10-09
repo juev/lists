@@ -224,6 +224,7 @@ impl Store {
 
     /// R88: makes the automatic backup when its time has come. Cheap to call often.
     pub fn backup_if_due(&self) -> Result<Option<Backup>> {
+        let _looking = self.backup_lock.lock().unwrap_or_else(|p| p.into_inner());
         let every = self.backup_settings()?.every_hours;
         if every == 0 || !self.holds_data()? {
             return Ok(None);
