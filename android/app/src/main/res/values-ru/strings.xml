@@ -52,6 +52,16 @@
     <string name="password">Пароль</string>
     <string name="webdav_hint">Для Nextcloud и подобных укажите пароль приложения. Данные на сервере не шифруются.</string>
     <string name="save_and_sync">Сохранить и синхронизировать</string>
+    <string name="sync_both_title">Задачи есть и на этом устройстве, и в хранилище</string>
+    <string name="sync_both_hint">«Объединить» сохраняет задачи обеих сторон. Два других варианта оставляют одну сторону и заменяют другую.</string>
+    <string name="sync_merge">Объединить</string>
+    <string name="sync_take_storage">Взять данные хранилища…</string>
+    <string name="sync_send_device">Отправить данные этого устройства…</string>
+    <string name="sync_replace_device_title">Заменить данные этого устройства?</string>
+    <string name="sync_replace_storage_title">Заменить данные хранилища?</string>
+    <string name="sync_replace_device_text">Задачи, списки и фильтры этого устройства будут стёрты и прочитаны заново из хранилища. Изменения, которые не успели синхронизироваться, пропадут.</string>
+    <string name="sync_replace_storage_text">Хранилище и все остальные устройства получат данные этого устройства. То, чего на этом устройстве нет, уйдёт в корзину на всех устройствах, а правки, сделанные на других устройствах, будут отменены.</string>
+    <string name="sync_replace">Заменить</string>
     <string name="test_connection">Проверить подключение</string>
     <string name="testing_connection">Проверяю подключение…</string>
     <string name="connected">Подключение есть.</string>

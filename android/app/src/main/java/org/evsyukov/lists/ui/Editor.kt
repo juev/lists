@@ -992,6 +992,36 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
         }
     }
 
+    // S36: the storage being joined while the person chooses a side, and the side that waits for a confirmation.
+    var joining by remember { mutableStateOf<SyncConfig?>(null) }
+    var replacing by remember { mutableStateOf<String?>(null) }
+
+    fun save(config: SyncConfig, side: String) {
+        runCatching {
+            Repo.store.setSyncConfig(config)
+            Secrets.save(context, password.takeIf { enabled })
+            Repo.store.setSyncPassword(password.takeIf { enabled })
+            val sender = enabled && pushSignIn && pushServer.isNotEmpty()
+            Repo.store.setPushSendServer(pushServer.takeIf { sender })
+            Secrets.save(context, pushToken.takeIf { sender }, Secrets.PUSH_TOKEN)
+            Repo.store.setPushToken(pushToken.takeIf { sender })
+            pushRefused = false
+            when (side) {
+                "storage" -> Repo.store.replaceLocalWithRemote()
+                "device" -> Repo.store.replaceRemoteWithLocal()
+            }
+        }
+            .onSuccess {
+                error = null
+                tested = null
+                // With sync switched off nothing runs, so the main screen would keep its icon and the pull (R67).
+                Repo.revision.update { it + 1 }
+                model.sync()
+                if (enabled) Background.askOnce(context)
+            }
+            .onFailure { error = describe(it) }
+    }
+
     FormDialog(
         title = str(R.string.settings),
         onDismiss = onDismiss,
@@ -1149,26 +1179,23 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
                     "caldav" -> SyncConfig.CalDav(url, user)
                     else -> SyncConfig.Off
                 }
-                runCatching {
-                    Repo.store.setSyncConfig(config)
-                    Secrets.save(context, password.takeIf { enabled })
-                    Repo.store.setSyncPassword(password.takeIf { enabled })
-                    val sender = enabled && pushSignIn && pushServer.isNotEmpty()
-                    Repo.store.setPushSendServer(pushServer.takeIf { sender })
-                    Secrets.save(context, pushToken.takeIf { sender }, Secrets.PUSH_TOKEN)
-                    Repo.store.setPushToken(pushToken.takeIf { sender })
-                    pushRefused = false
-                }
-                    .onSuccess {
-                        error = null
-                        tested = null
-                        // With sync switched off nothing runs, so the main screen would keep its icon and the pull (R67).
-                        Repo.revision.update { it + 1 }
-                        model.sync()
-                        if (enabled) Background.askOnce(context)
+                // S36: a storage that is new to this device may hold data of its own.
+                if (config == SyncConfig.Off || runCatching { Repo.store.syncConfig() }.getOrNull() == config) {
+                    save(config, "merge")
+                } else {
+                    val secret = password
+                    error = null
+                    testing = true
+                    scope.launch {
+                        val both = withContext(Dispatchers.IO) { runCatching { Repo.store.syncConflict(config, secret) } }
+                        testing = false
+                        both.fold(
+                            { if (it) joining = config else save(config, "merge") },
+                            { error = str(R.string.no_connection, describe(it)) },
+                        )
                     }
-                    .onFailure { error = describe(it) }
-            }) { Text(str(R.string.save_and_sync)) }
+                }
+            }, enabled = !testing) { Text(str(R.string.save_and_sync)) }
         },
         dismissButton = {
             Row {
@@ -1177,6 +1204,38 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
             }
         },
     )
+    joining?.let { config ->
+        when (val side = replacing) {
+            null -> AlertDialog(
+                onDismissRequest = { joining = null },
+                title = { Text(str(R.string.sync_both_title)) },
+                text = {
+                    Column {
+                        Text(str(R.string.sync_both_hint), style = MaterialTheme.typography.bodyMedium)
+                        @Composable
+                        fun option(label: String, action: () -> Unit) =
+                            Text(label, Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = action).padding(vertical = 12.dp))
+                        option(str(R.string.sync_merge)) { joining = null; save(config, "merge") }
+                        option(str(R.string.sync_take_storage)) { replacing = "storage" }
+                        option(str(R.string.sync_send_device)) { replacing = "device" }
+                    }
+                },
+                confirmButton = {},
+                dismissButton = { TextButton(onClick = { joining = null }) { Text(str(R.string.cancel)) } },
+            )
+            else -> AlertDialog(
+                onDismissRequest = { joining = null; replacing = null },
+                title = { Text(str(if (side == "storage") R.string.sync_replace_device_title else R.string.sync_replace_storage_title)) },
+                text = { Text(str(if (side == "storage") R.string.sync_replace_device_text else R.string.sync_replace_storage_text)) },
+                confirmButton = {
+                    TextButton(onClick = { joining = null; replacing = null; save(config, side) }) {
+                        Text(str(R.string.sync_replace), color = MaterialTheme.colorScheme.error)
+                    }
+                },
+                dismissButton = { TextButton(onClick = { joining = null; replacing = null }) { Text(str(R.string.cancel)) } },
+            )
+        }
+    }
     when (choosing) {
         "appearance" -> ChoiceDialog(str(R.string.appearance), lookLabels, LookPrefs.choices.indexOf(LookPrefs.appearance(context)), { choosing = null }) {
             LookPrefs.setAppearance(context, LookPrefs.choices[it])

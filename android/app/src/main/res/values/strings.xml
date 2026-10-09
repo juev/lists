@@ -53,6 +53,16 @@
     <string name="password">Password</string>
     <string name="webdav_hint">For Nextcloud and similar servers use an app password. Data on the server is not encrypted.</string>
     <string name="save_and_sync">Save and sync</string>
+    <string name="sync_both_title">This device and the storage both hold tasks</string>
+    <string name="sync_both_hint">Merge keeps the tasks of both sides. The other two choices keep one side and replace the other.</string>
+    <string name="sync_merge">Merge</string>
+    <string name="sync_take_storage">Use the data of the storage…</string>
+    <string name="sync_send_device">Use the data of this device…</string>
+    <string name="sync_replace_device_title">Replace the data of this device?</string>
+    <string name="sync_replace_storage_title">Replace the data of the storage?</string>
+    <string name="sync_replace_device_text">The tasks, lists and filters of this device are erased and read again from the storage. Changes that have not been synced are lost.</string>
+    <string name="sync_replace_storage_text">The storage and every other device get the data of this device. What this device does not have goes to the Trash on all devices, and edits made elsewhere are undone.</string>
+    <string name="sync_replace">Replace</string>
     <string name="test_connection">Test connection</string>
     <string name="testing_connection">Testing the connection…</string>
     <string name="connected">Connected.</string>
