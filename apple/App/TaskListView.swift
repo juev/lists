@@ -14,12 +14,12 @@ struct TaskListView: View {
                 DraftEditor(
                     draft: Binding(get: { model.draft ?? TaskDraft() }, set: { if model.draft != nil { model.draft = $0 } }),
                     onClose: { model.draft = nil })
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 8)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 14)
                     .cardBackground()
                     .padding(.horizontal, 12)
-                    .padding(.top, 10)
-                    .padding(.bottom, 4)
+                    .padding(.top, 12)
+                    .padding(.bottom, 8)
             }
             if let error = model.startupError {
                 ContentUnavailableView(L("The database could not be opened"), systemImage: "exclamationmark.triangle", description: Text(error))
@@ -225,7 +225,6 @@ struct TaskRow: View {
         let content = VStack(alignment: .leading, spacing: 6) {
             header
             if isExpanded {
-                Divider().padding(.leading, 34)
                 TaskEditor(task: task)
                     .padding(.leading, 34)
                 subtasks
@@ -237,11 +236,11 @@ struct TaskRow: View {
         if isExpanded {
             content
                 .onExitCommand { model.closeCard(task.id) }
-                .padding(.horizontal, 4)
-                .padding(.top, 4)
-                .padding(.bottom, 10)
+                .padding(.horizontal, 10)
+                .padding(.top, 10)
+                .padding(.bottom, 14)
                 .cardBackground()
-                .padding(.vertical, 4)
+                .padding(.vertical, 8)
         } else {
             content
         }
@@ -287,8 +286,10 @@ struct TaskRow: View {
                 model.toggleDone(task)
             } label: {
                 Image(systemName: task.wont ? "xmark.square.fill" : task.done != nil ? "checkmark.square.fill" : "square")
-                    .font(AppFont.style(.title3))
-                    .foregroundStyle(task.done != nil ? Color.secondary : (model.list(task.listId)?.tint ?? .accentColor))
+                    // R94: the mark is as high as the text and as quiet as the icons of the fields.
+                    .font(AppFont.style(.body))
+                    .fontWeight(.light)
+                    .foregroundStyle(task.done != nil ? .secondary : .tertiary)
             }
             .buttonStyle(.plain)
             // The mark is taller than a capital of the title: on the baseline it stands too high.
@@ -323,7 +324,9 @@ struct TaskRow: View {
                     .lineLimit(1)
                     .fixedSize()
             }
-            Button {
+            // R94: an open card has no chevron; a key or another task closes it.
+            if !isExpanded {
+              Button {
                 model.selection = task.id
                 model.toggleExpanded(task.id)
             } label: {
@@ -334,12 +337,14 @@ struct TaskRow: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(isExpanded ? L("Collapse") : L("Expand"))
+            .accessibilityLabel(L("Expand"))
+            }
         }
         .padding(.vertical, 6)
         .padding(.horizontal, 6)
+        // The selection is a strip behind a row; an open card is set apart by its outline instead.
         .background(
-            model.selection == task.id ? Color.primary.opacity(0.07) : .clear,
+            model.selection == task.id && !isExpanded ? Color.primary.opacity(0.07) : .clear,
             in: RoundedRectangle(cornerRadius: 6))
         .contentShape(Rectangle())
         .onTapGesture(count: 2) { model.toggleEditing(task.id) }
@@ -470,11 +475,13 @@ extension View {
     /// The outline that sets an open task apart from the rows around it.
     func cardBackground() -> some View {
         background {
-            RoundedRectangle(cornerRadius: 8)
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .fill(Color(nsColor: .controlBackgroundColor))
-                .shadow(color: .black.opacity(0.12), radius: 3, y: 1)
-            RoundedRectangle(cornerRadius: 8)
-                .strokeBorder(Color.primary.opacity(0.14))
+                .shadow(color: .black.opacity(0.10), radius: 12, y: 4)
+                .shadow(color: .black.opacity(0.06), radius: 1, y: 0.5)
+            // Barely there in the light appearance; in the dark one it is what tells the card from the window.
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.05))
         }
     }
 }
