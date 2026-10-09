@@ -1,6 +1,7 @@
 package org.evsyukov.lists.ui
 
 import android.app.Activity
+import android.content.ClipData
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
@@ -190,12 +191,23 @@ internal fun copyAttachment(context: Context, file: Attachment, target: Uri): Bo
     true
 }.getOrDefault(false)
 
+/**
+ * Lets the share sheet itself read the files, not only the app chosen in it: the sheet takes the permission from
+ * the clip of the intent, and without it cannot ask for the name of a file and shows the hash it is stored under.
+ */
+private fun Intent.readable(uris: List<Uri>): Intent = apply {
+    if (uris.isNotEmpty()) {
+        clipData = ClipData.newRawUri(null, uris[0]).also { clip -> uris.drop(1).forEach { clip.addItem(ClipData.Item(it)) } }
+    }
+    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+}
+
 /** Hands the file to another app through the share sheet (R86). */
 private fun shareAttachment(context: Context, file: Attachment) {
     val path = file.localPath ?: return
     runCatching {
         val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", File(path), file.name)
-        val intent = Intent(Intent.ACTION_SEND).setType(file.mime).putExtra(Intent.EXTRA_STREAM, uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        val intent = Intent(Intent.ACTION_SEND).setType(file.mime).putExtra(Intent.EXTRA_STREAM, uri).readable(listOf(uri))
         context.startActivity(Intent.createChooser(intent, file.name))
     }
 }
@@ -245,7 +257,7 @@ private fun shareAttachments(context: Context, files: List<Attachment>) {
             file.localPath?.let { FileProvider.getUriForFile(context, "${context.packageName}.files", File(it), file.name) }
         })
         val intent = Intent(Intent.ACTION_SEND_MULTIPLE).setType(shareType(files.map { it.mime }))
-            .putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            .putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris).readable(uris)
         context.startActivity(Intent.createChooser(intent, null))
     }
 }
