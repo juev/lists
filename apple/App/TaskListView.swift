@@ -326,18 +326,18 @@ struct TaskRow: View {
             }
             // R94: an open card has no chevron; a key or another task closes it.
             if !isExpanded {
-              Button {
-                model.selection = task.id
-                model.toggleExpanded(task.id)
-            } label: {
-                Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                    .font(AppFont.style(.caption))
-                    .foregroundStyle(.tertiary)
-                    .frame(width: 20, height: 20)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(L("Expand"))
+                Button {
+                    model.selection = task.id
+                    model.toggleExpanded(task.id)
+                } label: {
+                    Image(systemName: "chevron.right")
+                        .font(AppFont.style(.caption))
+                        .foregroundStyle(.tertiary)
+                        .frame(width: 20, height: 20)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(L("Expand"))
             }
         }
         .padding(.vertical, 6)
