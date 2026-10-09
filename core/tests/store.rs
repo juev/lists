@@ -1503,3 +1503,154 @@ fn r85_the_registers_keep_the_name_the_file_came_with() {
         ("Image", "application/octet-stream")
     );
 }
+
+/// The files of a folder with their content, by name.
+fn folder_content(dir: &std::path::Path) -> Vec<(String, Vec<u8>)> {
+    let mut all: Vec<_> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|e| e.unwrap())
+        .map(|e| {
+            (
+                e.file_name().to_string_lossy().into_owned(),
+                std::fs::read(e.path()).unwrap(),
+            )
+        })
+        .collect();
+    all.sort();
+    all
+}
+
+fn attach_named(d: &Device, task: &TaskItem, name: &str, content: &[u8]) -> Attachment {
+    let src = tempfile::tempdir().unwrap();
+    let file = src.path().join("source");
+    std::fs::write(&file, content).unwrap();
+    d.add_attachment(task.id.clone(), file.to_string_lossy().into_owned(), Some(name.into()))
+        .unwrap()
+}
+
+fn named(name: &str, content: &[u8]) -> (String, Vec<u8>) {
+    (name.to_string(), content.to_vec())
+}
+
+#[test]
+fn r91_every_attachment_is_saved_under_its_name() {
+    let d = device();
+    let t = add(&d, "с тремя файлами");
+    attach_named(&d, &t, "a.txt", b"first");
+    attach_named(&d, &t, "b.pdf", b"%PDF-1.7 second");
+    attach_named(&d, &t, "c.png", b"third");
+    let out = tempfile::tempdir().unwrap();
+
+    let report = d
+        .save_attachments(t.id.clone(), out.path().to_string_lossy().into_owned())
+        .unwrap();
+
+    let mut saved = report.saved.clone();
+    saved.sort();
+    assert_eq!(saved, ["a.txt", "b.pdf", "c.png"]);
+    assert_eq!((report.failed.len(), report.fetched), (0, 0));
+    assert_eq!(
+        folder_content(out.path()),
+        [
+            named("a.txt", b"first"),
+            named("b.pdf", b"%PDF-1.7 second"),
+            named("c.png", b"third")
+        ]
+    );
+    // The content behind the attachments is where it was.
+    assert!(d.attachments(t.id).unwrap().iter().all(|f| f.local_path.is_some()));
+}
+
+#[test]
+fn r91_a_name_that_is_taken_gets_a_number_and_nothing_is_replaced() {
+    let d = device();
+    let t = add(&d, "с одинаковыми именами");
+    attach_named(&d, &t, "a.txt", b"one");
+    attach_named(&d, &t, "a.txt", b"two");
+    attach_named(&d, &t, "notes", b"three");
+    attach_named(&d, &t, ".env", b"four");
+    let out = tempfile::tempdir().unwrap();
+    for (name, content) in [
+        ("a.txt", "was here"),
+        ("a 2.txt", "and this"),
+        ("notes", "old"),
+        (".env", "kept"),
+    ] {
+        std::fs::write(out.path().join(name), content).unwrap();
+    }
+
+    let dir = out.path().to_string_lossy().into_owned();
+    let report = d.save_attachments(t.id.clone(), dir.clone()).unwrap();
+
+    assert!(report.failed.is_empty(), "{report:?}");
+    let all = folder_content(out.path());
+    for kept in [
+        named("a.txt", b"was here"),
+        named("a 2.txt", b"and this"),
+        named("notes", b"old"),
+        named(".env", b"kept"),
+    ] {
+        assert!(all.contains(&kept), "{kept:?} in {all:?}");
+    }
+    // Two attachments share a name: both are there, each under a name of its own.
+    let numbered: Vec<_> = all
+        .iter()
+        .filter(|(name, _)| name == "a 3.txt" || name == "a 4.txt")
+        .collect();
+    let mut content: Vec<_> = numbered.iter().map(|(_, c)| c.as_slice()).collect();
+    content.sort();
+    assert_eq!(content, [b"one".as_slice(), b"two".as_slice()]);
+    assert!(all.contains(&named("notes 2", b"three")), "{all:?}");
+    assert!(all.contains(&named(".env 2", b"four")), "{all:?}");
+    assert_eq!(all.len(), 8);
+
+    // A second run adds a second set and still replaces nothing.
+    d.save_attachments(t.id, dir).unwrap();
+    assert_eq!(folder_content(out.path()).len(), 12);
+}
+
+#[test]
+fn r91_a_name_from_another_device_stays_inside_the_folder() {
+    let d = device();
+    let t = add(&d, "с чужим именем");
+    attach_named(&d, &t, "../up/and:out.txt", b"escaped");
+    attach_named(&d, &t, "plain.txt", b"plain");
+    let parent = tempfile::tempdir().unwrap();
+    let out = parent.path().join("chosen");
+    std::fs::create_dir(&out).unwrap();
+
+    let report = d.save_attachments(t.id, out.to_string_lossy().into_owned()).unwrap();
+
+    assert!(report.failed.is_empty(), "{report:?}");
+    assert_eq!(
+        folder_content(&out),
+        [named(".._up_and_out.txt", b"escaped"), named("plain.txt", b"plain")]
+    );
+    assert_eq!(std::fs::read_dir(parent.path()).unwrap().count(), 1);
+}
+
+#[test]
+fn r91_a_file_that_cannot_be_written_is_named_and_the_rest_are_saved() {
+    let d = device();
+    let t = add(&d, "с потерянным файлом");
+    let lost = attach_named(&d, &t, "lost.txt", b"lost");
+    attach_named(&d, &t, "kept.txt", b"kept");
+    // The content is gone from the device and there is no storage to take it from.
+    std::fs::remove_file(lost.local_path.unwrap()).unwrap();
+    let out = tempfile::tempdir().unwrap();
+
+    let report = d
+        .save_attachments(t.id.clone(), out.path().to_string_lossy().into_owned())
+        .unwrap();
+
+    assert_eq!(
+        (report.saved, report.failed, report.fetched),
+        (vec!["kept.txt".to_string()], vec!["lost.txt".to_string()], 0)
+    );
+    assert_eq!(folder_content(out.path()), [named("kept.txt", b"kept")]);
+
+    // A folder that is not there: every file is named, nothing is thrown.
+    let nowhere = out.path().join("missing").to_string_lossy().into_owned();
+    let report = d.save_attachments(t.id, nowhere).unwrap();
+    assert_eq!((report.saved.len(), report.failed.len()), (0, 2));
+}

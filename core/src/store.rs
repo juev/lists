@@ -1407,6 +1407,83 @@ impl Store {
     pub fn remove_attachment(&self, id: String) -> Result<()> {
         self.write(|w| w.set(KIND_ATTACHMENT, &id, "deleted", json!(true)))
     }
+
+    /// R91: writes every attachment of the task into the folder under its own name.
+    /// Nothing in the folder is replaced: a name that is taken gets a number. Content that has
+    /// not arrived is downloaded first (R76); what cannot be had or written is named in the
+    /// result and does not stop the rest.
+    pub fn save_attachments(&self, task_id: String, dir: String) -> Result<AttachmentsSaved> {
+        let dir = Path::new(&dir);
+        let mut report = AttachmentsSaved::default();
+        for mut file in self.attachments(task_id)? {
+            if file.local_path.is_none() {
+                if let Ok(got) = self.fetch_attachment(file.id.clone()) {
+                    report.fetched += u32::from(got.local_path.is_some());
+                    file = got;
+                }
+            }
+            let written = file
+                .local_path
+                .as_ref()
+                .and_then(|path| copy_under_free_name(Path::new(path), dir, &file.name).ok());
+            match written {
+                Some(name) => report.saved.push(name),
+                None => report.failed.push(file.name),
+            }
+        }
+        Ok(report)
+    }
+}
+
+/// The name of an attachment as a single path component: it comes from another device as it was typed there.
+fn file_name(name: &str) -> String {
+    let cleaned: String = name
+        .chars()
+        .map(|c| {
+            if matches!(c, '/' | '\\' | ':') || c.is_control() {
+                '_'
+            } else {
+                c
+            }
+        })
+        .collect();
+    match cleaned.trim() {
+        "" | "." | ".." => "file".into(),
+        _ => cleaned,
+    }
+}
+
+/// Copies the file into the folder under the name, or under the first free one with a number
+/// before the extension ("a 2.txt"). Returns the name it was written under.
+fn copy_under_free_name(source: &Path, dir: &Path, name: &str) -> std::io::Result<String> {
+    let name = file_name(name);
+    let (stem, extension) = match name.rfind('.') {
+        Some(dot) if dot > 0 => name.split_at(dot),
+        _ => (name.as_str(), ""),
+    };
+    let mut input = std::fs::File::open(source)?;
+    for number in 1..=9999 {
+        let candidate = if number == 1 {
+            name.clone()
+        } else {
+            format!("{stem} {number}{extension}")
+        };
+        let target = dir.join(&candidate);
+        // Created only if nothing has the name: a file that appears meanwhile is not replaced either.
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(&target) {
+            Ok(mut output) => {
+                if let Err(e) = std::io::copy(&mut input, &mut output) {
+                    drop(output);
+                    let _ = std::fs::remove_file(&target);
+                    return Err(e);
+                }
+                return Ok(candidate);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e),
+        }
+    }
+    Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, "no free name"))
 }
 
 impl Store {

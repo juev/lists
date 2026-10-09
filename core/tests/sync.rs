@@ -801,6 +801,64 @@ fn s35_content_that_does_not_match_its_hash_is_not_fetched() {
 }
 
 #[test]
+fn r91_content_that_has_not_arrived_is_fetched_before_everything_is_saved() {
+    let storage = tempfile::tempdir().unwrap();
+    let (a, b) = (device(), device());
+    for d in [&a, &b] {
+        d.set_sync_config(folder(&storage)).unwrap();
+    }
+    let t = add(&a, "с тремя файлами");
+    attach(&a, &t, "a.txt", b"first");
+    let absent = attach(&a, &t, "b.pdf", b"%PDF-1.7 second");
+    attach(&a, &t, "c.png", b"third");
+    a.sync_now().unwrap();
+    a.sync_attachments().unwrap();
+    b.sync_now().unwrap();
+    // One of the three is on the device already, the other two only in the storage.
+    let here = b
+        .attachments(t.id.clone())
+        .unwrap()
+        .into_iter()
+        .find(|f| f.name == "a.txt")
+        .unwrap();
+    b.fetch_attachment(here.id).unwrap();
+
+    let out = tempfile::tempdir().unwrap();
+    let report = b
+        .save_attachments(t.id.clone(), out.path().to_string_lossy().into_owned())
+        .unwrap();
+
+    assert_eq!((report.saved.len(), report.failed.len(), report.fetched), (3, 0, 2));
+    let read = |dir: &TempDir, name: &str| std::fs::read(dir.path().join(name)).ok();
+    assert_eq!(read(&out, "a.txt").as_deref(), Some(b"first".as_slice()));
+    assert_eq!(read(&out, "b.pdf").as_deref(), Some(b"%PDF-1.7 second".as_slice()));
+    assert_eq!(read(&out, "c.png").as_deref(), Some(b"third".as_slice()));
+    assert_eq!(b.sync_status().unwrap().attachments_waiting, 0);
+
+    // A third device finds one file missing in the storage: it is named, the other two are saved.
+    let c = device();
+    c.set_sync_config(folder(&storage)).unwrap();
+    c.sync_now().unwrap();
+    std::fs::remove_file(
+        storage
+            .path()
+            .join("lists/v1/blobs")
+            .join(&absent.sha256[..2])
+            .join(&absent.sha256),
+    )
+    .unwrap();
+    let out = tempfile::tempdir().unwrap();
+    let report = c
+        .save_attachments(t.id, out.path().to_string_lossy().into_owned())
+        .unwrap();
+
+    assert_eq!((report.failed, report.fetched), (vec!["b.pdf".to_string()], 2));
+    assert_eq!(read(&out, "a.txt").as_deref(), Some(b"first".as_slice()));
+    assert_eq!(read(&out, "c.png").as_deref(), Some(b"third".as_slice()));
+    assert_eq!(read(&out, "b.pdf"), None);
+}
+
+#[test]
 fn s14_newer_storage_format_stops_sync_but_not_local_work() {
     let storage = tempfile::tempdir().unwrap();
     let a = device();
