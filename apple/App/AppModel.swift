@@ -76,6 +76,8 @@ final class AppModel {
         }
     }
     var alert: String?
+    /// Tasks whose attachments are being saved into a folder (R91); the rows of files still to arrive show it.
+    var savingAttachments: Set<String> = []
     /// False while `alert` carries a report rather than a failure.
     var alertIsError = true
 
@@ -830,6 +832,44 @@ final class AppModel {
             await MainActor.run {
                 self.movingAttachments = false
                 self.attachmentsMoved(arrived: downloaded > 0)
+            }
+        }
+    }
+
+    /// R91: asks for a folder and saves every attachment of the task there.
+    func saveAllAttachments(of taskId: String) {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = L("Save")
+        guard panel.runModal() == .OK, let folder = panel.url else { return }
+        saveAttachments(of: taskId, into: folder)
+    }
+
+    /// Saves every attachment of the task into the folder, those still to arrive after downloading them.
+    /// What could not be downloaded or written is named in a message; the rest are saved.
+    func saveAttachments(of taskId: String, into folder: URL) {
+        guard let store, !savingAttachments.contains(taskId) else { return }
+        savingAttachments.insert(taskId)
+        _Concurrency.Task.detached(priority: .userInitiated) {
+            let result = Result { try store.saveAttachments(taskId: taskId, dir: folder.path) }
+            await MainActor.run {
+                self.savingAttachments.remove(taskId)
+                switch result {
+                case .success(let report):
+                    #if DEBUG
+                    print("debug: saved all \(report.saved), failed \(report.failed), fetched \(report.fetched)")
+                    #endif
+                    if report.fetched > 0 { self.attachmentsMoved(arrived: true) }
+                    guard !report.failed.isEmpty else { return }
+                    self.alertIsError = true
+                    self.alert = L("Could not save: %@", report.failed.joined(separator: ", "))
+                case .failure(let error):
+                    self.alertIsError = true
+                    self.alert = describe(error)
+                }
             }
         }
     }
