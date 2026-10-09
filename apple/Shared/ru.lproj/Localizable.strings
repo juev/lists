@@ -332,3 +332,13 @@
 "at the end of the day" = "в конце дня";
 "Won't do" = "Не буду делать";
 "No tasks marked won't do" = "Нет задач «не буду делать»";
+"This Mac and the storage both hold tasks" = "Задачи есть и на этом Mac, и в хранилище";
+"Merge" = "Объединить";
+"Use the data of the storage…" = "Взять данные хранилища…";
+"Use the data of this Mac…" = "Отправить данные этого Mac…";
+"Merge keeps the tasks of both sides. The other two choices keep one side and replace the other." = "«Объединить» сохраняет задачи обеих сторон. Два других варианта оставляют одну сторону и заменяют другую.";
+"Replace the data of this Mac?" = "Заменить данные этого Mac?";
+"Replace the data of the storage?" = "Заменить данные хранилища?";
+"Replace" = "Заменить";
+"The tasks, lists and filters of this Mac are erased and read again from the storage. Changes that have not been synced are lost." = "Задачи, списки и фильтры этого Mac будут стёрты и прочитаны заново из хранилища. Изменения, которые не успели синхронизироваться, пропадут.";
+"The storage and every other device get the data of this Mac. What this Mac does not have goes to the Trash on all devices, and edits made elsewhere are undone." = "Хранилище и все остальные устройства получат данные этого Mac. То, чего на этом Mac нет, уйдёт в корзину на всех устройствах, а правки, сделанные на других устройствах, будут отменены.";

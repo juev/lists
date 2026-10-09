@@ -210,6 +210,8 @@ struct SettingsView: View {
     @Environment(AppModel.self) private var model
 
     private enum Kind: Hashable { case off, webdav, caldav, folder }
+    /// What to do when this Mac and the storage both hold data (S36).
+    private enum Side { case merge, takeStorage, sendDevice }
     private static let times = ["07:00", "08:00", "09:00", "10:00", "12:00", "18:00", "20:00"]
     private static let leads = [0, 5, 15, 30, 60, 120, 1440]
 
@@ -250,6 +252,10 @@ struct SettingsView: View {
     @State private var pushRefused = false
     @State private var message: String?
     @State private var testing = false
+    /// The storage being joined while the person chooses a side (S36).
+    @State private var joining: SyncConfig?
+    /// The side that replaces the other one, until it is confirmed.
+    @State private var replacing: Side?
 
     var body: some View {
         Form {
@@ -437,6 +443,29 @@ struct SettingsView: View {
         .formStyle(.grouped)
         .frame(width: 520)
         .onAppear(perform: load)
+        .confirmationDialog(
+            L("This Mac and the storage both hold tasks"),
+            isPresented: Binding(get: { joining != nil && replacing == nil }, set: { if !$0 && replacing == nil { joining = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button(L("Merge")) { join(.merge) }
+            Button(L("Use the data of the storage…")) { replacing = .takeStorage }
+            Button(L("Use the data of this Mac…")) { replacing = .sendDevice }
+            Button(L("Cancel"), role: .cancel) { joining = nil }
+        } message: {
+            Text(L("Merge keeps the tasks of both sides. The other two choices keep one side and replace the other."))
+        }
+        .alert(
+            replacing == .takeStorage ? L("Replace the data of this Mac?") : L("Replace the data of the storage?"),
+            isPresented: Binding(get: { replacing != nil }, set: { if !$0 { replacing = nil; joining = nil } })
+        ) {
+            Button(L("Replace"), role: .destructive) { if let side = replacing { join(side) } }
+            Button(L("Cancel"), role: .cancel) { replacing = nil; joining = nil }
+        } message: {
+            Text(replacing == .takeStorage
+                ? L("The tasks, lists and filters of this Mac are erased and read again from the storage. Changes that have not been synced are lost.")
+                : L("The storage and every other device get the data of this Mac. What this Mac does not have goes to the Trash on all devices, and edits made elsewhere are undone."))
+        }
         // S30: the subscription is retried in the background, so the answer comes later than the save.
         .task {
             while !Task.isCancelled {
@@ -506,6 +535,30 @@ struct SettingsView: View {
         }
         message = nil
         guard let store = model.store else { return }
+        // S36: a storage that is new to this Mac may hold data of its own.
+        guard config != .off, (try? store.syncConfig()) != config else { return apply(config, side: .merge) }
+        let password = password
+        testing = true
+        Task {
+            let both = await Task.detached { Result { try store.syncConflict(config: config, password: password) } }.value
+            testing = false
+            switch both {
+            case .success(true): joining = config
+            case .success(false): apply(config, side: .merge)
+            case .failure(let error): message = L("No connection: %@", describe(error))
+            }
+        }
+    }
+
+    private func join(_ side: Side) {
+        guard let config = joining else { return }
+        joining = nil
+        replacing = nil
+        apply(config, side: side)
+    }
+
+    private func apply(_ config: SyncConfig, side: Side) {
+        guard let store = model.store else { return }
         do {
             try store.setSyncConfig(config: config)
             try store.setPushServer(server: kind == .off ? nil : pushServer)
@@ -535,6 +588,11 @@ struct SettingsView: View {
                     message = L("The password could not be saved in the system keychain: %@", error.localizedDescription)
                 }
                 store.setSyncPassword(password: password)
+            }
+            switch side {
+            case .merge: break
+            case .takeStorage: try store.replaceLocalWithRemote()
+            case .sendDevice: try store.replaceRemoteWithLocal()
             }
             model.reload()
             model.watchSyncFolder()
