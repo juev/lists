@@ -297,4 +297,5 @@
     <string name="wont_do_notice">Отмечено «не буду делать»</string>
     <string name="empty_wont_do">Нет задач «не буду делать»</string>
     <string name="save">Сохранить</string>
+    <string name="draft_discarded">Черновик удалён</string>
 </resources>

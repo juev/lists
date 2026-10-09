@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
@@ -53,6 +54,7 @@ import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Tag
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.DropdownMenu
@@ -93,6 +95,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -131,7 +134,10 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import org.evsyukov.lists.DayEvent
 import org.evsyukov.lists.SystemCalendars
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import java.time.Duration
 import java.time.LocalDateTime
 import org.evsyukov.lists.EntryPrefs
@@ -183,6 +189,10 @@ fun MainScreen(model: MainViewModel, onReminderSet: () -> Unit) {
     var clearCompleted by remember { mutableStateOf<ClearCompleted?>(null) }
     var duePickerFor by remember { mutableStateOf<TaskItem?>(null) }
     var adding by rememberSaveable { mutableStateOf(false) }
+    // R97: what the card held when it was closed, once the person asks for it back.
+    var restored by remember { mutableStateOf<NewTaskEntry?>(null) }
+    // The bar that offers it; a new card takes the offer away.
+    var restoreOffer by remember { mutableStateOf<Job?>(null) }
 
     LaunchedEffect(state.notice) {
         val notice = state.notice ?: return@LaunchedEffect
@@ -253,7 +263,7 @@ fun MainScreen(model: MainViewModel, onReminderSet: () -> Unit) {
             floatingActionButton = {
                 if (!state.readOnly) {
                     FloatingActionButton(
-                        onClick = { adding = true },
+                        onClick = { restoreOffer?.cancel(); restored = null; adding = true },
                         shape = CircleShape,
                         containerColor = viewTint(ViewTint.Blue),
                         contentColor = Color.White,
@@ -313,7 +323,21 @@ fun MainScreen(model: MainViewModel, onReminderSet: () -> Unit) {
     }
 
     state.editing?.let { EditorSheet(it, state, model, onReminderSet) }
-    if (adding) NewTaskSheet(state, onAdd = model::add) { adding = false }
+    if (adding) {
+        NewTaskSheet(state, restored, onAdd = model::add) { entry ->
+            adding = false
+            restored = null
+            // R97: closing discards what was entered; for a moment it can be brought back.
+            if (entry.hasContent) {
+                restoreOffer = scope.launch {
+                    if (snackbar.offerRestore()) {
+                        restored = entry
+                        adding = true
+                    }
+                }
+            }
+        }
+    }
 
     duePickerFor?.let { task ->
         MomentDialog(
@@ -498,28 +522,85 @@ private fun EmptyState(scope: Scope) {
     }
 }
 
+/** R97: how long the bar that brings a closed card back stays. */
+const val RESTORE_MILLIS = 3000L
+
+/** Shows "Draft discarded" with "Restore" for [RESTORE_MILLIS] and says whether the person asked for the card back. */
+private suspend fun SnackbarHostState.offerRestore(): Boolean = coroutineScope {
+    val message = str(R.string.draft_discarded)
+    // Counted from the moment the bar is on screen: another one may be showing before it.
+    val timer = launch {
+        snapshotFlow { currentSnackbarData?.visuals?.message }.first { it == message }
+        delay(RESTORE_MILLIS)
+        currentSnackbarData?.dismiss()
+    }
+    val result = showSnackbar(message, actionLabel = str(R.string.restore), duration = SnackbarDuration.Indefinite)
+    timer.cancel()
+    result == SnackbarResult.ActionPerformed
+}
+
 /**
  * The new-task card over the list. It stays open after a task is added, for
- * the next one; back or a tap outside closes it.
+ * the next one; back, a tap outside or a drag down closes it and hands over
+ * what it held (R97).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun NewTaskSheet(state: UiState, onAdd: (TaskDraft) -> Unit, onDismiss: () -> Unit) {
+private fun NewTaskSheet(state: UiState, restored: NewTaskEntry?, onAdd: (TaskDraft) -> Unit, onDismiss: (NewTaskEntry) -> Unit) {
     val context = LocalContext.current
+    val entry = rememberSaveable(saver = NewTaskEntry.Saver) { restored ?: NewTaskEntry(listId = state.newTaskListId()) }
     // No width limit: expanded, the card takes the whole screen (R64).
     ModalBottomSheet(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { onDismiss(entry) },
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         sheetMaxWidth = Dp.Unspecified,
+        dragHandle = { CardHandle(entry) },
     ) {
         NewTaskCard(
             lists = state.lists.filter { !it.archived },
-            listId = remember { state.newTaskListId() },
+            listId = entry.listId,
             parse = EntryPrefs.parse(context),
             onSubmit = onAdd,
             modifier = Modifier.navigationBarsPadding().padding(start = 8.dp, end = 8.dp, bottom = 8.dp),
             keepOpen = true,
+            entry = entry,
         )
+    }
+}
+
+/**
+ * The handle of the new-task card (R97): a drag up expands the card, a drag
+ * down collapses an expanded one. A drag down on a compact card is left to
+ * the sheet, which closes.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CardHandle(entry: NewTaskEntry) {
+    Box(
+        Modifier.fillMaxWidth().pointerInput(entry) {
+            awaitEachGesture {
+                val down = awaitFirstDown(requireUnconsumed = false)
+                val wasExpanded = entry.expanded
+                var dy = 0f
+                var decided = false
+                while (true) {
+                    val change = awaitPointerEvent().changes.firstOrNull { it.id == down.id } ?: break
+                    if (!change.pressed) break
+                    dy += change.positionChange().y
+                    if (!decided && abs(dy) > viewConfiguration.touchSlop) {
+                        decided = true
+                        if (dy < 0) entry.expanded = true else if (wasExpanded) entry.expanded = false
+                    }
+                    // Kept from the sheet, or it would follow the finger and close a card that only changes its size.
+                    if (dy < 0 || wasExpanded) change.consume()
+                }
+            }
+        },
+        contentAlignment = Alignment.Center,
+    ) {
+        // Expanded, the card reaches the top of the screen: the handle stays below the status bar,
+        // where a drag belongs to the system.
+        BottomSheetDefaults.DragHandle(if (entry.expanded) Modifier.statusBarsPadding() else Modifier)
     }
 }
 
