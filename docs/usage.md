@@ -251,6 +251,8 @@ Settings → Backups:
 - Each backup in the list can be restored, saved as a copy to a place you choose, or deleted.
 - **Restore from file** takes a backup saved elsewhere, for example on another device or after a fresh install.
 
+A new version of the app that changes how the data is stored makes a backup by itself before it touches the data, whatever the schedule says. It is an ordinary backup: it shows in the list and counts towards the number that is kept.
+
 Backups live in the data folder of the app and go away with it, so save a copy elsewhere from time to time.
 
 Restoring replaces everything on the device with what the backup holds; the state before it is saved as one more backup first. With sync on, the app asks what to do with the storage: **merge** keeps what happened since the backup (a later edit wins, and what was deleted since stays deleted), **replace the data of the storage** gives the restored state to the storage and to every other device, where the rest goes to the Trash. The web server has no backups of its own: back up its data volume, see [self-hosting](self-hosting.md).

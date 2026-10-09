@@ -456,3 +456,134 @@ fn r88_two_looks_at_the_schedule_at_once_make_one_backup() {
     assert_eq!(made, 1);
     assert_eq!(d.backups().unwrap().len(), 1);
 }
+
+/// Marks the database in `dir` as left by a version with an earlier schema.
+fn set_schema_version(dir: &std::path::Path, version: Option<&str>) {
+    let conn = rusqlite::Connection::open(dir.join("lists.sqlite")).unwrap();
+    match version {
+        Some(v) => conn
+            .execute(
+                "INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', ?1)",
+                [v],
+            )
+            .unwrap(),
+        None => conn
+            .execute("DELETE FROM meta WHERE key = 'schema_version'", [])
+            .unwrap(),
+    };
+}
+
+fn schema_version(dir: &std::path::Path) -> Option<String> {
+    let conn = rusqlite::Connection::open(dir.join("lists.sqlite")).unwrap();
+    conn.query_row("SELECT value FROM meta WHERE key = 'schema_version'", [], |r| r.get(0))
+        .ok()
+}
+
+/// A data folder with tasks in it, closed.
+fn furnished_folder() -> (TempDir, Vec<String>) {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().to_string_lossy().into_owned()).unwrap();
+    let list = store.create_list("Работа".into()).unwrap();
+    let task = add(&store, "отчёт");
+    store.move_to_list(task.id.clone(), list.id).unwrap();
+    store.set_notes(task.id, "черновик у Оли".into()).unwrap();
+    add(&store, "вторая");
+    let titles = sorted(view(&store, Scope::All));
+    (dir, titles)
+}
+
+fn open(dir: &TempDir) -> Result<std::sync::Arc<Store>> {
+    Store::open(dir.path().to_string_lossy().into_owned())
+}
+
+#[test]
+fn r92_a_database_of_an_earlier_schema_is_backed_up_before_it_is_migrated() {
+    let (dir, titles) = furnished_folder();
+    assert_eq!(schema_version(dir.path()).as_deref(), Some("1"));
+    set_schema_version(dir.path(), Some("0"));
+
+    let store = open(&dir).unwrap();
+
+    let backups = store.backups().unwrap();
+    assert_eq!(backups.len(), 1);
+    assert!(std::path::Path::new(&backups[0].path).starts_with(dir.path().join("backups")));
+    assert_eq!(schema_version(dir.path()).as_deref(), Some("1"));
+    assert_eq!(sorted(view(&store, Scope::All)), titles);
+    // The copy holds what the database held: a clean install restored from it shows the same.
+    let fresh = device();
+    fresh.restore_backup(backups[0].path.clone(), false).unwrap();
+    assert_eq!(sorted(view(&fresh, Scope::All)), titles);
+    drop(store);
+
+    // The next start finds the schema it knows and makes no copy.
+    assert_eq!(open(&dir).unwrap().backups().unwrap().len(), 1);
+}
+
+#[test]
+fn r92_a_database_of_the_present_schema_gets_no_backup() {
+    // A clean install.
+    let dir = tempfile::tempdir().unwrap();
+    assert!(open(&dir).unwrap().backups().unwrap().is_empty());
+
+    // A database from before the number was kept is of the first schema, the present one.
+    let (dir, _) = furnished_folder();
+    set_schema_version(dir.path(), None);
+    assert!(open(&dir).unwrap().backups().unwrap().is_empty());
+    assert_eq!(schema_version(dir.path()).as_deref(), Some("1"));
+
+    // A database without data has nothing to keep.
+    let dir = tempfile::tempdir().unwrap();
+    drop(open(&dir).unwrap());
+    set_schema_version(dir.path(), Some("0"));
+    assert!(open(&dir).unwrap().backups().unwrap().is_empty());
+    assert_eq!(schema_version(dir.path()).as_deref(), Some("1"));
+
+    // A database left by a later version keeps its number and gets no copy.
+    let (dir, _) = furnished_folder();
+    set_schema_version(dir.path(), Some("7"));
+    assert!(open(&dir).unwrap().backups().unwrap().is_empty());
+    assert_eq!(schema_version(dir.path()).as_deref(), Some("7"));
+}
+
+#[test]
+fn r92_without_the_backup_the_migration_does_not_start() {
+    let (dir, titles) = furnished_folder();
+    set_schema_version(dir.path(), Some("0"));
+    // Something stands where the folder of the backups would be.
+    std::fs::write(dir.path().join("backups"), b"in the way").unwrap();
+
+    assert!(open(&dir).is_err());
+    assert_eq!(schema_version(dir.path()).as_deref(), Some("0"));
+
+    std::fs::remove_file(dir.path().join("backups")).unwrap();
+    let store = open(&dir).unwrap();
+    assert_eq!(store.backups().unwrap().len(), 1);
+    assert_eq!(sorted(view(&store, Scope::All)), titles);
+}
+
+#[test]
+fn r92_the_backup_before_a_migration_takes_a_place_in_the_rotation() {
+    let (dir, _) = furnished_folder();
+    let oldest = {
+        let store = open(&dir).unwrap();
+        for second in 0..5 {
+            store.set_now_for_tests(&format!("2026-10-01T10:00:0{second}"));
+            store.create_backup().unwrap();
+        }
+        store.backups().unwrap().pop().unwrap().name
+    };
+    set_schema_version(dir.path(), Some("0"));
+
+    let names: Vec<String> = open(&dir)
+        .unwrap()
+        .backups()
+        .unwrap()
+        .into_iter()
+        .map(|b| b.name)
+        .collect();
+
+    // Five are kept by default: the new one is among them and the oldest is gone.
+    assert_eq!(names.len(), 5);
+    assert!(!names.contains(&oldest));
+    assert!(names.iter().any(|n| !n.starts_with("Lists_(2026-10-01")), "{names:?}");
+}
