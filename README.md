@@ -9,11 +9,39 @@ Lists covers the part of 2Do that a single person uses every day. A task has a l
 
 The interface is in English with a Russian localization and follows the system language.
 
-| macOS | Android | Web |
-|---|---|---|
-| ![The Today view on macOS](docs/screenshots/macos-today.png) | ![A list on Android](docs/screenshots/android-list.png) | ![The web interface on a phone](docs/screenshots/web-phone.png) |
+## Screenshots
 
-More screenshots are in [docs/screenshots](docs/screenshots/).
+The pictures show the same demo data on every platform; `cargo run --example demo -- <empty folder>` in `core/` makes it.
+
+### macOS
+
+![The Today view on macOS: the tasks that are overdue and the tasks of the day](docs/screenshots/macos-today.png)
+
+![A list on macOS with the card of a task open: note, dates, tags, a file and subtasks](docs/screenshots/macos-task.png)
+
+<img src="docs/screenshots/macos-quick-entry.png" width="520" alt="The quick-entry window on macOS with a note taken from the clipboard">
+
+### Android
+
+| Today | A list | A task |
+|---|---|---|
+| <img src="docs/screenshots/android-today.png" width="240" alt="The Today view on Android"> | <img src="docs/screenshots/android-list.png" width="240" alt="A list on Android"> | <img src="docs/screenshots/android-task.png" width="240" alt="The card of a task on Android"> |
+
+| Quick entry | Lists and views | A new filter | Settings |
+|---|---|---|---|
+| <img src="docs/screenshots/android-quick-entry.png" width="180" alt="Quick entry on Android: the date and the priority are read from the text"> | <img src="docs/screenshots/android-drawer.png" width="180" alt="The panel with the views, lists, projects and filters on Android"> | <img src="docs/screenshots/android-filter.png" width="180" alt="The dialog of a new filter on Android"> | <img src="docs/screenshots/android-settings.png" width="180" alt="The settings on Android"> |
+
+### Web
+
+![The web interface: a list with the card of a task open](docs/screenshots/web-desktop.png)
+
+![The web interface in English: the Today view](docs/screenshots/web-desktop-en.png)
+
+![A saved filter in the web interface](docs/screenshots/web-filter.png)
+
+| Today on a phone | A task on a phone |
+|---|---|
+| <img src="docs/screenshots/web-phone.png" width="240" alt="The web interface on a phone: the Today view"> | <img src="docs/screenshots/web-phone-task.png" width="240" alt="The web interface on a phone: the card of a task"> |
 
 ## Install
 
