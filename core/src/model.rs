@@ -331,6 +331,17 @@ pub struct SyncReport {
     pub blobs_downloaded: u32,
 }
 
+/// Which side is kept when a device joins a storage and both hold data (S36).
+#[derive(Debug, Clone, Copy, PartialEq, uniffi::Enum)]
+pub enum SyncSide {
+    /// Both: the usual merge (S12).
+    Merge,
+    /// The storage: the device drops its own data (S37).
+    Storage,
+    /// The device: its data goes over the storage's (S38).
+    Device,
+}
+
 /// Result of one pass over attachment content (S34).
 #[derive(Debug, Clone, PartialEq, Default, uniffi::Record)]
 pub struct AttachmentReport {

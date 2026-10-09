@@ -1709,6 +1709,18 @@ fn c28_taking_the_server_drops_what_the_device_held() {
 }
 
 #[test]
+fn c28_taking_the_server_keeps_the_settings_that_do_not_travel() {
+    let dav = start();
+    let (a, c, _) = server_and_newcomer(&dav);
+    c.set_keep_done(KeepDone::EndOfDay).unwrap();
+    c.join_storage(caldav(&dav), SyncSide::Storage).unwrap();
+    c.set_sync_password(Some("secret".into()));
+    settle(&c, &a);
+    assert_eq!(c.keep_done().unwrap(), KeepDone::EndOfDay);
+    assert!(!view(&c, Scope::All).contains(&"в".to_string()));
+}
+
+#[test]
 fn c28_sending_the_device_clears_the_server_of_the_rest() {
     let dav = start();
     let (a, c, from_a) = server_and_newcomer(&dav);

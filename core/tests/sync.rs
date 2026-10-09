@@ -1406,3 +1406,33 @@ fn s38_another_storage_cancels_a_waiting_replacement() {
     c.sync_now().unwrap();
     assert_eq!(sorted(view(&c, Scope::All)), ["в", "с A"]);
 }
+
+#[test]
+fn s36_joining_a_storage_and_choosing_a_side_is_one_step() {
+    let storage = tempfile::tempdir().unwrap();
+    let (a, c, d) = (device(), device(), device());
+    add(&a, "с A");
+    a.set_sync_config(folder(&storage)).unwrap();
+    a.sync_now().unwrap();
+
+    add(&c, "в");
+    c.join_storage(folder(&storage), SyncSide::Storage).unwrap();
+    c.sync_now().unwrap();
+    assert_eq!(view(&c, Scope::All), ["с A"]);
+
+    add(&d, "г");
+    d.join_storage(folder(&storage), SyncSide::Device).unwrap();
+    d.sync_now().unwrap();
+    a.sync_now().unwrap();
+    c.sync_now().unwrap();
+    for device in [&a, &c, &d] {
+        assert_eq!(view(device, Scope::All), ["г"]);
+        assert_eq!(view(device, Scope::Trash), ["с A"]);
+    }
+
+    // The same storage again: the side still applies.
+    add(&c, "без связи");
+    c.join_storage(folder(&storage), SyncSide::Storage).unwrap();
+    c.sync_now().unwrap();
+    assert_eq!(view(&c, Scope::All), ["г"]);
+}
