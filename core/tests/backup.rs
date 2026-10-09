@@ -492,6 +492,15 @@ fn furnished_folder() -> (TempDir, Vec<String>) {
     (dir, titles)
 }
 
+fn attach_to(store: &Store, task: &TaskItem, name: &str, content: &[u8]) {
+    let src = tempfile::tempdir().unwrap();
+    let file = src.path().join(name);
+    std::fs::write(&file, content).unwrap();
+    store
+        .add_attachment(task.id.clone(), file.to_string_lossy().into_owned(), None)
+        .unwrap();
+}
+
 fn open(dir: &TempDir) -> Result<std::sync::Arc<Store>> {
     Store::open(dir.path().to_string_lossy().into_owned())
 }
@@ -517,6 +526,38 @@ fn r92_a_database_of_an_earlier_schema_is_backed_up_before_it_is_migrated() {
 
     // The next start finds the schema it knows and makes no copy.
     assert_eq!(open(&dir).unwrap().backups().unwrap().len(), 1);
+}
+
+#[test]
+fn r92_the_backup_before_a_migration_does_not_read_the_derived_tables() {
+    let dir = tempfile::tempdir().unwrap();
+    let titles = {
+        let store = open(&dir).unwrap();
+        let task = add(&store, "с файлом");
+        attach_to(&store, &task, "цифры.txt", b"1 2 3");
+        sorted(view(&store, Scope::All))
+    };
+    // An earlier version left its derived tables in a shape this one does not know.
+    set_schema_version(dir.path(), Some("0"));
+    let conn = rusqlite::Connection::open(dir.path().join("lists.sqlite")).unwrap();
+    conn.execute_batch(
+        "DROP TABLE tasks; DROP TABLE lists; DROP TABLE attachments; DROP TABLE task_tags; DROP TABLE filters;
+         DELETE FROM meta WHERE key = 'derived_version';",
+    )
+    .unwrap();
+    drop(conn);
+
+    let store = open(&dir).unwrap();
+
+    let backups = store.backups().unwrap();
+    assert_eq!(backups.len(), 1);
+    assert_eq!(sorted(view(&store, Scope::All)), titles);
+    // The content of the attachment is in the copy.
+    let fresh = device();
+    fresh.restore_backup(backups[0].path.clone(), false).unwrap();
+    let task = fresh.tasks(Scope::All).unwrap().remove(0);
+    let file = fresh.attachments(task.id).unwrap().remove(0);
+    assert_eq!(std::fs::read(file.local_path.unwrap()).unwrap(), b"1 2 3");
 }
 
 #[test]

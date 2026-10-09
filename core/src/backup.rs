@@ -129,8 +129,13 @@ impl Store {
             let _ = inner.conn.execute("DETACH DATABASE snapshot", []);
             copied?;
             let fields = inner.conn.query_row("SELECT count(*) FROM fields", [], |r| r.get(0))?;
-            let mut stmt = inner.conn.prepare("SELECT DISTINCT sha256 FROM attachments")?;
-            let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+            // Read from the registers, not from the derived table: before a migration (R92)
+            // the derived tables are as an earlier version left them.
+            let mut stmt = inner.conn.prepare(
+                "SELECT DISTINCT json_extract(value, '$') FROM fields
+                 WHERE kind = ?1 AND field = 'sha256' AND json_valid(value) AND json_type(value) = 'text'",
+            )?;
+            let rows = stmt.query_map([db::KIND_ATTACHMENT], |r| r.get::<_, String>(0))?;
             let hashes = rows.collect::<rusqlite::Result<_>>()?;
             (fields, hashes)
         };
