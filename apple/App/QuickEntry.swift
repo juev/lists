@@ -93,6 +93,7 @@ final class QuickEntryPanel: NSPanel {
             let frame = screen.visibleFrame
             setFrameTopLeftPoint(NSPoint(x: frame.midX - self.frame.width / 2, y: frame.minY + frame.height * 0.78))
         }
+        setAsideWindowsOfHiddenApp()
         makeKeyAndOrderFront(nil)
         // SwiftUI asks for focus when the view appears, which is before the
         // panel is the key window, and the request is dropped. Hand the
@@ -136,6 +137,80 @@ final class QuickEntryPanel: NSPanel {
 
     override func cancelOperation(_ sender: Any?) {
         close()
+    }
+
+    /// The windows that were on screen when the app was hidden: the ones that come back with it.
+    private var hiddenWith: [NSWindow] = []
+    /// The windows taken off screen so that the panel could be shown alone, and their transparency before that.
+    private var setAside: [(window: NSWindow, alpha: CGFloat)] = []
+    private var observers: [NSObjectProtocol] = []
+
+    /// Starts keeping track of what Hide Lists (⌘H) hides. Called once, when the app starts: a hidden app
+    /// no longer tells which of its windows were on screen.
+    func watchHiding() {
+        guard observers.isEmpty else { return }
+        let center = NotificationCenter.default
+        observers = [
+            center.addObserver(forName: NSApplication.willHideNotification, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self, self.setAside.isEmpty else { return }
+                    self.hiddenWith = NSApp.windows.filter { $0 !== self && !($0 is NSPanel) && $0.canBecomeMain && $0.isVisible }
+                }
+            },
+            center.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.returnWindows(hide: false) }
+            },
+        ]
+    }
+
+    /// A hidden app is shown again with all its windows as soon as one of them is ordered front, the panel among
+    /// them. Only the panel is wanted: the windows the app was hidden with are ordered out first, transparent so
+    /// that not a frame of them is drawn, and then the app is shown. They return when the panel closes or the
+    /// person comes back to the app.
+    private func setAsideWindowsOfHiddenApp() {
+        guard NSApp.isHidden else { return }
+        for window in hiddenWith where NSApp.windows.contains(window) {
+            setAside.append((window, window.alphaValue))
+            window.alphaValue = 0
+            window.orderOut(nil)
+        }
+        hiddenWith = []
+        NSApp.unhideWithoutActivation()
+    }
+
+    /// Puts back what `setAsideWindowsOfHiddenApp` took away. With `hide` the app goes back to being hidden, as it
+    /// was before the panel: the windows are ordered in transparent and are seen again when the app is shown.
+    private func returnWindows(hide: Bool) {
+        guard !setAside.isEmpty else { return }
+        let windows = setAside
+        setAside = []
+        guard hide else {
+            for (window, alpha) in windows {
+                window.alphaValue = alpha
+                window.orderFront(nil)
+            }
+            return
+        }
+        windows.forEach { $0.window.orderBack(nil) }
+        hiddenWith = windows.map(\.window)
+        var token: NSObjectProtocol?
+        let restore = {
+            windows.forEach { $0.window.alphaValue = $0.alpha }
+            token.map(NotificationCenter.default.removeObserver)
+            token = nil
+        }
+        token = NotificationCenter.default.addObserver(forName: NSApplication.didHideNotification, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated(restore)
+        }
+        NSApp.hide(nil)
+        // Whatever becomes of the hiding, a window is not left transparent.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { if token != nil { restore() } }
+    }
+
+    override func close() {
+        super.close()
+        // The person went on in another app: Lists is hidden again. They came to Lists itself: its windows are back.
+        returnWindows(hide: !NSApp.isActive)
     }
 }
 

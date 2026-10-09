@@ -55,6 +55,10 @@ import UserNotifications
 /// `sidebar` (prints how many rows each list of the main window has, the sidebar among them),
 /// `copytext:text`, `copysecret:text` and `copyfile:path` (fill the pasteboard quick entry reads; with `LISTS_DEBUG_PASTEBOARD=name` that is a pasteboard of its own, not the general one),
 /// `clipnotes:on` and `clipnotes:off` (flip the setting of R58), `quicknote` (shows quick entry transparent and without the keyboard, and prints the note it starts with; `quicknote:/path.png` also draws the card into a file),
+/// `veil` (makes the windows of the app transparent and deaf to the mouse and leaves the app hidden) and
+/// `hideapp` (hides the app the way Hide Lists does), `unhideapp` (shows it again without making it active),
+/// `quickopen` and `quickclose` (show quick entry transparent and without the keyboard, and close it),
+/// `apphidden` (prints whether the app is hidden, whether it is active and how many of its main windows are ordered in),
 /// `quicktrace` (shows quick entry transparent and without the keyboard, and prints its geometry frame by frame:
 /// a line that differs from the next one is a card that moved after it was shown).
 /// With `LISTS_DEBUG_QUIET` set the script leaves the app in the background instead of bringing its window forward;
@@ -319,6 +323,30 @@ enum DebugScript {
                 case "panel":
                     print("debug: quick entry \(QuickEntryPanel.shared.isVisible ? "shown" : "hidden"), modal \(NSApp.modalWindow.map { String(describing: type(of: $0)) } ?? "none")")
                 case "quick": QuickEntryPanel.shared.present()
+                case "veil":
+                    // Unlike `ghost`, the app stays hidden: its windows are only made transparent, for the case they come on screen.
+                    for window in NSApp.windows where !(window is NSPanel) { hide(window) }
+                case "quickopen":
+                    // Shown transparent and without the keyboard, and left open until `quickclose`.
+                    QuickEntryPanel.debugSilent = true
+                    QuickEntryPanel.shared.alphaValue = 0
+                    QuickEntryPanel.shared.present()
+                    try? await _Concurrency.Task.sleep(for: .milliseconds(300))
+                case "quickclose":
+                    QuickEntryPanel.shared.close()
+                    QuickEntryPanel.shared.alphaValue = 1
+                    QuickEntryPanel.debugSilent = false
+                    try? await _Concurrency.Task.sleep(for: .milliseconds(300))
+                case "unhideapp":
+                    NSApp.unhideWithoutActivation()
+                    try? await _Concurrency.Task.sleep(for: .milliseconds(300))
+                case "hideapp":
+                    // What Hide Lists (⌘H) does.
+                    NSApp.hide(nil)
+                    try? await _Concurrency.Task.sleep(for: .milliseconds(300))
+                case "apphidden":
+                    let shown = NSApp.windows.filter { !($0 is NSPanel) && $0.canBecomeMain && $0.isVisible }.count
+                    print("debug: app \(NSApp.isHidden ? "hidden" : "shown"), active \(NSApp.isActive), main windows in the window list \(shown), quick entry \(QuickEntryPanel.shared.isVisible ? "shown" : "hidden")")
                 case "copytext", "copysecret", "copyfile":
                     let pasteboard = ClipboardNote.pasteboard
                     pasteboard.clearContents()

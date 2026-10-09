@@ -33,6 +33,7 @@ struct ListsApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         KeyboardShortcuts.onKeyUp(for: .quickEntry) { QuickEntryPanel.shared.toggle() }
+        MainActor.assumeIsolated { QuickEntryPanel.shared.watchHiding() }
         NSApp.servicesProvider = self
         AttachmentFiles.clear()
         MainActor.assumeIsolated { AppModel.shared.applyAppearance() }
