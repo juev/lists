@@ -155,6 +155,14 @@ The token is sent only to the server named in the same settings: when the device
 
 When the server turns the token down, the sync settings say "The push server refused access", and the web server writes that to its log. Sync itself goes on as scheduled. The Mac keeps the token in the keychain and Android encrypts it with a key from the system keystore; it is never written to the storage.
 
+When a device that already has tasks is connected to a storage that has tasks as well, Save and sync on macOS and Android asks which side to keep:
+
+- **Merge** keeps the tasks of both sides. This is what happens without the question, when one of the sides is empty.
+- **Use the data of the storage** erases the tasks, lists and filters of this device and reads them again from the storage. Changes that were not synced are lost.
+- **Use the data of this device** puts the state of this device over the storage and every other device. What this device does not have goes to the Trash on all devices and can be restored from there; edits made elsewhere are undone. An edit that another device made before and uploads only later is still merged in.
+
+The two replacements ask for a confirmation first; Cancel leaves the settings unsaved. To get the question for a storage that is already connected, turn sync off, save, and connect again. The web server, whose storage comes from the environment, always merges.
+
 Edits are saved locally at once. Two devices that change different fields of one task both keep their change; when they change the same field, the later edit wins. How the two kinds compare is in the [README](../README.md#sync).
 
 ## Notifications
