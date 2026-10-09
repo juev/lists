@@ -381,6 +381,7 @@ struct SettingsView: View {
             Section(L("Quick Entry")) {
                 KeyboardShortcuts.Recorder(L("Shortcut:"), name: .quickEntry)
             }
+            BackupsSection()
             Section(L("Sync")) {
                 Picker(L("Storage"), selection: $kind) {
                     Text(L("Off")).tag(Kind.off)
