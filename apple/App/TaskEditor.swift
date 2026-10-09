@@ -14,10 +14,10 @@ struct TaskEditor: View {
         var id: Self { self }
     }
 
-    @State private var notes = ""
+    @State private var notes: String
     @State private var popover: Popover?
     @State private var importing = false
-    @State private var attachments: [Attachment] = []
+    @State private var attachments: [Attachment]
     /// Attachments being downloaded on request, and those the last request did not get (R76).
     @State private var fetching: Set<String> = []
     @State private var fetchFailed: Set<String> = []
@@ -30,6 +30,14 @@ struct TaskEditor: View {
     @FocusState private var focusedFile: String?
 
     private var locked: Bool { task.deleted || task.isLog }
+
+    /// The card starts with the note and the files of its task: what the card took only after it had
+    /// appeared did not always reach the height of its row, and the bottom of the card was cut off (#155).
+    init(task: TaskItem) {
+        self.task = task
+        _notes = State(initialValue: task.notes)
+        _attachments = State(initialValue: (try? AppModel.shared.store?.attachments(taskId: task.id)) ?? [])
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
