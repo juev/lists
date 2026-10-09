@@ -1641,3 +1641,110 @@ fn c27_cancelled_by_another_client_closes_the_task_as_wont_do() {
     let got = a.task(plain.id).unwrap();
     assert!(got.done.is_none() && !got.wont);
 }
+
+const FOREIGN_TASK: &str = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Other//EN\r\nBEGIN:VTODO\r\nUID:foreign-uid-1\r\nSUMMARY:From another app\r\nEND:VTODO\r\nEND:VCALENDAR\r\n";
+
+fn caldav(dav: &Dav) -> SyncConfig {
+    SyncConfig::CalDav {
+        url: dav.url.clone(),
+        user: "user".into(),
+    }
+}
+
+/// A server with a task of device A, a task and an event of another client; C holds a task of its own.
+fn server_and_newcomer(dav: &Dav) -> (Device, Device, TaskItem) {
+    let (a, c) = (device(), device());
+    connect(&a, dav);
+    let from_a = add(&a, "а");
+    a.sync_now().unwrap();
+    let inbox = dav.home().join("lists-inbox");
+    std::fs::write(inbox.join("foreign.ics"), FOREIGN_TASK).unwrap();
+    std::fs::write(inbox.join("meeting.ics"), FOREIGN_EVENT).unwrap();
+    a.sync_now().unwrap();
+    add(&c, "в");
+    (a, c, from_a)
+}
+
+#[test]
+fn c28_there_is_a_side_to_choose_only_when_the_server_holds_objects() {
+    let dav = start();
+    let c = device();
+    add(&c, "в");
+    let seen = dav.requests(|| {
+        assert!(!c.sync_conflict(caldav(&dav), "secret".into()).unwrap());
+    });
+    assert!(seen.iter().all(|r| r.starts_with("PROPFIND")), "{seen:?}");
+    assert!(
+        std::fs::read_dir(dav.home()).unwrap().next().is_none(),
+        "no calendar is made"
+    );
+
+    let a = device();
+    connect(&a, &dav);
+    add(&a, "а");
+    a.sync_now().unwrap();
+    let seen = dav.requests(|| {
+        assert!(c.sync_conflict(caldav(&dav), "secret".into()).unwrap());
+    });
+    assert!(seen.iter().all(|r| r.starts_with("PROPFIND")), "{seen:?}");
+    assert!(!device().sync_conflict(caldav(&dav), "secret".into()).unwrap());
+    assert!(c.sync_conflict(caldav(&dav), "wrong".into()).is_err());
+}
+
+#[test]
+fn c28_taking_the_server_drops_what_the_device_held() {
+    let dav = start();
+    let (a, c, _) = server_and_newcomer(&dav);
+    connect(&c, &dav);
+    c.replace_local_with_remote().unwrap();
+    settle(&c, &a);
+    for d in [&a, &c] {
+        let mut got = view(d, Scope::All);
+        got.sort();
+        assert_eq!(got, ["From another app", "а"]);
+        assert!(view(d, Scope::Trash).is_empty());
+    }
+    // The task of A, the task and the event of the other client: nothing of C reached the server.
+    assert_eq!(dav.objects(), 3);
+}
+
+#[test]
+fn c28_sending_the_device_clears_the_server_of_the_rest() {
+    let dav = start();
+    let (a, c, from_a) = server_and_newcomer(&dav);
+    connect(&c, &dav);
+    c.replace_remote_with_local().unwrap();
+    c.sync_now().unwrap();
+    a.sync_now().unwrap();
+    for d in [&a, &c] {
+        assert_eq!(view(d, Scope::All), ["в"]);
+        let mut gone = view(d, Scope::Trash);
+        gone.sort();
+        assert_eq!(gone, ["From another app", "а"]);
+    }
+    let inbox = dav.home().join("lists-inbox");
+    assert!(!dav.object(&from_a.id).exists());
+    assert!(!inbox.join("foreign.ics").exists());
+    assert!(inbox.join("meeting.ics").exists(), "an event is not ours to remove");
+    assert_eq!(dav.objects(), 2);
+    // Nothing waits any more.
+    c.sync_now().unwrap();
+    assert_eq!(c.sync_now().unwrap(), SyncReport::default());
+}
+
+#[test]
+fn c28_sending_the_device_undoes_an_edit_of_another_client() {
+    let dav = start();
+    let (a, b) = pair(&dav);
+    let t = add(&a, "один");
+    settle(&a, &b);
+    rename_elsewhere(&dav, &t.id, "Renamed elsewhere");
+
+    b.replace_remote_with_local().unwrap();
+    b.sync_now().unwrap();
+    a.sync_now().unwrap();
+    assert!(dav.read(&t.id).contains("SUMMARY:один"), "{}", dav.read(&t.id));
+    for d in [&a, &b] {
+        assert_eq!(d.task(t.id.clone()).unwrap().title, "один");
+    }
+}

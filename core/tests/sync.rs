@@ -1171,3 +1171,238 @@ fn s33_the_wont_do_outcome_merges_with_completion_and_survives_an_unaware_versio
     a.set_now_for_tests("2026-10-05T10:00");
     assert!(!a.complete_task(plain.id.clone()).unwrap().wont);
 }
+
+/// A storage that cannot be reached while `down` is set.
+struct Flaky {
+    inner: DirRemote,
+    down: std::sync::atomic::AtomicBool,
+}
+
+impl Flaky {
+    fn new(storage: &TempDir) -> Flaky {
+        Flaky {
+            inner: DirRemote::new(storage.path()),
+            down: std::sync::atomic::AtomicBool::new(true),
+        }
+    }
+
+    fn check(&self) -> Result<()> {
+        if self.down.load(std::sync::atomic::Ordering::Relaxed) {
+            return Err(AppError::Sync {
+                msg: "connection refused".into(),
+            });
+        }
+        Ok(())
+    }
+}
+
+impl Remote for Flaky {
+    fn id(&self) -> String {
+        self.inner.id()
+    }
+    fn list(&self, dir: &str) -> Result<Vec<String>> {
+        self.check()?;
+        self.inner.list(dir)
+    }
+    fn get(&self, path: &str) -> Result<Option<Vec<u8>>> {
+        self.check()?;
+        self.inner.get(path)
+    }
+    fn put(&self, path: &str, data: &[u8]) -> Result<()> {
+        self.check()?;
+        self.inner.put(path, data)
+    }
+    fn delete(&self, path: &str) -> Result<()> {
+        self.check()?;
+        self.inner.delete(path)
+    }
+    fn exists(&self, path: &str) -> Result<bool> {
+        self.check()?;
+        self.inner.exists(path)
+    }
+}
+
+fn sorted(mut titles: Vec<String>) -> Vec<String> {
+    titles.sort();
+    titles
+}
+
+#[test]
+fn s36_there_is_a_side_to_choose_only_when_both_hold_data() {
+    let storage = tempfile::tempdir().unwrap();
+    let empty = tempfile::tempdir().unwrap();
+    let (a, c, fresh) = (device(), device(), device());
+    add(&a, "с A");
+    sync(&a, &storage);
+    let t = add(&c, "с C");
+
+    let before = (files(&storage, "log"), dump(&c));
+    assert!(c.sync_conflict(folder(&storage), String::new()).unwrap());
+    assert!(!c.sync_conflict(folder(&empty), String::new()).unwrap());
+    assert!(!fresh.sync_conflict(folder(&storage), String::new()).unwrap());
+    assert!(!c.sync_conflict(SyncConfig::Off, String::new()).unwrap());
+    assert_eq!((files(&storage, "log"), dump(&c)), before, "the check writes nothing");
+    assert!(files(&empty, "log").is_empty());
+
+    // A list of its own is data as well; tasks in the trash are not.
+    c.delete_task(t.id).unwrap();
+    assert!(!c.sync_conflict(folder(&storage), String::new()).unwrap());
+    c.create_list("Работа".into()).unwrap();
+    assert!(c.sync_conflict(folder(&storage), String::new()).unwrap());
+}
+
+#[test]
+fn s37_taking_the_storage_drops_what_the_device_held() {
+    let storage = tempfile::tempdir().unwrap();
+    let (a, c) = (device(), device());
+    let shared = add(&a, "общая");
+    sync(&a, &storage);
+    add(&c, "в");
+    let was = c.device_id();
+
+    c.replace_local_with_remote().unwrap();
+    assert!(view(&c, Scope::All).is_empty(), "empty until the first run");
+    assert_ne!(c.device_id(), was);
+    settle(&c, &a, &storage);
+    for d in [&a, &c] {
+        assert_eq!(view(d, Scope::All), ["общая"]);
+        assert!(view(d, Scope::Trash).is_empty());
+    }
+
+    // An edit that was not uploaded is lost, and what the device uploaded before comes back.
+    add(&c, "выгруженная");
+    settle(&c, &a, &storage);
+    c.set_title(shared.id.clone(), "изменено без связи".into()).unwrap();
+    c.replace_local_with_remote().unwrap();
+    settle(&c, &a, &storage);
+    for d in [&a, &c] {
+        assert_eq!(sorted(view(d, Scope::All)), ["выгруженная", "общая"]);
+    }
+
+    // The device goes on as a new one: its next change reaches the others.
+    add(&c, "после");
+    settle(&c, &a, &storage);
+    assert_eq!(sorted(view(&a, Scope::All)), ["выгруженная", "общая", "после"]);
+    assert_eq!(dump(&a), dump(&c));
+}
+
+#[test]
+fn s38_sending_the_device_puts_the_rest_into_the_trash_everywhere() {
+    let storage = tempfile::tempdir().unwrap();
+    let (a, b, c) = (device(), device(), device());
+    let a1 = add(&a, "а1");
+    add(&a, "а2");
+    let work = a.create_list("Работа".into()).unwrap();
+    settle(&a, &b, &storage);
+    add(&c, "в");
+
+    c.replace_remote_with_local().unwrap();
+    sync(&c, &storage);
+    sync(&a, &storage);
+    sync(&b, &storage);
+    for d in [&a, &b, &c] {
+        assert_eq!(view(d, Scope::All), ["в"]);
+        assert_eq!(sorted(view(d, Scope::Trash)), ["а1", "а2"]);
+        assert!(d.lists().unwrap().iter().all(|l| l.id != work.id), "the list is gone");
+    }
+    assert_eq!(dump(&a), dump(&c));
+    assert_eq!(dump(&b), dump(&c));
+    // Nothing waits any more: the next run is an ordinary one.
+    assert_eq!(sync(&c, &storage), SyncReport::default());
+
+    // What went to the trash can be taken back.
+    a.restore_task(a1.id).unwrap();
+    settle(&a, &c, &storage);
+    sync(&b, &storage);
+    for d in [&a, &b, &c] {
+        assert_eq!(sorted(view(d, Scope::All)), ["а1", "в"]);
+    }
+}
+
+#[test]
+fn s38_sending_the_device_undoes_what_it_has_not_seen() {
+    let storage = tempfile::tempdir().unwrap();
+    let (a, b) = (device(), device());
+    let t = add(&a, "один");
+    let cleared = add(&a, "очищенная");
+    settle(&a, &b, &storage);
+
+    // A goes on: a rename, a tag, a task deleted for good, a new task.
+    a.set_title(t.id.clone(), "два".into()).unwrap();
+    a.add_tag(t.id.clone(), "дом".into()).unwrap();
+    a.delete_task(cleared.id.clone()).unwrap();
+    a.empty_trash().unwrap();
+    add(&a, "новая на A");
+    sync(&a, &storage);
+
+    // B holds the earlier state, like a device restored from a backup.
+    b.replace_remote_with_local().unwrap();
+    sync(&b, &storage);
+    sync(&a, &storage);
+    for d in [&a, &b] {
+        let task = d.task(t.id.clone()).unwrap();
+        assert_eq!(task.title, "один");
+        assert!(task.tags.is_empty());
+        assert_eq!(sorted(view(d, Scope::All)), ["один", "очищенная"]);
+        assert_eq!(view(d, Scope::Trash), ["новая на A"]);
+    }
+    assert_eq!(dump(&a), dump(&b));
+}
+
+#[test]
+fn s38_an_edit_made_before_and_uploaded_after_loses() {
+    let storage = tempfile::tempdir().unwrap();
+    let (a, b) = (device(), device());
+    let t = add(&a, "один");
+    settle(&a, &b, &storage);
+
+    a.set_title(t.id.clone(), "правка без связи".into()).unwrap();
+    add(&a, "создана без связи");
+    b.replace_remote_with_local().unwrap();
+    sync(&b, &storage);
+    settle(&a, &b, &storage);
+    for d in [&a, &b] {
+        assert_eq!(d.task(t.id.clone()).unwrap().title, "один");
+        // A task the device could not see is not its to delete.
+        assert_eq!(sorted(view(d, Scope::All)), ["один", "создана без связи"]);
+    }
+}
+
+#[test]
+fn s39_a_failed_run_leaves_the_replacement_waiting() {
+    let storage = tempfile::tempdir().unwrap();
+    let (a, c) = (device(), device());
+    add(&a, "с A");
+    sync(&a, &storage);
+    add(&c, "в");
+
+    let remote = Flaky::new(&storage);
+    c.replace_remote_with_local().unwrap();
+    assert!(c.sync_with(&remote).is_err());
+    assert_eq!(view(&c, Scope::All), ["в"]);
+    // What is edited while the storage is away belongs to the device's data.
+    add(&c, "г");
+    assert!(c.sync_with(&remote).is_err());
+
+    remote.down.store(false, std::sync::atomic::Ordering::Relaxed);
+    c.sync_with(&remote).unwrap();
+    sync(&a, &storage);
+    for d in [&a, &c] {
+        assert_eq!(sorted(view(d, Scope::All)), ["в", "г"]);
+        assert_eq!(view(d, Scope::Trash), ["с A"]);
+    }
+}
+
+#[test]
+fn s38_another_storage_cancels_a_waiting_replacement() {
+    let storage = tempfile::tempdir().unwrap();
+    let (a, c) = (device(), device());
+    add(&a, "с A");
+    sync(&a, &storage);
+    add(&c, "в");
+
+    c.replace_remote_with_local().unwrap();
+    c.set_sync_config(folder(&storage)).unwrap();
+    c.sync_now().unwrap();
+    assert_eq!(sorted(view(&c, Scope::All)), ["в", "с A"]);
+}
