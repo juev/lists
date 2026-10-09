@@ -555,7 +555,11 @@ impl Store {
         let dir = PathBuf::from(dir);
         std::fs::create_dir_all(dir.join("blobs"))?;
         let conn = Connection::open(dir.join("lists.sqlite"))?;
-        db::migrate(&conn)?;
+        // R92: a database of an earlier schema is backed up as it is, before anything in it is changed.
+        let outdated = db::schema_version(&conn)?.is_some_and(|stored| stored < db::SCHEMA_VERSION);
+        if !outdated {
+            db::migrate(&conn)?;
+        }
         let device = match db::meta_get(&conn, "device")? {
             Some(d) => d,
             None => {
@@ -565,7 +569,7 @@ impl Store {
             }
         };
         let clock = Clock::new(&device, db::max_stamp(&conn)?.as_deref());
-        Ok(Arc::new(Store {
+        let store = Arc::new(Store {
             inner: Mutex::new(Inner { conn, clock, now: None }),
             sync_lock: Mutex::new(()),
             blob_lock: Mutex::new(()),
@@ -579,7 +583,15 @@ impl Store {
             push_token: Mutex::new(None),
             push_refused: Mutex::new((false, false)),
             caldav_renders: AtomicU64::new(0),
-        }))
+        });
+        if outdated {
+            // Without the backup the migration does not start: the data stays as it was.
+            if store.holds_data()? {
+                store.create_backup()?;
+            }
+            db::migrate(&store.lock().conn)?;
+        }
+        Ok(store)
     }
 
     pub fn device_id(&self) -> String {

@@ -25,6 +25,10 @@ pub const SETTINGS_ID: &str = "app";
 /// Bumped whenever a derived table changes shape: the tables are then dropped
 /// and rebuilt from `fields`, which never changes shape.
 const DERIVED_VERSION: &str = "4";
+/// The version of the tables that are not rebuilt from the registers: `fields` and the bookkeeping.
+/// A change that rewrites one of them raises it, and a database with a smaller number is backed up
+/// before it is migrated (R92). Adding a column or a table needs no new number.
+pub const SCHEMA_VERSION: u32 = 1;
 
 const MAX_KEY_LEN: usize = 200;
 
@@ -212,7 +216,30 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         settle(conn, &all)?;
         meta_set(conn, "derived_version", DERIVED_VERSION)?;
     }
+    // A database written by a later version keeps its number.
+    let stored: Option<u32> = meta_get(conn, "schema_version")?.and_then(|v| v.parse().ok());
+    if stored.is_none_or(|stored| stored < SCHEMA_VERSION) {
+        meta_set(conn, "schema_version", &SCHEMA_VERSION.to_string())?;
+    }
     Ok(())
+}
+
+/// The version of the schema the database was left at (R92), or nothing for a database that has no tables yet.
+/// A database from before the number was kept is at 1.
+pub fn schema_version(conn: &Connection) -> Result<Option<u32>> {
+    let tables: u32 = conn.query_row(
+        "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name IN ('meta', 'fields')",
+        [],
+        |r| r.get(0),
+    )?;
+    if tables < 2 {
+        return Ok(None);
+    }
+    Ok(Some(
+        meta_get(conn, "schema_version")?
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(1),
+    ))
 }
 
 pub fn meta_get(conn: &Connection, key: &str) -> Result<Option<String>> {
