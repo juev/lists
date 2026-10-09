@@ -63,7 +63,7 @@ Open `http://<host>:8080` and sign in with the password. Sync, OpenID Connect, a
 2. Open Settings → Sync on each device and point them all at the same WebDAV folder or CalDAV server. Until then the data stays on the device, and the app is fully usable.
 3. Coming from another task manager? Import a 2Do backup, a Todoist CSV, a Trello board or Microsoft To Do lists: File → Import… on macOS, Settings on Android, the sidebar in the web interface.
 
-The [user guide](docs/usage.md) describes lists, subtasks and projects, repeats, quick entry, filters, notifications, keyboard shortcuts and import.
+The [user guide](docs/usage.md) describes lists, subtasks and projects, repeats, quick entry, filters, notifications, keyboard shortcuts, backups and import.
 
 ## Sync
 

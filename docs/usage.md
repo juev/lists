@@ -239,6 +239,22 @@ On a phone the app stays in portrait and does not turn with the device. The quic
 
 Swipe right to complete, swipe left to set the due date; a swipe to the right that starts at the left edge of the screen opens the panel with the lists instead. Pull down at the top of a list to sync right away; this works once sync is set up. Long-press for the menu: due date, priority, move to list, add subtask, duplicate, delete.
 
+## Backups
+
+The apps for macOS and Android keep backups of your data on the device. A backup is one file, `.listsbackup`, with the tasks, lists, tags, projects, filters, the trash, the completed tasks and the attachments that are on the device. It does not hold where the device syncs, passwords, or the settings of the device itself.
+
+Settings → Backups:
+
+- **Create backups**: never, every 24 hours (the default) or every 48 hours. A backup is made when the app runs: at start and with the runs of sync.
+- **Keep at most**: 5 (the default), 10, 20 or 30. After a new backup the oldest ones over that number are removed.
+- **Create backup now** makes one at once.
+- Each backup in the list can be restored, saved as a copy to a place you choose, or deleted.
+- **Restore from file** takes a backup saved elsewhere, for example on another device or after a fresh install.
+
+Backups live in the data folder of the app and go away with it, so save a copy elsewhere from time to time.
+
+Restoring replaces everything on the device with what the backup holds; the state before it is saved as one more backup first. With sync on, the app asks what to do with the storage: **merge** keeps what happened since the backup (a later edit wins, and what was deleted since stays deleted), **replace the data of the storage** gives the restored state to the storage and to every other device, where the rest goes to the Trash. The web server has no backups of its own: back up its data volume, see [self-hosting](self-hosting.md).
+
 ## Import
 
 | Source | File |
