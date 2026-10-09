@@ -136,6 +136,10 @@
     <string name="share">Share</string>
     <string name="file_saved">Saved</string>
     <string name="file_not_saved">Could not save the file</string>
+    <string name="save_all_to">Save all to…</string>
+    <string name="share_all">Share all</string>
+    <string name="files_not_saved">Could not save: %1$s</string>
+    <string name="files_not_downloaded">Could not download: %1$s</string>
     <string name="cannot_show_file">This file cannot be shown here.</string>
     <string name="time">Time</string>
     <string name="time_off">Off</string>

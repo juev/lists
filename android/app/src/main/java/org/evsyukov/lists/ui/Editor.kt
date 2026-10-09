@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
 import android.net.Uri
+import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import android.provider.Settings
 import android.widget.Toast
@@ -199,6 +200,56 @@ private fun shareAttachment(context: Context, file: Attachment) {
     }
 }
 
+/** R91: fetches the content that has not arrived; gives the attachments that are here now and the names of those that are not. */
+private fun withContent(files: List<Attachment>): Pair<List<Attachment>, List<String>> {
+    val here = mutableListOf<Attachment>()
+    val missing = mutableListOf<String>()
+    for (file in files) {
+        val got = if (file.localPath != null) file else runCatching { Repo.store.fetchAttachment(file.id) }.getOrNull()
+        if (got?.localPath != null) here += got else missing += file.name
+    }
+    return here to missing
+}
+
+/**
+ * Writes each attachment into the folder the user picked as a new document (R91) and gives the names of those
+ * that could not be written. Nothing is replaced: the provider gives a document whose name is taken a name of its own.
+ */
+internal fun saveInto(context: Context, tree: Uri, files: List<Attachment>): List<String> {
+    val resolver = context.contentResolver
+    val folder = DocumentsContract.buildDocumentUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree))
+    return files.filterNot { file ->
+        val target = runCatching { DocumentsContract.createDocument(resolver, folder, file.mime, file.name) }.getOrNull()
+        val written = target != null && copyAttachment(context, file, target)
+        // A document that was made and not filled is not left behind.
+        if (target != null && !written) runCatching { DocumentsContract.deleteDocument(resolver, target) }
+        written
+    }.map { it.name }
+}
+
+/** The type a share sheet is asked for when it carries these files: theirs when they agree, the widest that covers them otherwise. */
+internal fun shareType(mimes: List<String>): String {
+    val all = mimes.distinct()
+    val kinds = all.map { it.substringBefore('/') }.distinct()
+    return when {
+        all.size == 1 -> all[0]
+        kinds.size == 1 && all.isNotEmpty() -> "${kinds[0]}/*"
+        else -> "*/*"
+    }
+}
+
+/** Hands every file to another app through one share sheet (R91). */
+private fun shareAttachments(context: Context, files: List<Attachment>) {
+    runCatching {
+        val uris = ArrayList(files.mapNotNull { file ->
+            file.localPath?.let { FileProvider.getUriForFile(context, "${context.packageName}.files", File(it), file.name) }
+        })
+        val intent = Intent(Intent.ACTION_SEND_MULTIPLE).setType(shareType(files.map { it.mime }))
+            .putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        context.startActivity(Intent.createChooser(intent, null))
+    }
+}
+
 private fun openAttachment(context: Context, file: Attachment) {
     val path = file.localPath ?: return
     runCatching {
@@ -250,6 +301,31 @@ fun EditorSheet(editing: Editing, state: UiState, model: MainViewModel, onRemind
         saving = file
         saveFile.launch(file.name)
     }
+    // R91: every file of the task in one action. Those still to arrive are fetched first and their rows show it.
+    var gathering by remember(task.id) { mutableStateOf(false) }
+    val several = editing.attachments.size > 1
+    // The work outlives the card: closing it does not leave a part of the files unsaved.
+    fun withAll(then: (List<Attachment>) -> List<String>, done: Int?, failed: Int) {
+        val files = editing.attachments
+        gathering = true
+        Repo.scope.launch {
+            val (here, missing) = withContent(files)
+            if (here.any { now -> files.any { it.id == now.id && it.localPath == null } }) Repo.revision.update { it + 1 }
+            val lost = missing + then(here)
+            withContext(Dispatchers.Main) {
+                gathering = false
+                if (lost.isNotEmpty()) {
+                    Toast.makeText(context, context.getString(failed, lost.joinToString(", ")), Toast.LENGTH_LONG).show()
+                } else if (done != null) {
+                    Toast.makeText(context, done, Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+    val saveAll = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { tree ->
+        if (tree != null) withAll({ saveInto(context, tree, it) }, R.string.file_saved, R.string.files_not_saved)
+    }
+    fun shareAll() = withAll({ if (it.isNotEmpty()) shareAttachments(context, it); emptyList() }, null, R.string.files_not_downloaded)
 
     ModalBottomSheet(onDismissRequest = { model.open(null) }, sheetState = sheet) {
         Column(Modifier.verticalScroll(rememberScrollState()).navigationBarsPadding().padding(bottom = 16.dp)) {
@@ -290,6 +366,10 @@ fun EditorSheet(editing: Editing, state: UiState, model: MainViewModel, onRemind
                         } else {
                             DropdownMenuItem(text = { Text(str(R.string.move_to_list)) }, onClick = { menu = false; dialog = "list" })
                             DropdownMenuItem(text = { Text(str(R.string.duplicate)) }, onClick = { menu = false; model.act { it.duplicateTask(task.id) } })
+                            if (several) {
+                                DropdownMenuItem(text = { Text(str(R.string.save_all_to)) }, onClick = { menu = false; saveAll.launch(null) })
+                                DropdownMenuItem(text = { Text(str(R.string.share_all)) }, onClick = { menu = false; shareAll() })
+                            }
                             DropdownMenuItem(
                                 text = { Text(str(R.string.delete), color = MaterialTheme.colorScheme.error) },
                                 onClick = { menu = false; model.delete(task) },
@@ -355,7 +435,7 @@ fun EditorSheet(editing: Editing, state: UiState, model: MainViewModel, onRemind
             for (file in editing.attachments) {
                 Row(
                     Modifier.fillMaxWidth()
-                        .clickable(enabled = file.id !in fetching) {
+                        .clickable(enabled = file.id !in fetching && !(gathering && file.localPath == null)) {
                             // An image or a PDF is shown here (R54); the rest is for another app.
                             fun show(file: Attachment) {
                                 if (previewKind(file.mime) != null) viewing = file.id else openAttachment(context, file)
@@ -387,7 +467,7 @@ fun EditorSheet(editing: Editing, state: UiState, model: MainViewModel, onRemind
                         Text(
                             when {
                                 file.localPath != null -> android.text.format.Formatter.formatShortFileSize(context, file.size.toLong())
-                                file.id in fetching -> str(R.string.downloading)
+                                file.id in fetching || gathering -> str(R.string.downloading)
                                 file.id in fetchFailed -> str(R.string.download_failed)
                                 else -> str(R.string.not_downloaded)
                             },
@@ -402,6 +482,10 @@ fun EditorSheet(editing: Editing, state: UiState, model: MainViewModel, onRemind
                                 DropdownMenuItem(text = { Text(str(R.string.save_to)) }, onClick = { fileMenu = null; save(file) })
                                 DropdownMenuItem(text = { Text(str(R.string.share)) }, onClick = { fileMenu = null; shareAttachment(context, file) })
                                 DropdownMenuItem(text = { Text(str(R.string.open_in_another_app)) }, onClick = { fileMenu = null; openAttachment(context, file) })
+                                if (several) {
+                                    DropdownMenuItem(text = { Text(str(R.string.save_all_to)) }, onClick = { fileMenu = null; saveAll.launch(null) })
+                                    DropdownMenuItem(text = { Text(str(R.string.share_all)) }, onClick = { fileMenu = null; shareAll() })
+                                }
                             }
                         }
                     }
