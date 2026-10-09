@@ -111,6 +111,21 @@ struct DraftEditor: View {
             .accessibilityHidden(true)
         }
         .onAppear { titleFocused = true }
+        // #152: in the main window the request above is sometimes dropped after the quick-entry panel was used,
+        // and the keyboard is left with the window itself. The card looks again and asks once more.
+        .task {
+            for wait in [50, 100, 200, 400] {
+                try? await _Concurrency.Task.sleep(for: .milliseconds(wait))
+                if _Concurrency.Task.isCancelled { return }
+                guard !footer, Keyboard.text == nil, chip == nil, popover == nil else { continue }
+                #if DEBUG
+                print("debug: the title of the new-task card asks for the keyboard again")
+                #endif
+                titleFocused = false
+                try? await _Concurrency.Task.sleep(for: .milliseconds(10))
+                titleFocused = true
+            }
+        }
         .onExitCommand(perform: cancel)
         .onChange(of: popover) { _, now in held = now == nil ? nil : sides }
         .onChange(of: pasteShown) { _, _ in onResize() }
