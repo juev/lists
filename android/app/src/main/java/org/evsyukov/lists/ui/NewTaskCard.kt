@@ -129,6 +129,21 @@ fun Store.createFrom(context: Context, draft: TaskDraft, parentId: String? = nul
     return task(task.id)
 }
 
+/** The most lines the note of the compact card takes before it scrolls inside itself (R64). */
+const val COMPACT_NOTE_LINES = 5
+
+/**
+ * The least and the most lines of the note (R64). Compact, it grows with its
+ * text up to a bound, so that the title and the icons stay above the keyboard.
+ * Expanded, it has no bound and the card scrolls; in landscape the keyboard
+ * leaves a strip, and a tall empty note would push the fields far down.
+ */
+internal fun noteLines(full: Boolean, landscape: Boolean): IntRange = when {
+    !full -> 1..COMPACT_NOTE_LINES
+    landscape -> 2..Int.MAX_VALUE
+    else -> 4..Int.MAX_VALUE
+}
+
 /** A repeat rule as plain values: the record the core hands over is not something a saved state can hold. */
 private val repeatSaver = listSaver<Repeat?, Any?>(
     save = { rule ->
@@ -272,9 +287,8 @@ fun NewTaskCard(
                 trailingIcon = if (taken != null && note == taken) {
                     { IconButton(onClick = { note = "" }) { Icon(Icons.Outlined.Close, str(R.string.remove_clipboard_note)) } }
                 } else null,
-                // In landscape the keyboard leaves a strip: a tall note would push the fields far down.
-                minLines = if (!full) 1 else if (landscape) 2 else 4,
-                maxLines = if (full) Int.MAX_VALUE else 1,
+                minLines = noteLines(full, landscape).first,
+                maxLines = noteLines(full, landscape).last,
                 textStyle = MaterialTheme.typography.bodyMedium,
                 colors = transparentField(),
                 keyboardOptions = SentenceKeyboard,
