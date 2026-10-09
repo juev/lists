@@ -540,6 +540,11 @@ impl Store {
     }
 }
 
+pub(crate) fn new_device_id() -> String {
+    let simple = Uuid::now_v7().simple().to_string();
+    simple[simple.len() - DEVICE_ID_LEN..].to_string()
+}
+
 #[uniffi::export]
 impl Store {
     /// Opens (creating if needed) the database in `dir`.
@@ -552,8 +557,7 @@ impl Store {
         let device = match db::meta_get(&conn, "device")? {
             Some(d) => d,
             None => {
-                let simple = Uuid::now_v7().simple().to_string();
-                let d = simple[simple.len() - DEVICE_ID_LEN..].to_string();
+                let d = new_device_id();
                 db::meta_set(&conn, "device", &d)?;
                 d
             }

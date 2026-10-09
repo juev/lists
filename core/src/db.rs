@@ -163,6 +163,15 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         CREATE TABLE IF NOT EXISTS outbox (seq INTEGER PRIMARY KEY, body BLOB NOT NULL, changes INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS blobs_uploaded (sha256 TEXT PRIMARY KEY) WITHOUT ROWID;
 
+        -- S38: what this device held when it was told to put its data over the storage's
+        CREATE TABLE IF NOT EXISTS kept (
+            kind  TEXT NOT NULL,
+            id    TEXT NOT NULL,
+            field TEXT NOT NULL,
+            value TEXT NOT NULL,
+            PRIMARY KEY (kind, id, field)
+        ) WITHOUT ROWID;
+
         -- CalDAV bookkeeping: what the server held when it was last read
         CREATE TABLE IF NOT EXISTS caldav_calendars (href TEXT PRIMARY KEY, list_id TEXT NOT NULL, sent TEXT) WITHOUT ROWID;
         CREATE TABLE IF NOT EXISTS caldav_items (

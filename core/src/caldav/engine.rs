@@ -502,6 +502,17 @@ pub fn run(store: &Store, url: &str, user: &str, password: &str) -> Result<SyncR
     sync(store, &client, calendars)
 }
 
+/// C28: whether a calendar of the collection holds an object. Only reads.
+pub fn holds_objects(url: &str, user: &str, password: &str) -> Result<bool> {
+    let client = Client::connect(url, user, password)?;
+    for calendar in client.calendars()?.unwrap_or_default() {
+        if !client.list(&calendar.href)?.is_empty() {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 fn sync(store: &Store, client: &Client, calendars: Vec<Calendar>) -> Result<SyncReport> {
     let mut report = SyncReport::default();
 

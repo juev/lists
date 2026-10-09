@@ -20,15 +20,21 @@ use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::db::{self, is_sha256, Change, Touched};
+use crate::db::{self, is_sha256, Change, Touched, KIND_ATTACHMENT, KIND_FILTER, KIND_LIST, KIND_TASK};
 use crate::error::{AppError, Result};
-use crate::model::{Attachment, AttachmentReport, ConnectionCheck, SyncConfig, SyncReport, SyncStatus};
-use crate::store::{hex, Store};
+use crate::hlc::Clock;
+use crate::model::{Attachment, AttachmentReport, ConnectionCheck, SyncConfig, SyncReport, SyncStatus, INBOX_ID};
+use crate::store::{hex, new_device_id, Store};
 use remote::{DirRemote, Remote};
 use webdav::WebDavRemote;
 
 const ROOT: &str = "lists/v1";
 const FORMAT: u32 = 1;
+
+/// Set while this device is to put its data over the storage's (S38).
+const REPLACE: &str = "replace_remote";
+/// What the registers looked like when `kept` was filled (S39).
+const KEPT_AT: &str = "replace_kept_at";
 
 #[derive(Serialize, Deserialize)]
 struct Vault {
@@ -486,6 +492,10 @@ impl Store {
     /// left to `sync_attachments_with` (S34).
     pub fn sync_with(&self, remote: &dyn Remote) -> Result<SyncReport> {
         let _running = self.sync_lock.lock().unwrap_or_else(|p| p.into_inner());
+        self.replacing(|| self.run_with(remote))
+    }
+
+    fn run_with(&self, remote: &dyn Remote) -> Result<SyncReport> {
         let me = self.device_id();
         let mut report = SyncReport::default();
 
@@ -526,6 +536,103 @@ impl Store {
         Ok(report)
     }
 
+    /// Count and greatest stamp of the registers: the same while nothing was written.
+    fn registers_mark(conn: &rusqlite::Connection) -> Result<String> {
+        Ok(conn.query_row(
+            "SELECT count(*) || ':' || coalesce(max(stamp), '') FROM fields",
+            [],
+            |r| r.get(0),
+        )?)
+    }
+
+    /// S38, S39: a run that also puts this device's data over the storage's
+    /// when that was asked for. The caller holds the sync lock.
+    fn replacing(&self, run: impl Fn() -> Result<SyncReport>) -> Result<SyncReport> {
+        if db::meta_get(&self.lock().conn, REPLACE)?.is_none() {
+            return run();
+        }
+        {
+            let mut inner = self.lock();
+            let tx = inner
+                .conn
+                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+            if db::meta_get(&tx, KEPT_AT)?.is_none() {
+                tx.execute_batch(
+                    "DELETE FROM kept; INSERT INTO kept (kind, id, field, value) SELECT kind, id, field, value FROM fields;",
+                )?;
+                db::meta_set(&tx, KEPT_AT, &Self::registers_mark(&tx)?)?;
+            }
+            tx.commit()?;
+        }
+        let first = match run() {
+            Ok(report) => report,
+            Err(e) => {
+                // Nothing was taken in and nothing was edited: the next attempt
+                // remembers anew, with whatever is edited until then.
+                let inner = self.lock();
+                if db::meta_get(&inner.conn, KEPT_AT)? == Some(Self::registers_mark(&inner.conn)?) {
+                    inner.conn.execute("DELETE FROM kept", [])?;
+                    db::meta_del(&inner.conn, KEPT_AT)?;
+                }
+                return Err(e);
+            }
+        };
+        self.put_back()?;
+        let second = run()?;
+        Ok(SyncReport {
+            pulled: first.pulled + second.pulled,
+            pushed: first.pushed + second.pushed,
+            blobs_uploaded: first.blobs_uploaded + second.blobs_uploaded,
+            blobs_downloaded: first.blobs_downloaded + second.blobs_downloaded,
+        })
+    }
+
+    /// S38: gives every register the value this device remembered, under a new
+    /// stamp, and sends what it did not have to the trash.
+    fn put_back(&self) -> Result<()> {
+        self.write(|w| {
+            let rows: Vec<(String, String, String, Option<String>)> = {
+                let mut stmt = w.tx.prepare(
+                    "SELECT f.kind, f.id, f.field, k.value FROM fields f
+                     LEFT JOIN kept k ON k.kind = f.kind AND k.id = f.id AND k.field = f.field
+                     ORDER BY f.kind, f.id, f.field",
+                )?;
+                let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?;
+                rows.collect::<rusqlite::Result<_>>()?
+            };
+            let known: BTreeSet<(String, String)> = {
+                let mut stmt = w.tx.prepare("SELECT DISTINCT kind, id FROM kept")?;
+                let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+                rows.collect::<rusqlite::Result<_>>()?
+            };
+            // What has a trash to go to; the inbox and the shared settings cannot be deleted.
+            let has_trash = |kind: &str, id: &str| match kind {
+                KIND_TASK | KIND_ATTACHMENT | KIND_FILTER => true,
+                KIND_LIST => id != INBOX_ID,
+                _ => false,
+            };
+            let mut gone: BTreeSet<(String, String)> = BTreeSet::new();
+            for (kind, id, field, kept) in rows {
+                match kept {
+                    Some(value) => {
+                        let value = serde_json::from_str(&value).unwrap_or(serde_json::Value::Null);
+                        w.set(&kind, &id, &field, value)?;
+                    }
+                    None if !known.contains(&(kind.clone(), id.clone())) && has_trash(&kind, &id) => {
+                        gone.insert((kind, id));
+                    }
+                    None => w.set(&kind, &id, &field, serde_json::Value::Null)?,
+                }
+            }
+            for (kind, id) in gone {
+                w.set(&kind, &id, "deleted", serde_json::Value::Bool(true))?;
+            }
+            w.tx.execute("DELETE FROM kept", [])?;
+            db::meta_del(w.tx, REPLACE)?;
+            db::meta_del(w.tx, KEPT_AT)
+        })
+    }
+
     fn password(&self, user: &str) -> Result<String> {
         match self.sync_password.lock().unwrap_or_else(|p| p.into_inner()).clone() {
             Some(password) => Ok(password),
@@ -563,7 +670,8 @@ impl Store {
             }
             SyncConfig::CalDav { url, user } => {
                 let _running = self.sync_lock.lock().unwrap_or_else(|p| p.into_inner());
-                crate::caldav::engine::run(self, &url, &user, &self.password(&user)?)?
+                let password = self.password(&user)?;
+                self.replacing(|| crate::caldav::engine::run(self, &url, &user, &password))?
             }
         }))
     }
@@ -659,13 +767,83 @@ impl Store {
         // and the first run publishes a snapshot so that readers there can start from it.
         tx.execute_batch(
             "DELETE FROM peers; DELETE FROM outbox; DELETE FROM blobs_uploaded;
-             DELETE FROM caldav_calendars; DELETE FROM caldav_items;
-             DELETE FROM meta WHERE key IN ('sync_ok', 'sync_error', 'caldav_filters_sent', 'caldav_home', 'push_published');
+             DELETE FROM caldav_calendars; DELETE FROM caldav_items; DELETE FROM kept;
+             DELETE FROM meta WHERE key IN ('sync_ok', 'sync_error', 'caldav_filters_sent', 'caldav_home', 'push_published',
+                                            'replace_remote', 'replace_kept_at');
              UPDATE fields SET dirty = 1;",
         )?;
         db::meta_set(&tx, "force_snapshot", "1")?;
         tx.commit()?;
         Ok(())
+    }
+
+    /// S36: whether both this device and the storage at `config` hold data, so
+    /// that the person has a side to choose. Only reads, here and there.
+    pub fn sync_conflict(&self, config: SyncConfig, password: String) -> Result<bool> {
+        let local: bool = self.lock().conn.query_row(
+            "SELECT EXISTS (SELECT 1 FROM tasks WHERE deleted = 0 AND purged = 0)
+                 OR EXISTS (SELECT 1 FROM lists WHERE deleted = 0 AND id != ?1)",
+            [INBOX_ID],
+            |r| r.get(0),
+        )?;
+        if !local {
+            return Ok(false);
+        }
+        let files = |remote: &dyn Remote| -> Result<bool> {
+            for dir in ["log", "snap"] {
+                let names = remote.list(&format!("{ROOT}/{dir}"))?;
+                if names.iter().any(|name| parse_name(name, DATA).is_some()) {
+                    return Ok(true);
+                }
+            }
+            Ok(false)
+        };
+        match config {
+            SyncConfig::Off => Ok(false),
+            SyncConfig::Folder { path } => files(&DirRemote::new(path)),
+            SyncConfig::WebDav { url, user } => files(&WebDavRemote::new(&url, &user, &password)?),
+            SyncConfig::CalDav { url, user } => crate::caldav::engine::holds_objects(&url, &user, &password),
+        }
+    }
+
+    /// S37: drops what this device holds and makes it a new device, so that the
+    /// next run reads the storage from the start. Changes not uploaded yet are
+    /// lost; attachment content on disk stays.
+    pub fn replace_local_with_remote(&self) -> Result<()> {
+        let _running = self.sync_lock.lock().unwrap_or_else(|p| p.into_inner());
+        let mut inner = self.lock();
+        let inner = &mut *inner;
+        let last = db::max_stamp(&inner.conn)?;
+        let device = new_device_id();
+        let tx = inner
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        tx.execute_batch(
+            "DELETE FROM fields; DELETE FROM kept;
+             DELETE FROM tasks; DELETE FROM task_tags; DELETE FROM attachments; DELETE FROM filters; DELETE FROM lists;
+             INSERT INTO lists (id) VALUES ('inbox');
+             DELETE FROM peers; DELETE FROM outbox; DELETE FROM blobs_uploaded;
+             DELETE FROM caldav_calendars; DELETE FROM caldav_items;
+             DELETE FROM meta WHERE key IN ('sync_ok', 'sync_error', 'caldav_filters_sent', 'caldav_home', 'push_published',
+                                            'own_seq', 'force_snapshot', 'replace_remote', 'replace_kept_at');",
+        )?;
+        db::meta_set(&tx, "device", &device)?;
+        tx.commit()?;
+        // The clock stays ahead of every stamp this device has issued.
+        inner.clock = Clock::new(&device, last.as_deref());
+        *self.storage_seen.lock().unwrap_or_else(|p| p.into_inner()) = None;
+        *self.folder_seen.lock().unwrap_or_else(|p| p.into_inner()) = None;
+        Ok(())
+    }
+
+    /// S38: asks the next run to put the data of this device over what the
+    /// storage and the other devices hold. Until a run gets through, the
+    /// request waits (S39).
+    pub fn replace_remote_with_local(&self) -> Result<()> {
+        let inner = self.lock();
+        inner.conn.execute("DELETE FROM kept", [])?;
+        db::meta_del(&inner.conn, KEPT_AT)?;
+        db::meta_set(&inner.conn, REPLACE, "1")
     }
 
     /// For sync through a folder: whether a file appeared in its log or left
