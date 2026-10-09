@@ -4,6 +4,7 @@
 
 uniffi::setup_scaffolding!();
 
+mod backup;
 mod caldav;
 mod db;
 mod error;
@@ -18,6 +19,7 @@ mod recur;
 mod store;
 pub mod sync;
 
+pub use backup::{Backup, BackupSettings};
 pub use error::{AppError, Result};
 pub use import::ImportReport;
 pub use markdown::{
