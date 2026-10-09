@@ -141,14 +141,13 @@ final class AppModel {
 
     private static func storedSidebarShow() -> [String: SidebarShow] {
         let defaults = UserDefaults.standard
-        if let stored = defaults.dictionary(forKey: "sidebarShow") as? [String: String] {
-            return stored.compactMapValues(SidebarShow.init(rawValue:))
-        }
-        // The setting this one replaced (R47): a Mac that had Completed switched off keeps it off.
-        if defaults.object(forKey: "showCompletedView") != nil, !defaults.bool(forKey: "showCompletedView") {
-            return ["completed": .never, "wontDo": .never]
-        }
-        return [:]
+        // The setting this one replaced (R47): a Mac that had Completed switched off keeps it off,
+        // until the two views are given a choice of their own. Only the views that were chosen are stored.
+        let old = defaults.object(forKey: "showCompletedView") != nil && !defaults.bool(forKey: "showCompletedView")
+        var show: [String: SidebarShow] = old ? ["completed": .never, "wontDo": .never] : [:]
+        let stored = (defaults.dictionary(forKey: "sidebarShow") as? [String: String]) ?? [:]
+        show.merge(stored.compactMapValues(SidebarShow.init(rawValue:))) { _, chosen in chosen }
+        return show
     }
 
     func sidebarShow(_ scope: Scope) -> SidebarShow {
