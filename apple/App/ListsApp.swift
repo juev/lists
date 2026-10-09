@@ -132,9 +132,7 @@ struct AppCommands: Commands {
             scope(L("Upcoming"), .upcoming, "3")
             scope(L("All"), .all, "4")
             scope(L("Completed"), .completed, "5")
-                .disabled(!model.showCompletedView)
             scope(L("Won't do"), .wontDo, "6")
-                .disabled(!model.showCompletedView)
             Divider()
             Button(L("Sync now")) { model.syncNow() }
                 .keyboardShortcut("r")
@@ -144,8 +142,9 @@ struct AppCommands: Commands {
 
     private func scope(_ title: String, _ scope: Scope, _ key: KeyEquivalent) -> some View {
         Button(title) {
-            // The menu may not have caught up with the setting yet.
-            if scope == .completed || scope == .wontDo, !model.showCompletedView { return }
+            // R93: a view without a row is not gone to. The item is not disabled for it: one that is
+            // disabled when the app starts stays so after the row comes back.
+            if !model.showsInSidebar(scope) { return }
             model.search = ""
             model.searchOpen = false
             model.scope = scope
@@ -277,7 +276,11 @@ struct SettingsView: View {
             }
             Section(L("Sidebar")) {
                 @Bindable var model = model
-                Toggle(L("Show Completed in the sidebar"), isOn: $model.showCompletedView)
+                ForEach(Scope.builtins, id: \.self) { scope in
+                    Picker(scope.builtinTitle, selection: Binding(get: { model.sidebarShow(scope) }, set: { model.setSidebarShow(scope, $0) })) {
+                        ForEach(SidebarShow.allCases, id: \.self) { Text($0.title).tag($0) }
+                    }
+                }
             }
             Section(L("Calendar events")) {
                 @Bindable var model = model

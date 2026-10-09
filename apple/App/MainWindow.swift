@@ -170,6 +170,59 @@ extension AppModel {
     }
 }
 
+/// When an item of the sidebar is shown (R93).
+enum SidebarShow: String, CaseIterable {
+    case always, filled, never
+
+    var title: String {
+        switch self {
+        case .always: L("Always")
+        case .filled: L("When it holds something")
+        case .never: L("Never")
+        }
+    }
+
+    /// What a Mac starts with: the views of every day always, the rest when they hold something.
+    static func initial(_ scope: Scope) -> SidebarShow {
+        switch scope {
+        case .completed, .wontDo, .trash: .filled
+        default: .always
+        }
+    }
+}
+
+extension Scope {
+    /// The built-in views in the order of the sidebar.
+    static let builtins: [Scope] = [.inbox, .today, .upcoming, .all, .completed, .wontDo, .trash]
+
+    /// The name a built-in view is kept under in the settings; nil for a list, a tag, a project or a filter.
+    var builtinName: String? {
+        switch self {
+        case .inbox: "inbox"
+        case .today: "today"
+        case .upcoming: "upcoming"
+        case .all: "all"
+        case .completed: "completed"
+        case .wontDo: "wontDo"
+        case .trash: "trash"
+        default: nil
+        }
+    }
+
+    var builtinTitle: String {
+        switch self {
+        case .inbox: L("Inbox")
+        case .today: L("Today")
+        case .upcoming: L("Upcoming")
+        case .all: L("All")
+        case .completed: L("Completed")
+        case .wontDo: L("Won't do")
+        case .trash: L("Trash")
+        default: ""
+        }
+    }
+}
+
 extension Scope {
     /// The icon of a built-in view: filled, in a colour of its own that no list decides (R79).
     var viewIcon: (symbol: String, tint: Color)? {
@@ -195,19 +248,18 @@ struct Sidebar: View {
         @Bindable var model = model
         List(selection: Binding<Scope?>(get: { model.scope }, set: { if let s = $0 { model.search = ""; model.searchOpen = false; model.scope = s } })) {
             Section {
-                row(.inbox, L("Inbox"), count: model.counts.inbox)
-                    .dropDestination(for: String.self) { ids, _ in moveTasks(ids, to: "inbox") }
-                    .contextMenu { Button(L("Configure…")) { editing = model.list("inbox") } }
-                row(.today, L("Today"), count: model.counts.today, alert: model.counts.overdue > 0)
-                row(.upcoming, L("Upcoming"), count: model.counts.upcoming)
-                row(.all, L("All"), count: 0)
-                if model.showCompletedView {
-                    row(.completed, L("Completed"), count: 0)
-                    row(.wontDo, L("Won't do"), count: 0)
+                // R93: each built-in view has a row always, while it holds something, or never.
+                if model.showsInSidebar(.inbox) {
+                    row(.inbox, L("Inbox"), count: model.counts.inbox)
+                        .dropDestination(for: String.self) { ids, _ in moveTasks(ids, to: "inbox") }
+                        .contextMenu { Button(L("Configure…")) { editing = model.list("inbox") } }
                 }
-                if model.counts.trash > 0 {
-                    row(.trash, L("Trash"), count: model.counts.trash)
-                }
+                if model.showsInSidebar(.today) { row(.today, L("Today"), count: model.counts.today, alert: model.counts.overdue > 0) }
+                if model.showsInSidebar(.upcoming) { row(.upcoming, L("Upcoming"), count: model.counts.upcoming) }
+                if model.showsInSidebar(.all) { row(.all, L("All"), count: 0) }
+                if model.showsInSidebar(.completed) { row(.completed, L("Completed"), count: 0) }
+                if model.showsInSidebar(.wontDo) { row(.wontDo, L("Won't do"), count: 0) }
+                if model.showsInSidebar(.trash) { row(.trash, L("Trash"), count: model.counts.trash) }
             }
             Section {
                 ForEach(model.lists.filter { $0.id != "inbox" && !$0.archived }, id: \.id) { list in
