@@ -791,7 +791,7 @@ fun RepeatDialog(value: Repeat?, onPick: (Repeat?) -> Unit, onDismiss: () -> Uni
  * is not rebuilt, and the field does not lose the cursor, when the keyboard opens.
  */
 @Composable
-private fun FormDialog(
+internal fun FormDialog(
     title: String,
     onDismiss: () -> Unit,
     confirmButton: @Composable () -> Unit,
@@ -1102,6 +1102,8 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
                 SwitchRow(str(R.string.parse_title), parse) { parse = it; EntryPrefs.setParse(context, it) }
                 SwitchRow(str(R.string.clipboard_note), clipboard) { clipboard = it; EntryPrefs.setClipboard(context, it) }
                 HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                SettingRow(str(R.string.backups), str(R.string.backups_open)) { choosing = "backups" }
+                HorizontalDivider(Modifier.padding(vertical = 8.dp))
                 Text(str(R.string.sync), style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(bottom = 4.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     for ((value, label) in listOf("off" to str(R.string.sync_off), "webdav" to "WebDAV", "caldav" to "CalDAV")) {
@@ -1239,6 +1241,7 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
         }
     }
     when (choosing) {
+        "backups" -> BackupsDialog(model) { choosing = null }
         "appearance" -> ChoiceDialog(str(R.string.appearance), lookLabels, LookPrefs.choices.indexOf(LookPrefs.appearance(context)), { choosing = null }) {
             LookPrefs.setAppearance(context, LookPrefs.choices[it])
         }
@@ -1283,7 +1286,7 @@ private fun keepDoneLabel(keep: KeepDone): String = when (keep) {
 }
 
 @Composable
-private fun SettingRow(label: String, value: String, onClick: () -> Unit) {
+internal fun SettingRow(label: String, value: String, onClick: () -> Unit) {
     Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(label, Modifier.weight(1f))
         Text(value, color = MaterialTheme.colorScheme.primary)
