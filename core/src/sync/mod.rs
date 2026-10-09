@@ -20,10 +20,12 @@ use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::db::{self, is_sha256, Change, Touched, KIND_ATTACHMENT, KIND_FILTER, KIND_LIST, KIND_TASK};
+use crate::db::{self, is_sha256, Change, Touched, KIND_ATTACHMENT, KIND_FILTER, KIND_LIST, KIND_SETTINGS, KIND_TASK};
 use crate::error::{AppError, Result};
 use crate::hlc::Clock;
-use crate::model::{Attachment, AttachmentReport, ConnectionCheck, SyncConfig, SyncReport, SyncStatus, INBOX_ID};
+use crate::model::{
+    Attachment, AttachmentReport, ConnectionCheck, SyncConfig, SyncReport, SyncSide, SyncStatus, INBOX_ID,
+};
 use crate::store::{hex, new_device_id, Store};
 use remote::{DirRemote, Remote};
 use webdav::WebDavRemote;
@@ -654,6 +656,9 @@ impl Store {
 
     /// Runs the configured kind of sync; `None` when sync is off.
     fn run_configured(&self) -> Result<Option<SyncReport>> {
+        // The settings are read under the lock: a run never starts with a
+        // storage that was replaced while it waited (S36).
+        let _running = self.sync_lock.lock().unwrap_or_else(|p| p.into_inner());
         let config = self.sync_config()?;
         Ok(Some(match config {
             SyncConfig::Off => return Ok(None),
@@ -661,7 +666,7 @@ impl Store {
                 let Some(remote) = self.file_storage()? else {
                     return Ok(None);
                 };
-                let report = self.sync_with(remote.as_ref())?;
+                let report = self.replacing(|| self.run_with(remote.as_ref()))?;
                 if matches!(config, SyncConfig::Folder { .. }) {
                     // What this run wrote is not news to it.
                     self.folder_changed();
@@ -669,11 +674,91 @@ impl Store {
                 report
             }
             SyncConfig::CalDav { url, user } => {
-                let _running = self.sync_lock.lock().unwrap_or_else(|p| p.into_inner());
                 let password = self.password(&user)?;
                 self.replacing(|| crate::caldav::engine::run(self, &url, &user, &password))?
             }
         }))
+    }
+
+    /// S37 without the lock: the caller holds it.
+    fn drop_local(&self) -> Result<()> {
+        // Over CalDAV the shared settings do not travel (S32): they are this device's own.
+        let own_settings = matches!(self.sync_config()?, SyncConfig::CalDav { .. });
+        let mut inner = self.lock();
+        let inner = &mut *inner;
+        let last = db::max_stamp(&inner.conn)?;
+        let device = new_device_id();
+        let tx = inner
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        if own_settings {
+            tx.execute("DELETE FROM fields WHERE kind != ?1", [KIND_SETTINGS])?;
+        } else {
+            tx.execute("DELETE FROM fields", [])?;
+        }
+        tx.execute_batch(
+            "DELETE FROM kept;
+             DELETE FROM tasks; DELETE FROM task_tags; DELETE FROM attachments; DELETE FROM filters; DELETE FROM lists;
+             INSERT INTO lists (id) VALUES ('inbox');
+             DELETE FROM peers; DELETE FROM outbox; DELETE FROM blobs_uploaded;
+             DELETE FROM caldav_calendars; DELETE FROM caldav_items;
+             DELETE FROM meta WHERE key IN ('sync_ok', 'sync_error', 'caldav_filters_sent', 'caldav_home', 'push_published',
+                                            'own_seq', 'force_snapshot', 'replace_remote', 'replace_kept_at');",
+        )?;
+        db::meta_set(&tx, "device", &device)?;
+        tx.commit()?;
+        // The clock stays ahead of every stamp this device has issued.
+        inner.clock = Clock::new(&device, last.as_deref());
+        *self.storage_seen.lock().unwrap_or_else(|p| p.into_inner()) = None;
+        *self.folder_seen.lock().unwrap_or_else(|p| p.into_inner()) = None;
+        Ok(())
+    }
+
+    /// S38 without the lock: the caller holds it.
+    fn ask_to_replace_remote(&self) -> Result<()> {
+        let inner = self.lock();
+        inner.conn.execute("DELETE FROM kept", [])?;
+        db::meta_del(&inner.conn, KEPT_AT)?;
+        db::meta_set(&inner.conn, REPLACE, "1")
+    }
+
+    fn store_config(&self, config: SyncConfig) -> Result<()> {
+        if config == self.sync_config()? {
+            return Ok(());
+        }
+        let stored = match config {
+            SyncConfig::Off => None,
+            SyncConfig::Folder { path } => Some(StoredConfig::Folder { path }),
+            SyncConfig::WebDav { url, user } => {
+                WebDavRemote::new(&url, &user, "")?;
+                Some(StoredConfig::Webdav { url, user })
+            }
+            SyncConfig::CalDav { url, user } => {
+                crate::caldav::client::Client::validate(&url)?;
+                Some(StoredConfig::Caldav { url, user })
+            }
+        };
+        let mut inner = self.lock();
+        let tx = inner
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        match stored {
+            Some(config) => db::meta_set(&tx, "sync", &serde_json::to_string(&config)?)?,
+            None => db::meta_del(&tx, "sync")?,
+        }
+        // A different storage knows nothing of this device. Log numbering goes on
+        // (a storage seen before must not get a second file with an old number),
+        // and the first run publishes a snapshot so that readers there can start from it.
+        tx.execute_batch(
+            "DELETE FROM peers; DELETE FROM outbox; DELETE FROM blobs_uploaded;
+             DELETE FROM caldav_calendars; DELETE FROM caldav_items; DELETE FROM kept;
+             DELETE FROM meta WHERE key IN ('sync_ok', 'sync_error', 'caldav_filters_sent', 'caldav_home', 'push_published',
+                                            'replace_remote', 'replace_kept_at');
+             UPDATE fields SET dirty = 1;",
+        )?;
+        db::meta_set(&tx, "force_snapshot", "1")?;
+        tx.commit()?;
+        Ok(())
     }
 }
 
@@ -739,42 +824,22 @@ impl Store {
     /// Stores where to sync. Switching storage keeps local data; the next run
     /// merges it with whatever the new storage holds.
     pub fn set_sync_config(&self, config: SyncConfig) -> Result<()> {
-        if config == self.sync_config()? {
-            return Ok(());
+        self.join_storage(config, SyncSide::Merge)
+    }
+
+    /// Stores where to sync and which side to keep there (S36). Replacing a
+    /// side waits for a run that is under way and lets none start in between,
+    /// so it may take as long as that run: call it off the main thread.
+    pub fn join_storage(&self, config: SyncConfig, side: SyncSide) -> Result<()> {
+        if side == SyncSide::Merge {
+            return self.store_config(config);
         }
-        let stored = match config {
-            SyncConfig::Off => None,
-            SyncConfig::Folder { path } => Some(StoredConfig::Folder { path }),
-            SyncConfig::WebDav { url, user } => {
-                WebDavRemote::new(&url, &user, "")?;
-                Some(StoredConfig::Webdav { url, user })
-            }
-            SyncConfig::CalDav { url, user } => {
-                crate::caldav::client::Client::validate(&url)?;
-                Some(StoredConfig::Caldav { url, user })
-            }
-        };
-        let mut inner = self.lock();
-        let tx = inner
-            .conn
-            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        match stored {
-            Some(config) => db::meta_set(&tx, "sync", &serde_json::to_string(&config)?)?,
-            None => db::meta_del(&tx, "sync")?,
+        let _running = self.sync_lock.lock().unwrap_or_else(|p| p.into_inner());
+        self.store_config(config)?;
+        match side {
+            SyncSide::Storage => self.drop_local(),
+            _ => self.ask_to_replace_remote(),
         }
-        // A different storage knows nothing of this device. Log numbering goes on
-        // (a storage seen before must not get a second file with an old number),
-        // and the first run publishes a snapshot so that readers there can start from it.
-        tx.execute_batch(
-            "DELETE FROM peers; DELETE FROM outbox; DELETE FROM blobs_uploaded;
-             DELETE FROM caldav_calendars; DELETE FROM caldav_items; DELETE FROM kept;
-             DELETE FROM meta WHERE key IN ('sync_ok', 'sync_error', 'caldav_filters_sent', 'caldav_home', 'push_published',
-                                            'replace_remote', 'replace_kept_at');
-             UPDATE fields SET dirty = 1;",
-        )?;
-        db::meta_set(&tx, "force_snapshot", "1")?;
-        tx.commit()?;
-        Ok(())
     }
 
     /// S36: whether both this device and the storage at `config` hold data, so
@@ -811,39 +876,15 @@ impl Store {
     /// lost; attachment content on disk stays.
     pub fn replace_local_with_remote(&self) -> Result<()> {
         let _running = self.sync_lock.lock().unwrap_or_else(|p| p.into_inner());
-        let mut inner = self.lock();
-        let inner = &mut *inner;
-        let last = db::max_stamp(&inner.conn)?;
-        let device = new_device_id();
-        let tx = inner
-            .conn
-            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        tx.execute_batch(
-            "DELETE FROM fields; DELETE FROM kept;
-             DELETE FROM tasks; DELETE FROM task_tags; DELETE FROM attachments; DELETE FROM filters; DELETE FROM lists;
-             INSERT INTO lists (id) VALUES ('inbox');
-             DELETE FROM peers; DELETE FROM outbox; DELETE FROM blobs_uploaded;
-             DELETE FROM caldav_calendars; DELETE FROM caldav_items;
-             DELETE FROM meta WHERE key IN ('sync_ok', 'sync_error', 'caldav_filters_sent', 'caldav_home', 'push_published',
-                                            'own_seq', 'force_snapshot', 'replace_remote', 'replace_kept_at');",
-        )?;
-        db::meta_set(&tx, "device", &device)?;
-        tx.commit()?;
-        // The clock stays ahead of every stamp this device has issued.
-        inner.clock = Clock::new(&device, last.as_deref());
-        *self.storage_seen.lock().unwrap_or_else(|p| p.into_inner()) = None;
-        *self.folder_seen.lock().unwrap_or_else(|p| p.into_inner()) = None;
-        Ok(())
+        self.drop_local()
     }
 
     /// S38: asks the next run to put the data of this device over what the
     /// storage and the other devices hold. Until a run gets through, the
     /// request waits (S39).
     pub fn replace_remote_with_local(&self) -> Result<()> {
-        let inner = self.lock();
-        inner.conn.execute("DELETE FROM kept", [])?;
-        db::meta_del(&inner.conn, KEPT_AT)?;
-        db::meta_set(&inner.conn, REPLACE, "1")
+        let _running = self.sync_lock.lock().unwrap_or_else(|p| p.into_inner());
+        self.ask_to_replace_remote()
     }
 
     /// For sync through a folder: whether a file appeared in its log or left
