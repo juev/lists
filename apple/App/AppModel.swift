@@ -244,8 +244,9 @@ final class AppModel {
         }
         reloadEvents()
         timer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.syncNow() }
+            MainActor.assumeIsolated { self?.syncNow(); self?.backupIfDue() }
         }
+        backupIfDue()
         watchSyncFolder()
         listenForNudges()
     }
@@ -791,6 +792,12 @@ final class AppModel {
         folderWatcher.watch(log) { [weak self] in
             MainActor.assumeIsolated { self?.scheduleSync() }
         }
+    }
+
+    /// R88: the automatic backup is looked at when the app starts and every minute after, with sync on or off.
+    private func backupIfDue() {
+        guard let store else { return }
+        _Concurrency.Task.detached(priority: .utility) { _ = try? store.backupIfDue() }
     }
 
     func syncNow() {
