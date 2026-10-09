@@ -21,6 +21,8 @@ struct NotesTextView: NSViewRepresentable {
     var onToggle: () -> Void = {}
     /// Tab was pressed: the keyboard moves on to the chips of the card (R62). ⌥Tab still types a tab.
     var onTab: (() -> Void)?
+    /// The room the view keeps while its text is shorter, in lines: the quick-entry panel keeps three (R82).
+    var minLines = 1
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -64,7 +66,7 @@ struct NotesTextView: NSViewRepresentable {
         container.containerSize = NSSize(width: width, height: .greatestFiniteMagnitude)
         layout.ensureLayout(for: container)
         let line = layout.defaultLineHeight(for: view.baseFont)
-        return CGSize(width: width, height: max(ceil(layout.usedRect(for: container).height), ceil(line)))
+        return CGSize(width: width, height: max(ceil(layout.usedRect(for: container).height), ceil(line) * CGFloat(minLines)))
     }
 
     /// Takes text only: a dropped file belongs to the card around the notes,

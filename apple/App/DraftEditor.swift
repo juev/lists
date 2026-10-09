@@ -27,6 +27,23 @@ struct TaskDraft: Equatable {
     var isBlank: Bool { title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 }
 
+/// A button of the strip of the quick-entry panel: a capsule with bold white text (R82).
+private struct StripButton: ButtonStyle {
+    let fill: Color
+    @Environment(\.isEnabled) private var enabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(AppFont.style(.callout, weight: .semibold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 3)
+            .background(fill, in: Capsule())
+            .opacity(!enabled ? 0.4 : configuration.isPressed ? 0.75 : 1)
+            .contentShape(Capsule())
+    }
+}
+
 /// The card of a new task, the same in the main window (⌘N) and in the
 /// quick-entry panel: every field can be filled before the task is created.
 /// Return in the title and ⌘Return anywhere save; Esc throws the card away (R37).
@@ -63,7 +80,7 @@ struct DraftEditor: View {
                     Image(systemName: "square").font(AppFont.style(.body)).foregroundStyle(.tertiary)
                     TextField(L("New task"), text: $draft.title)
                         .textFieldStyle(.plain)
-                        .font(AppFont.style(.title3, weight: .semibold))
+                        .font(AppFont.style(.body))
                         .focused($titleFocused)
                         .onSubmit(close)
                     if model.parseQuickText { QuickChips(text: draft.title) }
@@ -76,7 +93,7 @@ struct DraftEditor: View {
                 .padding(.leading, 26)
             }
             .padding(.horizontal, footer ? 18 : 0)
-            .padding(.top, footer ? 16 : 0)
+            .padding(.top, footer ? 22 : 0)
             .padding(.bottom, footer ? 12 : 0)
             if footer { strip }
         }
@@ -147,7 +164,7 @@ struct DraftEditor: View {
                 NotesTextView(
                     text: $draft.notes, font: AppFont.native(.body), returnAddsLine: model.returnAddsLine,
                     wantsFocus: $wantsNotes, onEditingChanged: { editing in if editing { pasteOpen = true } },
-                    onFinish: close, onCancel: cancel, onTab: { chip = stops.first })
+                    onFinish: close, onCancel: cancel, onTab: { chip = stops.first }, minLines: footer ? 3 : 1)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .frame(height: pasteShown ? 0 : nil)
                     .opacity(pasteShown ? 0 : 1)
@@ -186,8 +203,9 @@ struct DraftEditor: View {
             if draft.parentId == nil { listMenu(strong: true) }
             Spacer(minLength: 8)
             Button(L("Cancel"), action: cancel)
+                .buttonStyle(StripButton(fill: Color.secondary.opacity(0.55)))
             Button(L("Save"), action: close)
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(StripButton(fill: .accentColor))
                 .disabled(draft.isBlank)
         }
         .padding(.leading, 44)

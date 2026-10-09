@@ -41,19 +41,21 @@ final class QuickEntryPanel: NSPanel {
     private init() {
         super.init(
             contentRect: NSRect(x: 0, y: 0, width: 560, height: 92),
-            styleMask: [.nonactivatingPanel, .titled, .fullSizeContentView],
+            // No frame of the system: the card draws the panel itself, with corners rounder than a window has (R82).
+            styleMask: [.nonactivatingPanel, .borderless],
             backing: .buffered, defer: true)
-        titleVisibility = .hidden
-        titlebarAppearsTransparent = true
+        isOpaque = false
+        backgroundColor = .clear
+        hasShadow = true
         isMovableByWindowBackground = true
         level = .floating
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         hidesOnDeactivate = false
         isReleasedWhenClosed = false
-        standardWindowButton(.closeButton)?.isHidden = true
-        standardWindowButton(.miniaturizeButton)?.isHidden = true
-        standardWindowButton(.zoomButton)?.isHidden = true
     }
+
+    /// The radius of the corners the panel is drawn with.
+    static let corner: CGFloat = 16
 
     #if DEBUG
     /// Set by the debug script to measure the panel without taking the keyboard from the person at the machine.
@@ -75,9 +77,10 @@ final class QuickEntryPanel: NSPanel {
             .environment(AppModel.shared)
             .font(AppFont.style(.body))
             .frame(width: 520)
+            .background(Color(nsColor: .windowBackgroundColor))
+            .clipShape(RoundedRectangle(cornerRadius: Self.corner, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Self.corner, style: .continuous).strokeBorder(Color.primary.opacity(0.12)))
         let hosting = NSHostingView(rootView: view)
-        // The panel keeps a hidden title bar; without this the card would
-        // start below the room reserved for it.
         hosting.safeAreaRegions = []
         contentView = hosting
         setContentSize(hosting.fittingSize)
@@ -113,6 +116,8 @@ final class QuickEntryPanel: NSPanel {
             let top = NSPoint(x: self.frame.minX, y: self.frame.maxY)
             self.setContentSize(size)
             self.setFrameTopLeftPoint(top)
+            // The shadow follows the shape the card draws.
+            self.invalidateShadow()
         }
     }
 
