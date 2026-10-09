@@ -7,7 +7,7 @@ A release is a tag. Pushing `v<version>` starts the [Release workflow](../.githu
 1. Set the new version in four places: `core/Cargo.toml`, `web/Cargo.toml`, `MARKETING_VERSION` in `apple/project.yml`, `versionName` in `android/app/build.gradle.kts`. Run `cargo build` in `core/` and `web/` so that both `Cargo.lock` files follow.
 2. Raise `versionCode` in `android/app/build.gradle.kts` and `CURRENT_PROJECT_VERSION` in `apple/project.yml` by one. Android refuses to install an APK whose `versionCode` is lower than the installed one.
 3. Update the version in the Status section of the README.
-4. `./scripts/check-version.sh` confirms that the four places agree.
+4. `./scripts/check-version.sh` confirms that the four places agree. The workflow runs it again with the tag, so a tag that names another version stops the release.
 5. Commit, push, wait for CI.
 6. Tag and push the tag:
 
@@ -18,7 +18,7 @@ A release is a tag. Pushing `v<version>` starts the [Release workflow](../.githu
 
 A tag with a hyphen, such as `v0.2.0-rc.1`, is published as a pre-release and does not move `latest`.
 
-To try the pipeline without publishing, start the Release workflow by hand (Actions → Release → Run workflow). It builds the same artifacts and leaves them on the run.
+To try the pipeline without publishing, start the Release workflow by hand (Actions → Release → Run workflow). It builds the APK and the disk image and leaves them on the run; the Docker image is built into the cache only and is not pushed. The run needs the secrets of the Android key as a release does.
 
 ## Android signing key
 

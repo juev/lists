@@ -6,26 +6,26 @@ The server is meant for one person: everyone who signs in sees the same data.
 
 ## Docker
 
-The image is `ghcr.io/juev/lists`, built for amd64 and arm64. Tags: the version (`0.1.0`), the minor line (`0.1`) and `latest`.
+The image is `ghcr.io/juev/lists`, built for amd64 and arm64. Tags: the version (`0.1.0`), the minor line (`0.1`) and `latest`. Pre-releases get the version tag only, so until the first release without a suffix the image is pulled by its version, such as `0.1.0-rc.10`; the newest one is named on the [releases page](https://github.com/juev/lists/releases).
 
 ```sh
 docker run -d --name lists \
   -p 8080:8080 \
   -v lists-data:/data \
   -e LISTS_WEB_PASSWORD='choose a password' \
-  ghcr.io/juev/lists:latest
+  ghcr.io/juev/lists:0.1.0-rc.10
 ```
 
 The container listens on port 8080, keeps its data in `/data` and runs as user 10001. A directory mounted over `/data` must be writable by that user.
 
 The image holds only the server, linked statically, and a minimal init; there is no shell inside, so `docker exec` has nothing to run.
 
-The repository carries a ready [`compose.yaml`](../compose.yaml) that reads its settings from an `.env` file. A Compose file of your own, syncing through WebDAV:
+The repository carries a ready [`compose.yaml`](../compose.yaml) that reads its settings from an `.env` file: the version of the image (`LISTS_VERSION`), the port, the password and the settings of WebDAV sync and of the push server. The other variables (`LISTS_SYNC_PATH`, `LISTS_WEB_URL`, `LISTS_PUSH_TOKEN`, `LISTS_OIDC_*`) are not passed on by it and need a line of their own under `environment`. A Compose file of your own, syncing through WebDAV:
 
 ```yaml
 services:
   lists:
-    image: ghcr.io/juev/lists:latest
+    image: ghcr.io/juev/lists:0.1.0-rc.10
     restart: unless-stopped
     ports:
       - "127.0.0.1:8080:8080"
@@ -89,7 +89,7 @@ LISTS_WEB_URL=https://lists.example.org
 
 Register `<LISTS_WEB_URL>/auth/callback` as the redirect address. The flow is authorization code with PKCE. Only the addresses or subject ids in `LISTS_OIDC_ALLOW` are let in.
 
-A session lasts 30 days.
+A session lasts 30 days. Sessions are kept in memory, so a restart of the container signs everybody out.
 
 ## Reverse proxy
 
@@ -103,7 +103,9 @@ lists.example.org {
 
 ## Backup and updates
 
-The whole state is the `/data` volume. With sync configured it is a copy of what the storage holds, and a lost volume is rebuilt on the next sync; without sync it is the only copy, so back it up.
+The whole state is the `/data` volume. With sync configured it is a copy of what the storage holds, and a lost volume is rebuilt on the next sync; without sync it is the only copy, so back it up. CalDAV is the exception: the shared settings and an attachment over 5 MB do not travel through it and exist on the volume only.
+
+Before a new version changes how the data is stored, the server puts a backup of the data into `/data/backups`. It is an ordinary backup of Lists, and the app for macOS or Android restores from it; the server has no command for that.
 
 To update, pull the new image and recreate the container:
 

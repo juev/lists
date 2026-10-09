@@ -5,7 +5,7 @@
 
 A local-first to-do list with native apps for macOS and Android, a self-hosted web interface, and sync through storage you already own: a WebDAV folder, a CalDAV server or a plain directory. No account, no service to subscribe to.
 
-Lists covers the part of 2Do that a single person uses every day: lists, dates, priorities, tags, repeats, attachments, notes in Markdown and subtasks that are full tasks. Everything works offline; edits made on two devices to different fields of the same task are both kept.
+Lists covers the part of 2Do that a single person uses every day. A task has a list, dates, a priority, tags, a repeat, a reminder, notes in Markdown, attachments and subtasks that are full tasks; tasks group into projects, and saved filters cut across the lists. A task is closed as done or as "won't do", and stays in view for a few seconds before it leaves. Attachments open inside the app, can be saved or shared, and work in the web interface. The apps for macOS and Android show the calendar events of the day in Today, remind with a sound you choose and keep automatic local backups. Everything works offline; edits made on two devices to different fields of the same task are both kept.
 
 The interface is in English with a Russian localization and follows the system language.
 
@@ -52,7 +52,7 @@ docker run -d --name lists \
   -p 8080:8080 \
   -v lists-data:/data \
   -e LISTS_WEB_PASSWORD='choose a password' \
-  ghcr.io/juev/lists:latest
+  ghcr.io/juev/lists:0.1.0-rc.10
 ```
 
 Open `http://<host>:8080` and sign in with the password. Sync, OpenID Connect, a Compose file and the reverse proxy are covered in [docs/self-hosting.md](docs/self-hosting.md).
@@ -63,7 +63,7 @@ Open `http://<host>:8080` and sign in with the password. Sync, OpenID Connect, a
 2. Open Settings → Sync on each device and point them all at the same WebDAV folder or CalDAV server. Until then the data stays on the device, and the app is fully usable.
 3. Coming from another task manager? Import a 2Do backup, a Todoist CSV, a Trello board or Microsoft To Do lists: File → Import… on macOS, Settings on Android, the sidebar in the web interface.
 
-The [user guide](docs/usage.md) describes lists, subtasks and projects, repeats, quick entry, filters, notifications, keyboard shortcuts, backups and import.
+The [user guide](docs/usage.md) describes lists, tasks and attachments, subtasks and projects, repeats, quick entry, filters, sync, notifications, calendar events, keyboard shortcuts, backups and import.
 
 ## Sync
 
@@ -72,7 +72,7 @@ The [user guide](docs/usage.md) describes lists, subtasks and projects, repeats,
 | WebDAV or folder | the app's own change log, full fidelity | any WebDAV server, a mounted share, a folder synced by another tool |
 | CalDAV | one VTODO per task, a calendar per list | tasks should also be visible in other CalDAV clients |
 
-With CalDAV everything the app knows travels in a custom property next to the standard ones, edits made by other clients are picked up, and their own properties are preserved. Servers that strip unknown properties reduce it to the standard fields. Details: [docs/specs/caldav.md](docs/specs/caldav.md).
+With CalDAV what the app knows about a task travels in a custom property next to the standard ones (the shared settings and attachments over 5 MB do not travel), edits made by other clients are picked up, and their own properties are preserved. Servers that strip unknown properties reduce it to the standard fields. Details: [docs/specs/caldav.md](docs/specs/caldav.md).
 
 The data in the storage is not encrypted by the app. The storage password is kept in the macOS keychain and, on Android, encrypted with a key from the Android Keystore; it is never written to the database.
 
