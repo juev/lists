@@ -280,6 +280,17 @@ pub struct Attachment {
     pub local_path: Option<String>,
 }
 
+/// What saving every attachment of a task into a folder did (R91).
+#[derive(Debug, Clone, PartialEq, Default, uniffi::Record)]
+pub struct AttachmentsSaved {
+    /// The names the files were written under, in the order of the attachments.
+    pub saved: Vec<String>,
+    /// The names of the attachments that could not be downloaded or written.
+    pub failed: Vec<String>,
+    /// How many were downloaded for this (R76).
+    pub fetched: u32,
+}
+
 /// Result of parsing a quick-entry line.
 #[derive(Debug, Clone, PartialEq, Default, uniffi::Record)]
 pub struct QuickParse {
