@@ -37,6 +37,14 @@ struct TaskListView: View {
                         if model.eventsShown {
                             EventsBlock(events: model.dayEvents)
                                 .listRowSeparator(.hidden)
+                        } else {
+                            // #155: the first row of the list keeps the height it was first given, so a card
+                            // in it that grows is cut off at the bottom. An empty row takes that place.
+                            Color.clear
+                                .frame(height: 1)
+                                .listRowInsets(EdgeInsets())
+                                .listRowSeparator(.hidden)
+                                .accessibilityHidden(true)
                         }
                         ForEach(model.visibleSections) { section in
                             if let title = section.title {
@@ -47,6 +55,8 @@ struct TaskListView: View {
                         }
                     }
                     .listStyle(.inset)
+                    // The rows are as high as what they hold; without this the empty first row would take a line.
+                    .environment(\.defaultMinListRowHeight, 1)
                     .focusable()
                     .focusEffectDisabled()
                     .focused($listFocused)
