@@ -135,6 +135,10 @@
     <string name="share">Поделиться</string>
     <string name="file_saved">Сохранено</string>
     <string name="file_not_saved">Не удалось сохранить файл</string>
+    <string name="save_all_to">Сохранить все в…</string>
+    <string name="share_all">Поделиться всеми</string>
+    <string name="files_not_saved">Не удалось сохранить: %1$s</string>
+    <string name="files_not_downloaded">Не удалось загрузить: %1$s</string>
     <string name="cannot_show_file">Этот файл не получается показать здесь.</string>
     <string name="time">Время</string>
     <string name="time_off">Нет</string>
