@@ -264,7 +264,7 @@ struct TaskEditor: View {
                         AttachmentIcon(file: file)
                         Button(file.name) { open(file) }
                             .buttonStyle(.link)
-                            .disabled(fetching.contains(file.id))
+                            .disabled(isFetching(file))
                             .help(file.localPath == nil ? L("Download now") : "")
                     }
                     // R86: over a file that is here lies a layer of its own for the pointer. Inside a list row
@@ -327,7 +327,7 @@ struct TaskEditor: View {
 
     /// The actions of a file that is on this device: the same under its menu button and its right click (R54, R86).
     private func fileChoices(_ file: Attachment) -> [MenuChoice] {
-        [
+        let one = [
             MenuChoice(title: L("Quick Look")) { show(file) },
             MenuChoice(title: L("Open in Default App")) {
                 if let url = AttachmentFiles.named(file) { NSWorkspace.shared.open(url) }
@@ -339,11 +339,18 @@ struct TaskEditor: View {
                 }
             },
         ]
+        // R91: with more than one file, all of them go into a folder in one action.
+        return attachments.count > 1 ? one + [MenuChoice(title: L("Save All…")) { model.saveAllAttachments(of: task.id) }] : one
+    }
+
+    /// A file that is being downloaded: asked for by a click, or awaited by "Save All…" (R76, R91).
+    private func isFetching(_ file: Attachment) -> Bool {
+        fetching.contains(file.id) || (file.localPath == nil && model.savingAttachments.contains(task.id))
     }
 
     private func caption(_ file: Attachment) -> String {
         if file.localPath != nil { return ByteCountFormatter.string(fromByteCount: Int64(file.size), countStyle: .file) }
-        if fetching.contains(file.id) { return L("downloading…") }
+        if isFetching(file) { return L("downloading…") }
         return fetchFailed.contains(file.id) ? L("could not download, try again later") : L("not downloaded yet, click to download")
     }
 
@@ -353,7 +360,7 @@ struct TaskEditor: View {
 
     /// R76: a file that has not arrived is downloaded ahead of the others and shown.
     private func fetch(_ file: Attachment) {
-        guard let store = model.store, !fetching.contains(file.id) else { return }
+        guard let store = model.store, !isFetching(file) else { return }
         let id = file.id
         fetching.insert(id)
         fetchFailed.remove(id)

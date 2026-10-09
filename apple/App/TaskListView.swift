@@ -403,6 +403,10 @@ struct TaskRow: View {
                 }
             }
             Button(L("Duplicate")) { model.perform { _ = try $0.duplicateTask(id: task.id) } }
+            // R91: the files of the task, all of them, without looking for the menu of one.
+            if task.attachments > 1 {
+                Button(L("Save All…")) { model.saveAllAttachments(of: task.id) }
+            }
             if task.done == nil {
                 Button(L("Won't do")) { model.wontDo(task) }
             }
