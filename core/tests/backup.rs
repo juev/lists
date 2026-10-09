@@ -442,3 +442,17 @@ fn s40_a_backup_restored_on_another_device_does_not_share_its_name() {
         assert_eq!(sorted(view(d, Scope::All)), ["ещё с A", "с A", "с B"]);
     }
 }
+
+#[test]
+fn r88_two_looks_at_the_schedule_at_once_make_one_backup() {
+    let d = device();
+    add(&d, "задача");
+    let made: usize = std::thread::scope(|scope| {
+        let looks: Vec<_> = (0..8)
+            .map(|_| scope.spawn(|| d.backup_if_due().unwrap().is_some()))
+            .collect();
+        looks.into_iter().map(|l| l.join().unwrap() as usize).sum()
+    });
+    assert_eq!(made, 1);
+    assert_eq!(d.backups().unwrap().len(), 1);
+}
