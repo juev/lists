@@ -91,6 +91,8 @@ object Repo {
     }
 
     suspend fun sync(): Result<SyncReport> = withContext(Dispatchers.IO) {
+        // R88: the automatic backup is looked at with every run, with sync on or off.
+        runCatching { store.backupIfDue() }
         if (store.syncConfig() is SyncConfig.Off) return@withContext Result.success(SyncReport(0u, 0u, 0u, 0u))
         val result = syncMutex.withLock {
             syncing.value = true
