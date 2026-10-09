@@ -47,7 +47,7 @@ data class UiState(
     val tags: List<TagCount> = emptyList(),
     val projects: List<TaskItem> = emptyList(),
     val filters: List<SavedFilter> = emptyList(),
-    val counts: Counts = Counts(0u, 0u, 0u, 0u, 0u),
+    val counts: Counts = Counts(0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u),
     val scope: Scope = Scope.Today,
     val search: String? = null,
     val sections: List<TaskSection> = emptyList(),
