@@ -154,6 +154,7 @@ import uniffi.lists_core.Repeat
 import uniffi.lists_core.SortMode
 import uniffi.lists_core.Store
 import uniffi.lists_core.SyncConfig
+import uniffi.lists_core.SyncSide
 import uniffi.lists_core.TaskItem
 import uniffi.lists_core.TaskList
 import uniffi.lists_core.checkSyncConnection
@@ -994,32 +995,33 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
 
     // S36: the storage being joined while the person chooses a side, and the side that waits for a confirmation.
     var joining by remember { mutableStateOf<SyncConfig?>(null) }
-    var replacing by remember { mutableStateOf<String?>(null) }
+    var replacing by remember { mutableStateOf<SyncSide?>(null) }
 
-    fun save(config: SyncConfig, side: String) {
-        runCatching {
-            Repo.store.setSyncConfig(config)
-            Secrets.save(context, password.takeIf { enabled })
-            Repo.store.setSyncPassword(password.takeIf { enabled })
-            val sender = enabled && pushSignIn && pushServer.isNotEmpty()
-            Repo.store.setPushSendServer(pushServer.takeIf { sender })
-            Secrets.save(context, pushToken.takeIf { sender }, Secrets.PUSH_TOKEN)
-            Repo.store.setPushToken(pushToken.takeIf { sender })
-            pushRefused = false
-            when (side) {
-                "storage" -> Repo.store.replaceLocalWithRemote()
-                "device" -> Repo.store.replaceRemoteWithLocal()
+    fun save(config: SyncConfig, side: SyncSide) {
+        testing = true
+        scope.launch {
+            // Replacing a side waits for a run that is under way: not on the main thread.
+            val joined = withContext(Dispatchers.IO) { runCatching { Repo.store.joinStorage(config, side) } }
+            testing = false
+            joined.mapCatching {
+                Secrets.save(context, password.takeIf { enabled })
+                Repo.store.setSyncPassword(password.takeIf { enabled })
+                val sender = enabled && pushSignIn && pushServer.isNotEmpty()
+                Repo.store.setPushSendServer(pushServer.takeIf { sender })
+                Secrets.save(context, pushToken.takeIf { sender }, Secrets.PUSH_TOKEN)
+                Repo.store.setPushToken(pushToken.takeIf { sender })
+                pushRefused = false
             }
+                .onSuccess {
+                    error = null
+                    tested = null
+                    // With sync switched off nothing runs, so the main screen would keep its icon and the pull (R67).
+                    Repo.revision.update { it + 1 }
+                    model.sync()
+                    if (enabled) Background.askOnce(context)
+                }
+                .onFailure { error = describe(it) }
         }
-            .onSuccess {
-                error = null
-                tested = null
-                // With sync switched off nothing runs, so the main screen would keep its icon and the pull (R67).
-                Repo.revision.update { it + 1 }
-                model.sync()
-                if (enabled) Background.askOnce(context)
-            }
-            .onFailure { error = describe(it) }
     }
 
     FormDialog(
@@ -1181,7 +1183,7 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
                 }
                 // S36: a storage that is new to this device may hold data of its own.
                 if (config == SyncConfig.Off || runCatching { Repo.store.syncConfig() }.getOrNull() == config) {
-                    save(config, "merge")
+                    save(config, SyncSide.MERGE)
                 } else {
                     val secret = password
                     error = null
@@ -1190,7 +1192,7 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
                         val both = withContext(Dispatchers.IO) { runCatching { Repo.store.syncConflict(config, secret) } }
                         testing = false
                         both.fold(
-                            { if (it) joining = config else save(config, "merge") },
+                            { if (it) joining = config else save(config, SyncSide.MERGE) },
                             { error = str(R.string.no_connection, describe(it)) },
                         )
                     }
@@ -1215,9 +1217,9 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
                         @Composable
                         fun option(label: String, action: () -> Unit) =
                             Text(label, Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = action).padding(vertical = 12.dp))
-                        option(str(R.string.sync_merge)) { joining = null; save(config, "merge") }
-                        option(str(R.string.sync_take_storage)) { replacing = "storage" }
-                        option(str(R.string.sync_send_device)) { replacing = "device" }
+                        option(str(R.string.sync_merge)) { joining = null; save(config, SyncSide.MERGE) }
+                        option(str(R.string.sync_take_storage)) { replacing = SyncSide.STORAGE }
+                        option(str(R.string.sync_send_device)) { replacing = SyncSide.DEVICE }
                     }
                 },
                 confirmButton = {},
@@ -1225,8 +1227,8 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
             )
             else -> AlertDialog(
                 onDismissRequest = { joining = null; replacing = null },
-                title = { Text(str(if (side == "storage") R.string.sync_replace_device_title else R.string.sync_replace_storage_title)) },
-                text = { Text(str(if (side == "storage") R.string.sync_replace_device_text else R.string.sync_replace_storage_text)) },
+                title = { Text(str(if (side == SyncSide.STORAGE) R.string.sync_replace_device_title else R.string.sync_replace_storage_title)) },
+                text = { Text(str(if (side == SyncSide.STORAGE) R.string.sync_replace_device_text else R.string.sync_replace_storage_text)) },
                 confirmButton = {
                     TextButton(onClick = { joining = null; replacing = null; save(config, side) }) {
                         Text(str(R.string.sync_replace), color = MaterialTheme.colorScheme.error)
