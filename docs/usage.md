@@ -20,7 +20,7 @@ The fixed views next to the lists:
 | Won't do | the part of Completed that was closed as "won't do"; it has no Clear… of its own |
 | Trash | deleted tasks; they can be restored until the trash is emptied by hand |
 
-On macOS, Settings → Sidebar → "Show Completed in the sidebar" removes the Completed and Won't do views from the sidebar and from the Go menu (⌘5, ⌘6). It is a setting of that Mac and does not sync. It is not the per-list switch "Keep completed tasks in this list" (context menu of a list → Configure…), which decides whether finished tasks stay at the end of that one list.
+On macOS, Settings → Sidebar says for each built-in view (Inbox, Today, Upcoming, All, Completed, Won't do, Trash) when it has a row in the sidebar: always, when it holds something, or never. Inbox, Today, Upcoming and All start as "always"; Completed, Won't do and Trash appear when they hold something. A view without a row is not opened from the Go menu or by its key (⌘1–⌘6) either, and when the row of the view on screen goes away the app goes to Inbox. It is a setting of that Mac and does not sync. It is not the per-list switch "Keep completed tasks in this list" (context menu of a list → Configure…), which decides whether finished tasks stay at the end of that one list.
 
 Search looks through titles and notes in all lists.
 

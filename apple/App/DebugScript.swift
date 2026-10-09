@@ -42,7 +42,7 @@ import UserNotifications
 /// `ghost` (puts the windows of a hidden app on screen transparent, deaf to the mouse and without the keyboard, popovers that open later among them:
 /// a hidden app shows no popovers; key presses then go to the open popover first, as they do when it has the keyboard),
 /// `wont` (closes the selected task as "won't do"; `task` prints the state of the selected task), `go:completed`, `go:wontdo`, `go:today`, `go:#tag` and `go:List name` (switch to those views),
-/// `completedview:on` and `completedview:off` (flip the setting that offers the Completed view), `scope` (prints the current view), `quit` (quits the app the way ⌘Q does), `search` (prints whether search is open as a field and its text),
+/// `completedview:on` and `completedview:off` (show the Completed and Won't do views always or never), `sidebarshow:wontDo=filled` (sets when a built-in view has a row in the sidebar: `always`, `filled` or `never`; `sidebarshow` alone prints the built-in rows there are), `scope` (prints the current view), `quit` (quits the app the way ⌘Q does), `search` (prints whether search is open as a field and its text),
 /// `calendarevents` (prints the setting of R78, the access the system gave, and how many calendars are listed and hidden; nothing is asked of the system),
 /// `events:14:30=Bank,-=Birthday,09:00=Standup,y=Trip` (puts those events through the order of the block in place of the calendars of the system:
 /// `-` is an all-day event, `y` one that began yesterday) and `events` alone print whether the block is on show and its lines,
@@ -238,7 +238,16 @@ enum DebugScript {
                     case _ where argument.hasPrefix("#"): model.scope = .tag(name: String(argument.dropFirst()))
                     default: model.scope = model.lists.first { $0.name == argument }.map { .list(id: $0.id) } ?? .inbox
                     }
-                case "completedview": AppModel.shared.showCompletedView = argument != "off"
+                case "completedview":
+                    for scope in [Scope.completed, .wontDo] { AppModel.shared.setSidebarShow(scope, argument != "off" ? .always : .never) }
+                case "sidebarshow":
+                    // `sidebarshow:wontDo=filled` sets when a built-in view has a row; alone it prints the rows there are.
+                    let parts = argument.split(separator: "=").map(String.init)
+                    if parts.count == 2, let scope = Scope.builtins.first(where: { $0.builtinName == parts[0] }), let show = SidebarShow(rawValue: parts[1]) {
+                        AppModel.shared.setSidebarShow(scope, show)
+                    } else {
+                        print("debug: sidebar shows \(AppModel.shared.shownBuiltins.compactMap(\.builtinName))")
+                    }
                 case "calendarevents":
                     let model = AppModel.shared
                     print("debug: calendar events \(model.showCalendarEvents ? "on" : "off"), access \(SystemCalendars.shared.access), calendars \(model.eventCalendars.count), hidden \(model.hiddenCalendars.count)")
@@ -295,7 +304,7 @@ enum DebugScript {
                     try? await _Concurrency.Task.sleep(for: .milliseconds(300))
                 case "chips": print("debug: chip \(chip ?? "none"), popover \(popover ?? "none")")
                 case "quit": NSApp.terminate(nil)
-                case "scope": print("debug: scope \(AppModel.shared.scopeTitle), completed view \(AppModel.shared.showCompletedView ? "on" : "off")")
+                case "scope": print("debug: scope \(AppModel.shared.scopeTitle), completed view \(AppModel.shared.showsInSidebar(.completed) ? "on" : "off")")
                 case "search": print("debug: search field \(AppModel.shared.searchOpen || AppModel.shared.isSearching ? "open" : "closed"), text \"\(AppModel.shared.search)\"")
                 case "menu":
                     let items = (NSApp.mainMenu?.items ?? []).flatMap { $0.submenu?.items ?? [] }

@@ -24,7 +24,7 @@ final class AppModel {
     var tags: [TagCount] = []
     var projects: [TaskItem] = []
     var filters: [SavedFilter] = []
-    var counts = Counts(inbox: 0, today: 0, overdue: 0, upcoming: 0, trash: 0)
+    var counts = Counts(inbox: 0, today: 0, overdue: 0, upcoming: 0, trash: 0, all: 0, completed: 0, wontDo: 0)
 
     var scope: Scope = .today { didSet { if scope != oldValue { expanded.removeAll(); subtasksShown.removeAll(); draft = nil; selection = nil; reload() } } }
     var search = "" { didSet { if search != oldValue { reload() } } }
@@ -131,12 +131,65 @@ final class AppModel {
         didSet { UserDefaults.standard.set(returnAddsLine, forKey: "returnAddsLine") }
     }
 
-    /// Whether the sidebar and the Go menu offer the Completed view on this Mac; not synced.
-    var showCompletedView: Bool = UserDefaults.standard.object(forKey: "showCompletedView") == nil || UserDefaults.standard.bool(forKey: "showCompletedView") {
+    /// When each built-in view has a row in the sidebar of this Mac (R93); not synced.
+    var sidebarShow: [String: SidebarShow] = AppModel.storedSidebarShow() {
         didSet {
-            UserDefaults.standard.set(showCompletedView, forKey: "showCompletedView")
-            if !showCompletedView, scope == .completed || scope == .wontDo { scope = .inbox }
+            UserDefaults.standard.set(sidebarShow.mapValues(\.rawValue), forKey: "sidebarShow")
+            leaveHiddenView()
         }
+    }
+
+    private static func storedSidebarShow() -> [String: SidebarShow] {
+        let defaults = UserDefaults.standard
+        if let stored = defaults.dictionary(forKey: "sidebarShow") as? [String: String] {
+            return stored.compactMapValues(SidebarShow.init(rawValue:))
+        }
+        // The setting this one replaced (R47): a Mac that had Completed switched off keeps it off.
+        if defaults.object(forKey: "showCompletedView") != nil, !defaults.bool(forKey: "showCompletedView") {
+            return ["completed": .never, "wontDo": .never]
+        }
+        return [:]
+    }
+
+    func sidebarShow(_ scope: Scope) -> SidebarShow {
+        guard let name = scope.builtinName else { return .always }
+        return sidebarShow[name] ?? SidebarShow.initial(scope)
+    }
+
+    func setSidebarShow(_ scope: Scope, _ show: SidebarShow) {
+        guard let name = scope.builtinName else { return }
+        sidebarShow[name] = show
+    }
+
+    /// Whether the view has something to show, as the counts know it.
+    private func holds(_ scope: Scope) -> Bool {
+        switch scope {
+        case .inbox: counts.inbox > 0
+        case .today: counts.today > 0
+        case .upcoming: counts.upcoming > 0
+        case .all: counts.all > 0
+        case .completed: counts.completed > 0
+        case .wontDo: counts.wontDo > 0
+        case .trash: counts.trash > 0
+        default: true
+        }
+    }
+
+    /// Whether the sidebar and the Go menu offer the view (R93).
+    func showsInSidebar(_ scope: Scope) -> Bool {
+        switch sidebarShow(scope) {
+        case .always: true
+        case .filled: holds(scope)
+        case .never: false
+        }
+    }
+
+    /// The built-in views that have a row in the sidebar, in its order.
+    var shownBuiltins: [Scope] { Scope.builtins.filter(showsInSidebar) }
+
+    /// The view on screen lost its row: the app goes to Inbox (R93).
+    private func leaveHiddenView() {
+        if scope != .inbox, scope.builtinName != nil, !showsInSidebar(scope) { scope = .inbox }
     }
 
     // Calendar events in Today (R78); settings of this Mac, not synced.
@@ -340,6 +393,8 @@ final class AppModel {
 
     func reload() {
         guard let store else { return }
+        // After the counts are new: a view that holds nothing any more may have lost its row.
+        defer { leaveHiddenView() }
         do {
             lists = try store.lists()
             tags = try store.tags()
