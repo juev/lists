@@ -37,9 +37,10 @@ struct TaskListView: View {
                         if model.eventsShown {
                             EventsBlock(events: model.dayEvents)
                                 .listRowSeparator(.hidden)
-                        } else {
+                        } else if model.visibleSections.first?.title == nil {
                             // #155: the first row of the list keeps the height it was first given, so a card
                             // in it that grows is cut off at the bottom. An empty row takes that place.
+                            // A view that starts with the heading of a group has that heading there.
                             Color.clear
                                 .frame(height: 1)
                                 .listRowInsets(EdgeInsets())
