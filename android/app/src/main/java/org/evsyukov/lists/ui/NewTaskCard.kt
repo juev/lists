@@ -44,6 +44,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -147,31 +148,76 @@ internal fun noteLines(full: Boolean, landscape: Boolean): IntRange = when {
 }
 
 /** A repeat rule as plain values: the record the core hands over is not something a saved state can hold. */
-private val repeatSaver = listSaver<Repeat?, Any?>(
-    save = { rule ->
-        if (rule == null) emptyList()
-        else listOf(
-            rule.freq.name, rule.interval.toInt(), ArrayList(rule.weekdays.map { it.toInt() }), rule.monthday?.toInt(),
-            rule.nth, rule.nthWeekday?.toInt(), rule.fromDone, rule.count?.toInt(), rule.until,
-        )
-    },
-    restore = { saved ->
-        @Suppress("UNCHECKED_CAST")
-        Repeat(
-            freq = Freq.valueOf(saved[0] as String),
-            interval = (saved[1] as Int).toUInt(),
-            weekdays = (saved[2] as List<Int>).map { it.toUInt() },
-            monthday = (saved[3] as Int?)?.toUInt(),
-            nth = saved[4] as Int?,
-            nthWeekday = (saved[5] as Int?)?.toUInt(),
-            fromDone = saved[6] as Boolean,
-            count = (saved[7] as Int?)?.toUInt(),
-            until = saved[8] as String?,
-        )
-    },
+private fun Repeat.toSaved(): ArrayList<Any?> = arrayListOf(
+    freq.name, interval.toInt(), ArrayList(weekdays.map { it.toInt() }), monthday?.toInt(),
+    nth, nthWeekday?.toInt(), fromDone, count?.toInt(), until,
 )
 
-private val urisSaver = listSaver<List<Uri>, String>(save = { uris -> uris.map(Uri::toString) }, restore = { saved -> saved.map(Uri::parse) })
+@Suppress("UNCHECKED_CAST")
+private fun repeatFromSaved(saved: List<Any?>) = Repeat(
+    freq = Freq.valueOf(saved[0] as String),
+    interval = (saved[1] as Int).toUInt(),
+    weekdays = (saved[2] as List<Int>).map { it.toUInt() },
+    monthday = (saved[3] as Int?)?.toUInt(),
+    nth = saved[4] as Int?,
+    nthWeekday = (saved[5] as Int?)?.toUInt(),
+    fromDone = saved[6] as Boolean,
+    count = (saved[7] as Int?)?.toUInt(),
+    until = saved[8] as String?,
+)
+
+/**
+ * What is entered in the new-task card. The card keeps one of its own; the
+ * main screen holds it outside the card, so that a card closed by mistake can
+ * be brought back with everything in it (R97).
+ */
+@Stable
+class NewTaskEntry(title: String = "", notes: String = "", listId: String? = null) {
+    var text by mutableStateOf(title)
+    var note by mutableStateOf(notes)
+    /** The note as taken from the clipboard (R58), to tell it from one the person typed. */
+    var taken by mutableStateOf<String?>(null)
+    var start by mutableStateOf<String?>(null)
+    var due by mutableStateOf<String?>(null)
+    var dueRemoved by mutableStateOf(false)
+    var repeat by mutableStateOf<Repeat?>(null)
+    /** Null until the person chooses: the default of the list shows through and follows the chosen list. */
+    var priority by mutableStateOf<Priority?>(null)
+    var listId by mutableStateOf(listId)
+    /** Files picked in the card; they join the ones it was opened with. */
+    var picked by mutableStateOf(emptyList<Uri>())
+    /** The size chosen in portrait (R64). */
+    var expanded by mutableStateOf(false)
+
+    /** Whether closing the card would lose something (R97). The list and the size alone are not an entry. */
+    val hasContent: Boolean get() = hasContent(text, note, start, due, repeat != null, priority, picked.size)
+
+    internal fun toSaved(): ArrayList<Any?> = arrayListOf(
+        text, note, taken, start, due, dueRemoved, repeat?.toSaved(), priority?.name, listId,
+        ArrayList(picked.map(Uri::toString)), expanded,
+    )
+
+    companion object {
+        @Suppress("UNCHECKED_CAST")
+        internal fun fromSaved(saved: List<Any?>) = NewTaskEntry(saved[0] as String, saved[1] as String, saved[8] as String?).apply {
+            taken = saved[2] as String?
+            start = saved[3] as String?
+            due = saved[4] as String?
+            dueRemoved = saved[5] as Boolean
+            repeat = (saved[6] as List<Any?>?)?.let(::repeatFromSaved)
+            priority = (saved[7] as String?)?.let(Priority::valueOf)
+            picked = (saved[9] as List<String>).map(Uri::parse)
+            expanded = saved[10] as Boolean
+        }
+
+        /** Saved, not just remembered: the card keeps what was entered when the screen is turned (R63). */
+        val Saver = listSaver<NewTaskEntry, Any?>(save = { it.toSaved() }, restore = { fromSaved(it) })
+    }
+}
+
+/** Whether a new-task card holds something the person entered (R97). A priority chosen as "none" is a choice too. */
+internal fun hasContent(text: String, note: String, start: String?, due: String?, repeats: Boolean, priority: Priority?, files: Int): Boolean =
+    text.isNotBlank() || note.isNotBlank() || start != null || due != null || repeats || priority != null || files > 0
 
 /**
  * The new-task card: title, note, dates, repeat, priority, files and the list.
@@ -198,34 +244,33 @@ fun NewTaskCard(
     keepOpen: Boolean = false,
     /** The note taken from the clipboard (R58); it may arrive after the card is shown. */
     pastedNotes: String? = null,
+    /** What is entered. Given from outside where the card can be closed and brought back (R97). */
+    entry: NewTaskEntry = rememberSaveable(saver = NewTaskEntry.Saver) { NewTaskEntry(title, notes, listId) },
 ) {
-    // Saved, not just remembered: the card keeps what was entered when the screen is turned (R63).
-    var text by rememberSaveable { mutableStateOf(title) }
-    var note by rememberSaveable { mutableStateOf(notes) }
+    var text by entry::text
+    var note by entry::note
     // Kept apart from `pastedNotes`: a window rebuilt on rotation is not handed the same clipboard again.
-    var taken by rememberSaveable { mutableStateOf<String?>(null) }
+    var taken by entry::taken
     LaunchedEffect(pastedNotes) {
         if (pastedNotes != null && note.isEmpty()) {
             note = pastedNotes
             taken = pastedNotes
         }
     }
-    var start by rememberSaveable { mutableStateOf<String?>(null) }
-    var due by rememberSaveable { mutableStateOf<String?>(null) }
-    var dueRemoved by rememberSaveable { mutableStateOf(false) }
-    var repeat by rememberSaveable(stateSaver = repeatSaver) { mutableStateOf<Repeat?>(null) }
-    // Null until the person chooses: the default of the list shows through and follows the chosen list.
-    var priority by rememberSaveable { mutableStateOf<Priority?>(null) }
-    var chosenList by rememberSaveable { mutableStateOf(listId) }
+    var start by entry::start
+    var due by entry::due
+    var dueRemoved by entry::dueRemoved
+    var repeat by entry::repeat
+    var priority by entry::priority
+    var chosenList by entry::listId
     var dialog by rememberSaveable { mutableStateOf<String?>(null) }
-    // Files picked here join the ones the card was opened with.
-    var picked by rememberSaveable(stateSaver = urisSaver) { mutableStateOf(emptyList<Uri>()) }
+    var picked by entry::picked
     val pickFiles = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
         picked = (picked + uris).distinct()
     }
     val attached = files + picked
     // What the user chose in portrait; it comes back when the screen is turned upright again.
-    var expanded by rememberSaveable { mutableStateOf(false) }
+    var expanded by entry::expanded
     val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val full = expanded || landscape
     val focus = remember { FocusRequester() }
