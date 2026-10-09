@@ -680,18 +680,53 @@ impl Store {
         }))
     }
 
+    /// Whether this device has a task out of the trash or a list of its own (S36, R88).
+    pub(crate) fn holds_data(&self) -> Result<bool> {
+        Ok(self.lock().conn.query_row(
+            "SELECT EXISTS (SELECT 1 FROM tasks WHERE deleted = 0 AND purged = 0)
+                 OR EXISTS (SELECT 1 FROM lists WHERE deleted = 0 AND id != ?1)",
+            [INBOX_ID],
+            |r| r.get(0),
+        )?)
+    }
+
     /// S37 without the lock: the caller holds it.
     fn drop_local(&self) -> Result<()> {
         // Over CalDAV the shared settings do not travel (S32): they are this device's own.
         let own_settings = matches!(self.sync_config()?, SyncConfig::CalDav { .. });
+        self.renew(None, own_settings)
+    }
+
+    /// Replaces the registers and makes this a device the storage has not seen
+    /// (S37, S40): with nothing, or with the registers of the database at
+    /// `from` (R90). One transaction: a failure leaves what was there. The
+    /// caller holds the sync lock.
+    pub(crate) fn renew(&self, from: Option<&std::path::Path>, keep_settings: bool) -> Result<()> {
         let mut inner = self.lock();
         let inner = &mut *inner;
+        if let Some(path) = from {
+            inner
+                .conn
+                .execute("ATTACH DATABASE ?1 AS restored", [path.to_string_lossy()])?;
+        }
+        let done = Self::renew_in(inner, from.is_some(), keep_settings);
+        if from.is_some() {
+            // Whatever happened above, the file is let go.
+            let _ = inner.conn.execute("DETACH DATABASE restored", []);
+        }
+        done?;
+        *self.storage_seen.lock().unwrap_or_else(|p| p.into_inner()) = None;
+        *self.folder_seen.lock().unwrap_or_else(|p| p.into_inner()) = None;
+        Ok(())
+    }
+
+    fn renew_in(inner: &mut crate::store::Inner, restore: bool, keep_settings: bool) -> Result<()> {
         let last = db::max_stamp(&inner.conn)?;
         let device = new_device_id();
         let tx = inner
             .conn
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        if own_settings {
+        if keep_settings {
             tx.execute("DELETE FROM fields WHERE kind != ?1", [KIND_SETTINGS])?;
         } else {
             tx.execute("DELETE FROM fields", [])?;
@@ -705,17 +740,36 @@ impl Store {
              DELETE FROM meta WHERE key IN ('sync_ok', 'sync_error', 'caldav_filters_sent', 'caldav_home', 'push_published',
                                             'own_seq', 'force_snapshot', 'replace_remote', 'replace_kept_at');",
         )?;
+        if restore {
+            // The file comes from outside: only registers this version would accept from a peer get in.
+            let changes: Vec<Change> = {
+                let mut stmt = tx.prepare("SELECT kind, id, field, value, stamp FROM restored.fields")?;
+                let rows = stmt.query_map([], change_from_row)?;
+                rows.collect::<rusqlite::Result<_>>()?
+            };
+            let mut touched = Touched::new();
+            for change in changes.iter().filter(|c| c.is_well_formed()) {
+                // Everything is to be uploaded: the storage has not seen this device (S40).
+                db::apply(&tx, change, true, &mut touched)?;
+            }
+            db::settle(&tx, &touched)?;
+            db::meta_set(&tx, "force_snapshot", "1")?;
+        } else if keep_settings {
+            tx.execute("UPDATE fields SET dirty = 1", [])?;
+        }
         db::meta_set(&tx, "device", &device)?;
+        let newest = db::max_stamp(&tx)?;
         tx.commit()?;
-        // The clock stays ahead of every stamp this device has issued.
+        // The clock stays ahead of every stamp this device has issued or holds.
         inner.clock = Clock::new(&device, last.as_deref());
-        *self.storage_seen.lock().unwrap_or_else(|p| p.into_inner()) = None;
-        *self.folder_seen.lock().unwrap_or_else(|p| p.into_inner()) = None;
+        if let Some(stamp) = newest {
+            inner.clock.observe(&stamp);
+        }
         Ok(())
     }
 
     /// S38 without the lock: the caller holds it.
-    fn ask_to_replace_remote(&self) -> Result<()> {
+    pub(crate) fn ask_to_replace_remote(&self) -> Result<()> {
         let inner = self.lock();
         inner.conn.execute("DELETE FROM kept", [])?;
         db::meta_del(&inner.conn, KEPT_AT)?;
@@ -845,13 +899,7 @@ impl Store {
     /// S36: whether both this device and the storage at `config` hold data, so
     /// that the person has a side to choose. Only reads, here and there.
     pub fn sync_conflict(&self, config: SyncConfig, password: String) -> Result<bool> {
-        let local: bool = self.lock().conn.query_row(
-            "SELECT EXISTS (SELECT 1 FROM tasks WHERE deleted = 0 AND purged = 0)
-                 OR EXISTS (SELECT 1 FROM lists WHERE deleted = 0 AND id != ?1)",
-            [INBOX_ID],
-            |r| r.get(0),
-        )?;
-        if !local {
+        if !self.holds_data()? {
             return Ok(false);
         }
         let files = |remote: &dyn Remote| -> Result<bool> {
