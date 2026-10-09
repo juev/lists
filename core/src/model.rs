@@ -266,6 +266,12 @@ pub struct Counts {
     pub overdue: u32,
     pub upcoming: u32,
     pub trash: u32,
+    /// Open top-level tasks, as the All view lists them.
+    pub all: u32,
+    /// What the Completed view lists, "won't do" among it.
+    pub completed: u32,
+    /// What the "Won't do" view lists (R69).
+    pub wont_do: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]

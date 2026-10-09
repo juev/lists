@@ -990,6 +990,9 @@ impl Store {
                 &[&today],
             )?,
             trash: count("t.deleted = 1 AND t.purged = 0", &[])?,
+            all: count(&format!("{open} AND t.eff_parent IS NULL"), &[])?,
+            completed: count(COMPLETED, &[])?,
+            wont_do: count(&format!("{COMPLETED} AND t.wont = 1"), &[])?,
         })
     }
 

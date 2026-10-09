@@ -543,6 +543,32 @@ fn r21_smart_views_and_counts() {
 }
 
 #[test]
+fn r93_counts_say_which_built_in_views_hold_something() {
+    let d = device();
+    let c = d.counts().unwrap();
+    assert_eq!((c.all, c.completed, c.wont_do, c.trash), (0, 0, 0, 0));
+
+    let parent = add(&d, "открытая");
+    add_sub(&d, &parent, "подзадача");
+    let done = add(&d, "сделанная");
+    d.complete_task(done.id).unwrap();
+    let dropped = add(&d, "не буду");
+    d.wont_do_task(dropped.id.clone()).unwrap();
+    let gone = add(&d, "удалённая");
+    d.delete_task(gone.id).unwrap();
+
+    let c = d.counts().unwrap();
+    // A subtask is not a row of All; "won't do" is a row of Completed as well.
+    assert_eq!((c.all, c.completed, c.wont_do, c.trash), (1, 2, 1, 1));
+    assert_eq!(c.completed as usize, view(&d, Scope::Completed).len());
+    assert_eq!(c.wont_do as usize, view(&d, Scope::WontDo).len());
+
+    d.reopen_task(dropped.id).unwrap();
+    let c = d.counts().unwrap();
+    assert_eq!((c.all, c.completed, c.wont_do), (2, 1, 0));
+}
+
+#[test]
 fn r22_search_ignores_case_in_any_script() {
     let d = device();
     let t = add(&d, "Купить МОЛОКО");
