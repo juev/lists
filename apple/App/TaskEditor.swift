@@ -24,6 +24,8 @@ struct TaskEditor: View {
     @State private var notesFocused = false
     @State private var wantsNotes = false
     @State private var menus = MenuAnchors()
+    /// Where the chips stood when a popover opened: a chip does not change sides under its own popover.
+    @State private var held: Sides?
     @FocusState private var chip: CardChip?
     @State private var previewed: URL?
     @State private var previewable: [URL] = []
@@ -40,7 +42,7 @@ struct TaskEditor: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             notesField
             chips
             if !attachments.isEmpty { files }
@@ -62,6 +64,7 @@ struct TaskEditor: View {
         .onAppear(perform: load)
         .onChange(of: task) { _, _ in load() }
         .onChange(of: model.attachmentsArrived) { _, _ in load() }
+        .onChange(of: popover) { _, now in held = now == nil ? nil : sides }
         // A chip that is gone, a tag just removed for one, hands the keyboard to the chip that took its place.
         .onChange(of: stops) { before, now in
             guard let chip, !now.contains(chip), let index = before.firstIndex(of: chip) else { return }
@@ -138,13 +141,25 @@ struct TaskEditor: View {
 
     // MARK: Chips
 
-    /// The chips in the order they are drawn, which is the order Tab walks them in (R62).
-    private var stops: [CardChip] {
-        [.start, .due] + (showsRepeat ? [.repeat] : []) + (showsRemind ? [.remind] : []) + [.priority] + task.tags.map(CardChip.tag) + [.add]
+    /// The chips of the two sides of the row: what is set stands at the left with its value, the rest at the right as icons (R94).
+    private struct Sides: Equatable {
+        var left: [CardChip]
+        var right: [CardChip]
     }
 
-    private var showsRepeat: Bool { task.repeat != nil || popover == .repeat }
-    private var showsRemind: Bool { task.remind != nil || popover == .remind }
+    private var sides: Sides {
+        if let held { return held }
+        let dated: [(CardChip, Bool)] = [
+            (.start, task.start != nil), (.due, task.due != nil), (.repeat, task.repeat != nil),
+            (.remind, task.remind != nil), (.priority, task.priority != .none),
+        ]
+        return Sides(
+            left: dated.filter(\.1).map(\.0) + task.tags.map(CardChip.tag),
+            right: dated.filter { !$0.1 }.map(\.0) + [.newTag] + (model.showsSubtasks(task) ? [] : [.subtask]) + [.file])
+    }
+
+    /// The chips in the order they are drawn, which is the order Tab walks them in (R62).
+    private var stops: [CardChip] { sides.left + sides.right }
 
     private var keys: ChipKeys {
         ChipKeys(step: { from, by in
@@ -165,54 +180,59 @@ struct TaskEditor: View {
         }
     }
 
-    private var addChoices: [MenuChoice] {
-        var choices: [MenuChoice] = []
-        if task.repeat == nil { choices.append(MenuChoice(title: L("Repeat")) { popover = .repeat }) }
-        if task.remind == nil { choices.append(MenuChoice(title: L("Reminder")) { popover = .remind }) }
-        choices.append(MenuChoice(title: L("Tag")) { popover = .tag })
-        if !model.showsSubtasks(task) { choices.append(MenuChoice(title: L("Subtask")) { model.showSubtasks(task.id) }) }
-        choices.append(MenuChoice(title: L("File or image…")) { importing = true })
-        return choices
+    private var chips: some View {
+        HStack(alignment: .center, spacing: 6) {
+            FlowLayout(spacing: 6) {
+                ForEach(sides.left, id: \.self) { field($0, set: true) }
+            }
+            Spacer(minLength: 8)
+            HStack(spacing: 2) {
+                ForEach(sides.right, id: \.self) { field($0, set: false) }
+            }
+        }
     }
 
-    private var chips: some View {
-        FlowLayout(spacing: 6) {
-            // Both dates are always on show: when the work begins and when it is due.
-            chipButton(.start, symbol: "calendar.badge.clock", text: task.start.map { L("Start: ") + Moment.label($0).lowercased() } ?? L("Start"),
-                       tint: task.start == nil ? .secondary : .accentColor)
+    /// One field of the row: a chip with its value when it is set, an icon when it is not.
+    @ViewBuilder
+    private func field(_ which: CardChip, set: Bool) -> some View {
+        switch which {
+        case .start:
+            chipButton(.start, symbol: "calendar.badge.clock",
+                       text: task.start.map { L("Start: ") + Moment.label($0).lowercased() } ?? "", tint: .accentColor, set: set)
                 .popover(isPresented: isOpen(.start)) {
                     DateEditor(title: L("Start: hidden from Today until"), value: task.start) { value in model.perform { try $0.setStart(id: task.id, start: value) } }
                 }
                 .help(L("Start date (⌘S)"))
                 .chipStop(.start, focus: $chip, keys: keys) { popover = .start }
-            chipButton(.due, symbol: "calendar", text: task.due.map { L("Due: ") + Moment.label($0).lowercased() } ?? L("Due"),
-                       tint: task.due.map { Moment.isOverdue($0) && task.done == nil ? Color.red : .accentColor } ?? .secondary)
+        case .due:
+            chipButton(.due, symbol: "calendar", text: task.due.map { L("Due: ") + Moment.label($0).lowercased() } ?? "",
+                       tint: task.due.map { Moment.isOverdue($0) && task.done == nil ? Color.red : .accentColor } ?? .accentColor, set: set)
                 .popover(isPresented: isOpen(.due)) {
                     DateEditor(title: L("Due"), value: task.due) { value in model.perform { try $0.setDue(id: task.id, due: value) } }
                 }
                 .help(L("Due date (⌘D)"))
                 .chipStop(.due, focus: $chip, keys: keys) { popover = .due }
-            if showsRepeat {
-                chipButton(.repeat, symbol: "repeat", text: task.repeat?.summary ?? L("Repeat"), tint: .accentColor)
-                    .popover(isPresented: isOpen(.repeat)) {
-                        RepeatEditor(value: task.repeat) { rule in model.perform { try $0.setRepeat(id: task.id, repeat: rule) } }
+        case .repeat:
+            chipButton(.repeat, symbol: "repeat", text: task.repeat?.summary ?? "", tint: .accentColor, set: set)
+                .popover(isPresented: isOpen(.repeat)) {
+                    RepeatEditor(value: task.repeat) { rule in model.perform { try $0.setRepeat(id: task.id, repeat: rule) } }
+                }
+                .help(L("Repeat (⇧⌘R)"))
+                .chipStop(.repeat, focus: $chip, keys: keys) { popover = .repeat }
+        case .remind:
+            chipButton(.remind, symbol: "bell", text: task.remind.map(Moment.label) ?? "", tint: .accentColor, set: set)
+                .popover(isPresented: isOpen(.remind)) {
+                    DateEditor(title: L("Remind me"), value: task.remind, timeRequired: true) { value in
+                        model.perform { try $0.setRemind(id: task.id, remind: value) }
                     }
-                    .help(L("Repeat (⇧⌘R)"))
-                    .chipStop(.repeat, focus: $chip, keys: keys) { popover = .repeat }
-            }
-            if showsRemind {
-                chipButton(.remind, symbol: "bell", text: task.remind.map(Moment.label) ?? L("Reminder"), tint: .accentColor)
-                    .popover(isPresented: isOpen(.remind)) {
-                        DateEditor(title: L("Remind me"), value: task.remind, timeRequired: true) { value in
-                            model.perform { try $0.setRemind(id: task.id, remind: value) }
-                        }
-                    }
-                    .chipStop(.remind, focus: $chip, keys: keys) { popover = .remind }
-            }
+                }
+                .help(L("Reminder"))
+                .chipStop(.remind, focus: $chip, keys: keys) { popover = .remind }
+        case .priority:
             Menu {
                 ChoiceItems(choices: priorityChoices)
             } label: {
-                Chip(symbol: "flag", text: task.priority == .none ? "" : task.priority.title, tint: task.priority == .none ? .secondary : .orange)
+                Chip(symbol: "flag", text: task.priority == .none ? "" : task.priority.title, tint: task.priority == .none ? .secondary : .orange, plain: !set)
             }
             .menuStyle(.button)
             .buttonStyle(.plain)
@@ -221,35 +241,37 @@ struct TaskEditor: View {
             .help(L("Priority"))
             .menuAnchor(menus, .priority)
             .chipStop(.priority, focus: $chip, keys: keys) { menus.show(priorityChoices, under: .priority) }
-
-            ForEach(task.tags, id: \.self) { tag in
-                Button {
-                    model.perform { try $0.removeTag(id: task.id, tag: tag) }
-                } label: {
-                    Chip(symbol: nil, text: "#\(tag) ×")
-                }
-                .buttonStyle(.plain)
-                .help(L("Remove tag"))
-                .chipStop(.tag(tag), focus: $chip, keys: keys) { model.perform { try $0.removeTag(id: task.id, tag: tag) } }
-            }
-
-            Menu {
-                ChoiceItems(choices: addChoices)
+        case .tag(let tag):
+            Button {
+                model.perform { try $0.removeTag(id: task.id, tag: tag) }
             } label: {
-                Chip(symbol: "plus", text: "")
+                Chip(symbol: nil, text: "#\(tag) ×")
             }
-            .menuStyle(.button)
             .buttonStyle(.plain)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .help(L("Add field"))
-            .popover(isPresented: isOpen(.tag)) {
-                TagEditor(known: model.tags.map(\.name).filter { !task.tags.contains($0) }) { tag in
-                    model.perform { try $0.addTag(id: task.id, tag: tag) }
+            .help(L("Remove tag"))
+            .chipStop(.tag(tag), focus: $chip, keys: keys) { model.perform { try $0.removeTag(id: task.id, tag: tag) } }
+        case .newTag:
+            Button { popover = .tag } label: { Chip(symbol: "number", text: "", plain: true) }
+                .buttonStyle(.plain)
+                .popover(isPresented: isOpen(.tag)) {
+                    TagEditor(known: model.tags.map(\.name).filter { !task.tags.contains($0) }) { tag in
+                        model.perform { try $0.addTag(id: task.id, tag: tag) }
+                    }
                 }
-            }
-            .menuAnchor(menus, .add)
-            .chipStop(.add, focus: $chip, keys: keys) { menus.show(addChoices, under: .add) }
+                .help(L("Tag"))
+                .chipStop(.newTag, focus: $chip, keys: keys) { popover = .tag }
+        case .subtask:
+            Button { model.showSubtasks(task.id) } label: { Chip(symbol: "checklist", text: "", plain: true) }
+                .buttonStyle(.plain)
+                .help(L("Subtask"))
+                .chipStop(.subtask, focus: $chip, keys: keys) { model.showSubtasks(task.id) }
+        case .file:
+            Button { importing = true } label: { Chip(symbol: "paperclip", text: "", plain: true) }
+                .buttonStyle(.plain)
+                .help(L("File or image"))
+                .chipStop(.file, focus: $chip, keys: keys) { importing = true }
+        default:
+            EmptyView()
         }
     }
 
@@ -257,8 +279,8 @@ struct TaskEditor: View {
         Binding(get: { popover == which }, set: { if !$0 && popover == which { popover = nil } })
     }
 
-    private func chipButton(_ which: Popover, symbol: String, text: String, tint: Color) -> some View {
-        Button { popover = which } label: { Chip(symbol: symbol, text: text, tint: tint) }
+    private func chipButton(_ which: Popover, symbol: String, text: String, tint: Color, set: Bool) -> some View {
+        Button { popover = which } label: { Chip(symbol: symbol, text: text, tint: set ? tint : .secondary, plain: !set) }
             .buttonStyle(.plain)
     }
 

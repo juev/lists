@@ -89,7 +89,7 @@ class MarkdownTextView: NSTextView, NSLayoutManagerDelegate {
         activeBlocks = active(in: blocks)
         let selection = selectedRange()
         let dim = NSColor.tertiaryLabelColor
-        let plain: [NSAttributedString.Key: Any] = [.font: baseFont, .foregroundColor: NSColor.secondaryLabelColor]
+        let plain: [NSAttributedString.Key: Any] = [.font: baseFont, .foregroundColor: NSColor.labelColor]
 
         var hidden = IndexSet(), bullets = IndexSet(), tabs = IndexSet()
         boxes = []; links = []; quotes = []; rules = []; codeBlocks = []; grids = []
