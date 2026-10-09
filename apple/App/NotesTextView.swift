@@ -61,7 +61,8 @@ struct NotesTextView: NSViewRepresentable {
         guard let container = view.textContainer, let layout = view.layoutManager else { return nil }
         // The size is asked for before the view is updated: a card that has just taken the note of its task
         // would be measured with the text the view held before, an empty one, and stay one line high (#155).
-        if view.string != text { view.setText(text) }
+        // Not while the note is being typed into: then the view holds the newer text of the two.
+        if view.string != text, view.window?.firstResponder !== view { view.setText(text) }
         // Asked for an ideal size, the view has no width to wrap at: answer with
         // the width it has, never with the text view's own (zero) idea of it.
         let offered = proposal.width.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
