@@ -210,8 +210,8 @@ struct SettingsView: View {
     @Environment(AppModel.self) private var model
 
     private enum Kind: Hashable { case off, webdav, caldav, folder }
-    /// What to do when this Mac and the storage both hold data (S36).
-    private enum Side { case merge, takeStorage, sendDevice }
+    /// A storage being joined with one side replacing the other, until that is confirmed (S36).
+    private struct Replacement { let config: SyncConfig; let side: SyncSide }
     private static let times = ["07:00", "08:00", "09:00", "10:00", "12:00", "18:00", "20:00"]
     private static let leads = [0, 5, 15, 30, 60, 120, 1440]
 
@@ -254,8 +254,7 @@ struct SettingsView: View {
     @State private var testing = false
     /// The storage being joined while the person chooses a side (S36).
     @State private var joining: SyncConfig?
-    /// The side that replaces the other one, until it is confirmed.
-    @State private var replacing: Side?
+    @State private var replacing: Replacement?
 
     var body: some View {
         Form {
@@ -445,24 +444,27 @@ struct SettingsView: View {
         .onAppear(perform: load)
         .confirmationDialog(
             L("This Mac and the storage both hold tasks"),
-            isPresented: Binding(get: { joining != nil && replacing == nil }, set: { if !$0 && replacing == nil { joining = nil } }),
-            titleVisibility: .visible
-        ) {
-            Button(L("Merge")) { join(.merge) }
-            Button(L("Use the data of the storage…")) { replacing = .takeStorage }
-            Button(L("Use the data of this Mac…")) { replacing = .sendDevice }
-            Button(L("Cancel"), role: .cancel) { joining = nil }
-        } message: {
+            isPresented: Binding(get: { joining != nil }, set: { if !$0 { joining = nil } }),
+            titleVisibility: .visible,
+            presenting: joining
+        ) { config in
+            // The buttons carry the storage themselves: the dialog forgets it as it closes.
+            Button(L("Merge")) { apply(config, side: .merge) }
+            Button(L("Use the data of the storage…")) { replacing = Replacement(config: config, side: .storage) }
+            Button(L("Use the data of this Mac…")) { replacing = Replacement(config: config, side: .device) }
+            Button(L("Cancel"), role: .cancel) {}
+        } message: { _ in
             Text(L("Merge keeps the tasks of both sides. The other two choices keep one side and replace the other."))
         }
         .alert(
-            replacing == .takeStorage ? L("Replace the data of this Mac?") : L("Replace the data of the storage?"),
-            isPresented: Binding(get: { replacing != nil }, set: { if !$0 { replacing = nil; joining = nil } })
-        ) {
-            Button(L("Replace"), role: .destructive) { if let side = replacing { join(side) } }
-            Button(L("Cancel"), role: .cancel) { replacing = nil; joining = nil }
-        } message: {
-            Text(replacing == .takeStorage
+            replacing?.side == .storage ? L("Replace the data of this Mac?") : L("Replace the data of the storage?"),
+            isPresented: Binding(get: { replacing != nil }, set: { if !$0 { replacing = nil } }),
+            presenting: replacing
+        ) { choice in
+            Button(L("Replace"), role: .destructive) { apply(choice.config, side: choice.side) }
+            Button(L("Cancel"), role: .cancel) {}
+        } message: { choice in
+            Text(choice.side == .storage
                 ? L("The tasks, lists and filters of this Mac are erased and read again from the storage. Changes that have not been synced are lost.")
                 : L("The storage and every other device get the data of this Mac. What this Mac does not have goes to the Trash on all devices, and edits made elsewhere are undone."))
         }
@@ -550,17 +552,23 @@ struct SettingsView: View {
         }
     }
 
-    private func join(_ side: Side) {
-        guard let config = joining else { return }
-        joining = nil
-        replacing = nil
-        apply(config, side: side)
+    private func apply(_ config: SyncConfig, side: SyncSide) {
+        guard let store = model.store else { return }
+        guard side != .merge else { return finish(Result { try store.joinStorage(config: config, side: side) }) }
+        // Replacing a side waits for a run that is under way: not on the main thread.
+        testing = true
+        Task {
+            let joined = await Task.detached { Result { try store.joinStorage(config: config, side: side) } }.value
+            testing = false
+            finish(joined)
+        }
     }
 
-    private func apply(_ config: SyncConfig, side: Side) {
+    /// The rest of saving, once the storage is stored.
+    private func finish(_ joined: Result<Void, Error>) {
         guard let store = model.store else { return }
         do {
-            try store.setSyncConfig(config: config)
+            try joined.get()
             try store.setPushServer(server: kind == .off ? nil : pushServer)
             // The core keeps the address without the trailing slash; the token is filed under that.
             if let server = try store.pushServer() {
@@ -588,11 +596,6 @@ struct SettingsView: View {
                     message = L("The password could not be saved in the system keychain: %@", error.localizedDescription)
                 }
                 store.setSyncPassword(password: password)
-            }
-            switch side {
-            case .merge: break
-            case .takeStorage: try store.replaceLocalWithRemote()
-            case .sendDevice: try store.replaceRemoteWithLocal()
             }
             model.reload()
             model.watchSyncFolder()
