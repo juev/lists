@@ -586,7 +586,12 @@ impl Store {
         });
         if outdated {
             // Without the backup the migration does not start: the data stays as it was.
-            if store.holds_data()? {
+            // Asked of the registers alone: the derived tables are as the earlier version left them.
+            let written: bool = store
+                .lock()
+                .conn
+                .query_row("SELECT EXISTS (SELECT 1 FROM fields)", [], |r| r.get(0))?;
+            if written {
                 store.create_backup()?;
             }
             db::migrate(&store.lock().conn)?;
