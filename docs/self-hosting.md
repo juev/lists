@@ -6,14 +6,14 @@ The server is meant for one person: everyone who signs in sees the same data.
 
 ## Docker
 
-The image is `ghcr.io/juev/lists`, built for amd64 and arm64. Tags: the version (`0.1.0`), the minor line (`0.1`) and `latest`. Pre-releases get the version tag only, so until the first release without a suffix the image is pulled by its version, such as `0.1.0-rc.10`; the newest one is named on the [releases page](https://github.com/juev/lists/releases).
+The image is `ghcr.io/juev/lists`, built for amd64 and arm64. Tags: the version (`0.1.0`), the minor line (`0.1`) and `latest`. Pre-releases get the version tag only; every version is listed on the [releases page](https://github.com/juev/lists/releases).
 
 ```sh
 docker run -d --name lists \
   -p 8080:8080 \
   -v lists-data:/data \
   -e LISTS_WEB_PASSWORD='choose a password' \
-  ghcr.io/juev/lists:0.1.0-rc.10
+  ghcr.io/juev/lists:0.1.0
 ```
 
 The container listens on port 8080, keeps its data in `/data` and runs as user 10001. A directory mounted over `/data` must be writable by that user.
@@ -25,7 +25,7 @@ The repository carries a ready [`compose.yaml`](../compose.yaml) that reads its 
 ```yaml
 services:
   lists:
-    image: ghcr.io/juev/lists:0.1.0-rc.10
+    image: ghcr.io/juev/lists:0.1.0
     restart: unless-stopped
     ports:
       - "127.0.0.1:8080:8080"
