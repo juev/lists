@@ -8,6 +8,7 @@ import android.content.res.Configuration
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -33,6 +34,9 @@ import androidx.compose.material.icons.outlined.Flag
 import androidx.compose.material.icons.outlined.OpenInFull
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Repeat
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -51,20 +55,18 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import org.evsyukov.lists.R
 import org.evsyukov.lists.Repo
 import org.evsyukov.lists.dateLabel
 import org.evsyukov.lists.displayName
-import org.evsyukov.lists.marks
 import org.evsyukov.lists.priorities
 import org.evsyukov.lists.str
 import org.evsyukov.lists.summary
@@ -177,8 +179,9 @@ private val urisSaver = listSaver<List<Uri>, String>(save = { uris -> uris.map(U
  * window. With `keepOpen` it empties itself after each task and waits for the
  * next one; the list and the size stay as chosen.
  *
- * It has two sizes (R64). Compact shows the fields as one row of icons;
- * expanded takes the height it is given and shows them as labelled rows that
+ * It has two sizes (R64). Compact shows the fields as one row, a chip for
+ * what is set and a light icon for what is not, and ends with a strip that
+ * holds the list and "Save"; expanded takes the height it is given and shows them as labelled rows that
  * scroll under the title. In landscape it is always expanded: the compact one
  * has no room above the keyboard.
  */
@@ -234,8 +237,9 @@ fun NewTaskCard(
     val presetPriority = chosen?.defaultPriority?.takeIf { priority == null && it != Priority.NONE }
     // What the title says wins over an untouched preset (R41), and the icon says so.
     val typed = remember(text, parse) { if (parse && text.isNotBlank()) Repo.store.parseQuick(text) else null }
-    val shownDue = due ?: preset?.let { typed?.due ?: it }
-    val shownPriority = priority ?: presetPriority?.let { typed?.priority?.takeIf { p -> p != Priority.NONE } ?: it } ?: Priority.NONE
+    // Shown as the value of the field, whichever of the three it comes from: the card, the title, the list.
+    val shownDue = shownDue(due, typed?.due, preset)
+    val shownPriority = shownPriority(priority, typed?.priority ?: Priority.NONE, presetPriority)
 
     fun submit() {
         if (text.isBlank()) return
@@ -257,6 +261,7 @@ fun NewTaskCard(
     // One tree for both sizes: the title and the note stay the same fields, so the cursor stays where it was.
     Column(if (full) modifier.fillMaxHeight() else modifier) {
         Row(verticalAlignment = Alignment.CenterVertically) {
+            if (!full) Mark(MarkState.Open, null, Modifier.padding(start = 16.dp))
             TextField(
                 value = text,
                 onValueChange = { text = it },
@@ -270,15 +275,18 @@ fun NewTaskCard(
             if (!landscape) {
                 IconButton(onClick = { expanded = !expanded }) {
                     if (expanded) Icon(Icons.Outlined.CloseFullscreen, str(R.string.collapse_card))
-                    else Icon(Icons.Outlined.OpenInFull, str(R.string.expand_card))
+                    else Icon(Icons.Outlined.OpenInFull, str(R.string.expand_card), tint = MaterialTheme.colorScheme.outline)
                 }
             }
-            IconButton(onClick = { submit() }, enabled = text.isNotBlank()) {
-                Icon(Icons.AutoMirrored.Outlined.Send, str(R.string.add))
+            // Compact, the card is saved from the strip at its bottom.
+            if (full) {
+                IconButton(onClick = { submit() }, enabled = text.isNotBlank()) {
+                    Icon(Icons.AutoMirrored.Outlined.Send, str(R.string.add))
+                }
             }
         }
         Column(if (full) Modifier.weight(1f).verticalScroll(rememberScrollState()) else Modifier) {
-            if (parse) QuickChips(text, Modifier.padding(start = 16.dp, bottom = 4.dp))
+            if (parse && full) QuickChips(text, Modifier.padding(start = 16.dp, bottom = 4.dp))
             TextField(
                 value = note,
                 onValueChange = { note = it },
@@ -292,7 +300,8 @@ fun NewTaskCard(
                 textStyle = MaterialTheme.typography.bodyMedium,
                 colors = transparentField(),
                 keyboardOptions = SentenceKeyboard,
-                modifier = Modifier.fillMaxWidth(),
+                // Compact, the note begins under the title, past the mark.
+                modifier = Modifier.fillMaxWidth().padding(start = if (full) 0.dp else 34.dp),
             )
             // The same fields as in the editor, so that nothing has to be typed as text.
             val startText = start?.let { dateLabel(it).lowercase() }
@@ -307,14 +316,57 @@ fun NewTaskCard(
                 // Under a project there is nothing to choose: the parent decides the list.
                 if (listName != null) FieldRow(Icons.AutoMirrored.Outlined.List, str(R.string.list), listName) { dialog = "list" }
             } else {
-                FittedRow(Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
-                    FieldIcon(Icons.Outlined.PlayArrow, str(R.string.start), startText) { dialog = "start" }
-                    FieldIcon(Icons.Outlined.Event, str(R.string.due), dueText) { dialog = "due" }
-                    FieldIcon(Icons.Outlined.Repeat, str(R.string.repeat), repeat?.summary()) { dialog = "repeat" }
-                    FieldIcon(Icons.Outlined.Flag, str(R.string.priority), shownPriority.marks().ifEmpty { null }) { dialog = "priority" }
-                    FieldIcon(Icons.Outlined.AttachFile, str(R.string.file_or_image), filesText) { pickFiles.launch("*/*") }
-                    if (listName != null) FieldIcon(Icons.AutoMirrored.Outlined.List, str(R.string.list), listName) { dialog = "list" }
+                FieldsRow(
+                    Modifier.fillMaxWidth().padding(start = 50.dp, end = 8.dp),
+                    chips = {
+                        start?.let { ValueChip(dateLabel(it), Icons.Outlined.PlayArrow, str(R.string.start)) { dialog = "start" } }
+                        shownDue?.let { ValueChip(dateLabel(it), Icons.Outlined.Event, str(R.string.due)) { dialog = "due" } }
+                        repeat?.let { ValueChip(it.summary(), Icons.Outlined.Repeat, str(R.string.repeat)) { dialog = "repeat" } }
+                        if (shownPriority != Priority.NONE) {
+                            ValueChip(shownPriority.title(), Icons.Outlined.Flag, str(R.string.priority), color = PriorityColor) { dialog = "priority" }
+                        }
+                        filesText?.let { ValueChip(it, Icons.Outlined.AttachFile, str(R.string.file_or_image)) { pickFiles.launch("*/*") } }
+                        // Read from the title and changed there (R41).
+                        for (tag in typed?.tags.orEmpty()) ValueChip("#$tag", onClick = null)
+                        typed?.listName?.let { ValueChip("@$it", onClick = null) }
+                    },
+                    icons = {
+                        if (startText == null) LightIcon(Icons.Outlined.PlayArrow, str(R.string.start)) { dialog = "start" }
+                        if (dueText == null) LightIcon(Icons.Outlined.Event, str(R.string.due)) { dialog = "due" }
+                        if (repeat == null) LightIcon(Icons.Outlined.Repeat, str(R.string.repeat)) { dialog = "repeat" }
+                        if (shownPriority == Priority.NONE) LightIcon(Icons.Outlined.Flag, str(R.string.priority)) { dialog = "priority" }
+                        LightIcon(Icons.Outlined.AttachFile, str(R.string.file_or_image)) { pickFiles.launch("*/*") }
+                    },
+                )
+            }
+        }
+        if (!full) {
+            HorizontalDivider(Modifier.padding(top = 6.dp), color = MaterialTheme.colorScheme.outlineVariant)
+            Row(
+                Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, top = 6.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // Under a project there is nothing to choose: the parent decides the list.
+                if (listName != null) {
+                    Row(
+                        Modifier.weight(1f, fill = false).clip(CircleShape).clickable(role = Role.Button) { dialog = "list" }.heightIn(min = 40.dp).padding(horizontal = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.AutoMirrored.Outlined.List, str(R.string.list), Modifier.size(18.dp), tint = chosen?.tint() ?: MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(Modifier.width(6.dp))
+                        Text(listName, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                } else {
+                    Spacer(Modifier.weight(1f))
                 }
+                Button(
+                    onClick = { submit() },
+                    enabled = text.isNotBlank(),
+                    shape = CircleShape,
+                    colors = ButtonDefaults.buttonColors(containerColor = viewTint(ViewTint.Blue), contentColor = Color.White),
+                    contentPadding = PaddingValues(horizontal = 18.dp),
+                ) { Text(str(R.string.save)) }
             }
         }
     }
@@ -324,27 +376,6 @@ fun NewTaskCard(
         "repeat" -> RepeatDialog(repeat, onPick = { repeat = it }) { dialog = null }
         "priority" -> ChoiceDialog(str(R.string.priority), priorities.map { it.title() }, priorities.indexOf(shownPriority), { dialog = null }) { priority = priorities[it] }
         "list" -> ChoiceDialog(str(R.string.list), lists.map { it.displayName() }, lists.indexOfFirst { it.id == chosenList }, { dialog = null }) { chosenList = lists[it].id }
-    }
-}
-
-/** A field of the compact card: its icon, and the value next to it once one is set. */
-@Composable
-private fun FieldIcon(icon: ImageVector, label: String, value: String?, onClick: () -> Unit) {
-    Row(
-        Modifier.clip(CircleShape).clickable(role = Role.Button, onClick = onClick).heightIn(min = 40.dp).widthIn(min = 36.dp).padding(horizontal = 6.dp),
-        horizontalArrangement = Arrangement.Center,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(
-            icon,
-            label,
-            Modifier.size(18.dp),
-            tint = if (value != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        if (value != null) {
-            Spacer(Modifier.width(3.dp))
-            Text(value, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelMedium)
-        }
     }
 }
 
@@ -367,41 +398,4 @@ private fun FieldRow(icon: ImageVector, label: String, value: String?, onClick: 
             modifier = Modifier.weight(1f).padding(start = 16.dp),
         )
     }
-}
-
-/**
- * A row that never runs past its width. Children that fit keep their size;
- * when they do not, the widest are narrowed first and cut their text short.
- */
-@Composable
-private fun FittedRow(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
-    Layout(content, modifier) { measurables, constraints ->
-        val wanted = measurables.map { it.maxIntrinsicWidth(constraints.maxHeight) }
-        val widths = fitWidths(wanted, constraints.maxWidth)
-        val placeables = measurables.mapIndexed { index, measurable ->
-            measurable.measure(Constraints(maxWidth = widths[index], maxHeight = constraints.maxHeight))
-        }
-        val height = placeables.maxOfOrNull { it.height } ?: 0
-        layout(constraints.maxWidth, height.coerceAtLeast(constraints.minHeight)) {
-            var x = 0
-            for (placeable in placeables) {
-                placeable.placeRelative(x, (height - placeable.height) / 2)
-                x += placeable.width
-            }
-        }
-    }
-}
-
-/** Shares `total` among children that want `wanted`: the narrow ones get what they ask for, the rest split what is left evenly. */
-internal fun fitWidths(wanted: List<Int>, total: Int): List<Int> {
-    if (wanted.sum() <= total) return wanted
-    val widths = IntArray(wanted.size)
-    var left = total
-    var waiting = wanted.size
-    for (index in wanted.indices.sortedBy { wanted[it] }) {
-        widths[index] = minOf(wanted[index], left / waiting)
-        left -= widths[index]
-        waiting--
-    }
-    return widths.toList()
 }

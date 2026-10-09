@@ -38,14 +38,12 @@ import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.CalendarMonth
-import androidx.compose.material.icons.outlined.CheckBox
-import androidx.compose.material.icons.outlined.CheckBoxOutlineBlank
+import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Checklist
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.CloudDone
 import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.CloudSync
-import androidx.compose.material.icons.outlined.DisabledByDefault
 import androidx.compose.material.icons.outlined.FilterList
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Inventory2
@@ -68,7 +66,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
-import androidx.compose.material3.NavigationDrawerItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
@@ -107,9 +104,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -215,8 +214,8 @@ fun MainScreen(model: MainViewModel, onReminderSet: () -> Unit) {
                 TopAppBar(
                     title = {
                         val query = state.search
-                        if (query == null) Text(state.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        else SearchField(query, model::search)
+                        // R95: the title of the view stands at the top of the content; the bar holds the search field only.
+                        if (query != null) SearchField(query, model::search)
                     },
                     navigationIcon = {
                         IconButton(onClick = { scope.launch { drawer.open() } }) { Icon(Icons.Outlined.Menu, str(R.string.lists)) }
@@ -253,7 +252,12 @@ fun MainScreen(model: MainViewModel, onReminderSet: () -> Unit) {
             },
             floatingActionButton = {
                 if (!state.readOnly) {
-                    FloatingActionButton(onClick = { adding = true }) { Icon(Icons.Outlined.Add, str(R.string.new_task)) }
+                    FloatingActionButton(
+                        onClick = { adding = true },
+                        shape = CircleShape,
+                        containerColor = viewTint(ViewTint.Blue),
+                        contentColor = Color.White,
+                    ) { Icon(Icons.Outlined.Add, str(R.string.new_task)) }
                 }
             },
         ) { padding ->
@@ -274,6 +278,7 @@ fun MainScreen(model: MainViewModel, onReminderSet: () -> Unit) {
                 val eventsShown = state.effectiveScope == Scope.Today && events.isNotEmpty()
                 if (state.loaded && state.sections.all { it.tasks.isEmpty() }) {
                     Column(Modifier.fillMaxSize()) {
+                        if (state.search == null) ViewTitle(state)
                         // R78: the events of the day are shown on a day without tasks as well.
                         if (eventsShown) EventsBlock(events)
                         EmptyState(state.effectiveScope)
@@ -281,16 +286,12 @@ fun MainScreen(model: MainViewModel, onReminderSet: () -> Unit) {
                 } else {
                     // Room below the last row, so that the add button does not cover it.
                     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 88.dp)) {
+                        if (state.search == null) item(key = "title") { ViewTitle(state) }
                         if (eventsShown) item(key = "events") { EventsBlock(events) }
                         for (section in state.sections) {
                             section.title?.let { title ->
                                 item(key = "h:${section.key}") {
-                                    Text(
-                                        title,
-                                        Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp),
-                                        style = MaterialTheme.typography.labelLarge,
-                                        color = if (section.key == "overdue") MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-                                    )
+                                    GroupHeading(title)
                                 }
                             }
                             items(section.tasks, key = { "${section.key}:${it.id}" }) { task ->
@@ -603,12 +604,13 @@ private fun SwipeRow(task: TaskItem, state: UiState, onToggle: () -> Unit, onOpe
         enableDismissFromEndToStart = !locked,
         backgroundContent = {
             val toEnd = swipe.dismissDirection == SwipeToDismissBoxValue.StartToEnd
+            // R95: a coloured tile with the icon of the action.
             Row(
-                Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceVariant).padding(horizontal = 20.dp),
+                Modifier.fillMaxSize().background(viewTint(if (toEnd) ViewTint.Green else ViewTint.Yellow)).padding(horizontal = 20.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = if (toEnd) Arrangement.Start else Arrangement.End,
             ) {
-                Icon(if (toEnd) Icons.Outlined.CheckBox else Icons.Outlined.CalendarMonth, null)
+                Icon(if (toEnd) Icons.Outlined.Check else Icons.Outlined.CalendarMonth, null, tint = if (toEnd) Color.White else Color.Black)
             }
         },
     ) {
@@ -623,7 +625,16 @@ private fun UiState.showsOrigin(): Boolean = when (effectiveScope) {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun TaskRow(task: TaskItem, state: UiState, onToggle: () -> Unit, onOpen: () -> Unit, model: MainViewModel, showOrigin: Boolean) {
+fun TaskRow(
+    task: TaskItem,
+    state: UiState,
+    onToggle: () -> Unit,
+    onOpen: () -> Unit,
+    model: MainViewModel,
+    showOrigin: Boolean,
+    // A subtask in the card of its task (R96): a round mark, and grey without a strike when it is done.
+    subtask: Boolean = false,
+) {
     var menu by remember { mutableStateOf(false) }
     val done = task.done != null
     Row(
@@ -634,15 +645,7 @@ fun TaskRow(task: TaskItem, state: UiState, onToggle: () -> Unit, onOpen: () -> 
         verticalAlignment = Alignment.CenterVertically,
     ) {
         IconButton(onClick = onToggle, enabled = !task.deleted && !task.isLog) {
-            Icon(
-                when {
-                    task.wont -> Icons.Outlined.DisabledByDefault
-                    done -> Icons.Outlined.CheckBox
-                    else -> Icons.Outlined.CheckBoxOutlineBlank
-                },
-                contentDescription = if (done) str(R.string.reopen) else str(R.string.complete),
-                tint = if (done) MaterialTheme.colorScheme.onSurfaceVariant else state.list(task.listId)?.tint() ?: MaterialTheme.colorScheme.primary,
-            )
+            Mark(task.markState(), if (done) str(R.string.reopen) else str(R.string.complete), round = subtask)
         }
         if (task.isProject) {
             Icon(Icons.Outlined.Folder, str(R.string.project), Modifier.padding(end = 6.dp).size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -650,7 +653,7 @@ fun TaskRow(task: TaskItem, state: UiState, onToggle: () -> Unit, onOpen: () -> 
         if (task.priority != Priority.NONE) {
             Text(
                 task.priority.marks(),
-                color = Color(0xFFE8890C),
+                color = PriorityColor,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.padding(end = 6.dp).semantics { contentDescription = task.priority.title() },
             )
@@ -661,8 +664,12 @@ fun TaskRow(task: TaskItem, state: UiState, onToggle: () -> Unit, onOpen: () -> 
                 task.title,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                textDecoration = if (done) TextDecoration.LineThrough else null,
-                color = if (done) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                textDecoration = if (done && !subtask) TextDecoration.LineThrough else null,
+                color = when {
+                    !done -> MaterialTheme.colorScheme.onSurface
+                    subtask -> MaterialTheme.colorScheme.outline
+                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                },
                 modifier = Modifier.weight(1f, fill = false),
             )
             Marks(task, parent = task.parentTitle.takeIf { showOrigin })
@@ -684,6 +691,12 @@ fun TaskRow(task: TaskItem, state: UiState, onToggle: () -> Unit, onOpen: () -> 
             }
         }
     }
+}
+
+fun TaskItem.markState(): MarkState = when {
+    wont -> MarkState.Wont
+    done != null -> MarkState.Done
+    else -> MarkState.Open
 }
 
 /** Marks after the title, only for what is set, without text or numbers (R72); then the parent of a subtask shown on its own (R12). */
@@ -823,26 +836,12 @@ private fun Drawer(
     }
 }
 
-// The colours of the icons of the built-in views (R79): the same as on macOS, a lighter shade in the dark look.
-// They come neither from a list nor from the dynamic palette.
-internal enum class ViewTint(val light: Long, val dark: Long) {
-    Blue(0xFF007AFF, 0xFF0A84FF),
-    Yellow(0xFFFFCC00, 0xFFFFD60A),
-    Pink(0xFFFF2D55, 0xFFFF375F),
-    Teal(0xFF30B0C7, 0xFF40C8E0),
-    Green(0xFF34C759, 0xFF30D158),
-    Gray(0xFF8E8E93, 0xFF98989D),
-}
-
-@Composable
-private fun viewTint(tint: ViewTint): Color =
-    Color(if (MaterialTheme.colorScheme.surface.luminance() < 0.5f) tint.dark else tint.light)
-
 @Composable
 private fun DrawerHeading(text: String) {
     Text(text, Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }
 
+/** A row of the panel of lists. A long press opens the settings of what it shows; there is no gear at the row (R95). */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun DrawerItem(
@@ -855,19 +854,73 @@ private fun DrawerItem(
     onLong: (() -> Unit)? = null,
     onClick: () -> Unit,
 ) {
-    NavigationDrawerItem(
-        label = { Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-        icon = { Icon(icon, null, tint = tint ?: MaterialTheme.colorScheme.onSurfaceVariant) },
-        badge = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (count > 0u) Text("$count", color = if (alert) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
-                if (onLong != null) {
-                    Spacer(Modifier.width(8.dp))
-                    Icon(Icons.Outlined.Settings, str(R.string.configure), Modifier.size(18.dp).clip(CircleShape).clickable(onClick = onLong), tint = MaterialTheme.colorScheme.outline)
-                }
-            }
-        },
-        selected = selected,
-        onClick = onClick,
-    )
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .height(56.dp)
+            .clip(CircleShape)
+            .background(if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
+            .combinedClickable(
+                role = Role.Tab,
+                onLongClickLabel = if (onLong != null) str(R.string.configure) else null,
+                onLongClick = onLong,
+                onClick = onClick,
+            )
+            .semantics { this.selected = selected }
+            .padding(start = 16.dp, end = 24.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, null, tint = tint ?: MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(
+            label,
+            Modifier.weight(1f).padding(horizontal = 12.dp),
+            style = MaterialTheme.typography.labelLarge,
+            color = if (selected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        if (count > 0u) {
+            Text("$count", style = MaterialTheme.typography.labelLarge, color = if (alert) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+/** R95: the large title of the view with its icon, at the top of the content. */
+@Composable
+private fun ViewTitle(state: UiState) {
+    val plain = MaterialTheme.colorScheme.onSurfaceVariant
+    val (icon, tint) = when (val scope = state.scope) {
+        Scope.Inbox -> Icons.Filled.Inbox to viewTint(ViewTint.Blue)
+        Scope.Today -> Icons.Filled.Star to viewTint(ViewTint.Yellow)
+        Scope.Upcoming -> Icons.Filled.CalendarMonth to viewTint(ViewTint.Pink)
+        Scope.All -> Icons.Filled.Layers to viewTint(ViewTint.Teal)
+        Scope.Completed -> Icons.Filled.CheckBox to viewTint(ViewTint.Green)
+        Scope.WontDo -> Icons.Filled.DisabledByDefault to viewTint(ViewTint.Gray)
+        Scope.Trash -> Icons.Filled.Delete to viewTint(ViewTint.Gray)
+        is Scope.List -> Icons.AutoMirrored.Outlined.List to (state.list(scope.id)?.tint() ?: plain)
+        is Scope.Project -> Icons.Outlined.Folder to (state.projects.firstOrNull { it.id == scope.id }?.let { state.list(it.listId)?.tint() } ?: plain)
+        is Scope.Filter -> Icons.Outlined.FilterList to plain
+        is Scope.Tag -> Icons.Outlined.Tag to plain
+        is Scope.Search -> Icons.Outlined.Search to plain
+    }
+    Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon, null, Modifier.size(28.dp), tint = tint)
+        Text(
+            state.title,
+            Modifier.padding(start = 10.dp).semantics { heading() },
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.Bold,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/** R95: the heading of a group, in the colour of text with a thin line under it. */
+@Composable
+private fun GroupHeading(title: String) {
+    Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 4.dp)) {
+        Text(title, Modifier.semantics { heading() }, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+        HorizontalDivider(Modifier.padding(top = 6.dp), color = MaterialTheme.colorScheme.outlineVariant)
+    }
 }

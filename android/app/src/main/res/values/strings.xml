@@ -297,4 +297,5 @@
     <string name="wont_do">Won\'t do</string>
     <string name="wont_do_notice">Marked \"won\'t do\"</string>
     <string name="empty_wont_do">No tasks marked \"won\'t do\"</string>
+    <string name="save">Save</string>
 </resources>

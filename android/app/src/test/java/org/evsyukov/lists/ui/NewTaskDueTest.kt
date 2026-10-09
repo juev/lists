@@ -71,4 +71,34 @@ class NewTaskDueTest {
         assertEquals(today, finalDue(due = null, isPreset = false, removed = false, created = today, typed = null))
         assertNull(finalDue(due = null, isPreset = false, removed = false, created = null, typed = null))
     }
+
+    @Test
+    fun r64_the_card_shows_the_picked_due_then_the_typed_then_the_preset() {
+        assertEquals(tomorrow, shownDue(picked = tomorrow, typed = today, preset = today))
+        assertEquals(tomorrow, shownDue(picked = null, typed = tomorrow, preset = today))
+        assertEquals(today, shownDue(picked = null, typed = null, preset = today))
+        assertNull(shownDue(picked = null, typed = null, preset = null))
+    }
+
+    @Test
+    fun r64_the_card_shows_the_priority_the_task_will_get() {
+        // Untouched: the title wins over the default of the list (R41).
+        assertEquals(Priority.MEDIUM, shownPriority(picked = null, typed = Priority.MEDIUM, preset = Priority.HIGH))
+        assertEquals(Priority.HIGH, shownPriority(picked = null, typed = Priority.NONE, preset = Priority.HIGH))
+        assertEquals(Priority.NONE, shownPriority(picked = null, typed = Priority.NONE, preset = null))
+        // "None" takes the default of the list away and leaves what the title names (R75).
+        assertEquals(Priority.MEDIUM, shownPriority(picked = Priority.NONE, typed = Priority.MEDIUM, preset = null))
+        assertEquals(Priority.NONE, shownPriority(picked = Priority.NONE, typed = Priority.NONE, preset = null))
+        assertEquals(Priority.LOW, shownPriority(picked = Priority.LOW, typed = Priority.HIGH, preset = null))
+    }
+
+    @Test
+    fun r64_what_the_card_shows_is_what_the_task_gets() {
+        for (picked in listOf(null, Priority.NONE, Priority.LOW)) {
+            for (typed in listOf(Priority.NONE, Priority.MEDIUM)) {
+                // The core gives a new task the priority of its title, which is what `created` holds here.
+                assertEquals(finalPriority(picked, created = typed, typed = typed), shownPriority(picked, typed, preset = null))
+            }
+        }
+    }
 }

@@ -40,11 +40,16 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Add
-import androidx.compose.material.icons.outlined.CheckBox
-import androidx.compose.material.icons.outlined.CheckBoxOutlineBlank
+import androidx.compose.material.icons.outlined.AttachFile
+import androidx.compose.material.icons.outlined.Checklist
 import androidx.compose.material.icons.outlined.Close
-import androidx.compose.material.icons.outlined.DisabledByDefault
+import androidx.compose.material.icons.outlined.Event
+import androidx.compose.material.icons.outlined.Flag
 import androidx.compose.material.icons.outlined.MoreVert
+import androidx.compose.material.icons.outlined.Notifications
+import androidx.compose.material.icons.outlined.PlayArrow
+import androidx.compose.material.icons.outlined.Repeat
+import androidx.compose.material.icons.outlined.Tag
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.AssistChip
@@ -272,8 +277,8 @@ private fun openAttachment(context: Context, file: Attachment) {
 }
 
 /**
- * The task editor: a sheet over the list. Title, note and one row of chips;
- * fields that are not set take no space and are added from the "+" chip.
+ * The task editor: a sheet over the list. Title, note and one row of fields:
+ * a chip for each field that is set, a light icon for each that is not (R96).
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -284,7 +289,6 @@ fun EditorSheet(editing: Editing, state: UiState, model: MainViewModel, onRemind
     val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var dialog by rememberSaveable(task.id) { mutableStateOf<String?>(null) }
     var menu by remember { mutableStateOf(false) }
-    var addMenu by remember { mutableStateOf(false) }
     // Subtasks are not mentioned until the task has one or the user asks for the field.
     var subtaskField by remember(task.id) { mutableStateOf(false) }
     // The attachment shown over the screen; it closes by itself when the file is removed elsewhere.
@@ -350,15 +354,7 @@ fun EditorSheet(editing: Editing, state: UiState, model: MainViewModel, onRemind
             }
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 4.dp, end = 4.dp)) {
                 IconButton(onClick = { model.toggleDone(task) }, enabled = !locked) {
-                    Icon(
-                        when {
-                            task.wont -> Icons.Outlined.DisabledByDefault
-                            task.done != null -> Icons.Outlined.CheckBox
-                            else -> Icons.Outlined.CheckBoxOutlineBlank
-                        },
-                        if (task.done != null) str(R.string.reopen) else str(R.string.complete),
-                        tint = state.list(task.listId)?.tint() ?: MaterialTheme.colorScheme.primary,
-                    )
+                    Mark(task.markState(), if (task.done != null) str(R.string.reopen) else str(R.string.complete))
                 }
                 CommittedField(
                     key = task.id,
@@ -367,7 +363,7 @@ fun EditorSheet(editing: Editing, state: UiState, model: MainViewModel, onRemind
                     enabled = !locked,
                     singleLine = true,
                     wraps = true,
-                    textStyle = MaterialTheme.typography.titleMedium,
+                    textStyle = MaterialTheme.typography.bodyLarge,
                     modifier = Modifier.weight(1f),
                 ) { value -> if (value.isNotBlank()) model.act { it.setTitle(task.id, value) } }
                 Box {
@@ -400,48 +396,35 @@ fun EditorSheet(editing: Editing, state: UiState, model: MainViewModel, onRemind
             ) { value -> model.act { it.setNotes(task.id, value) } }
 
             if (!locked) {
-                FlowRow(
-                    Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    // Both dates are always on show: when the work begins and when it is due.
-                    AssistChip(
-                        onClick = { dialog = "start" },
-                        label = { Text(task.start?.let { str(R.string.start_at, dateLabel(it).lowercase()) } ?: str(R.string.start)) },
-                    )
-                    val overdue = task.due?.let { isOverdue(it) && task.done == null } == true
-                    AssistChip(
-                        onClick = { dialog = "due" },
-                        label = { Text(task.due?.let { str(R.string.due_at, dateLabel(it).lowercase()) } ?: str(R.string.due), color = if (overdue) MaterialTheme.colorScheme.error else Color.Unspecified) },
-                    )
-                    task.repeat?.let { AssistChip(onClick = { dialog = "repeat" }, label = { Text(it.summary()) }) }
-                    task.remind?.let { AssistChip(onClick = { dialog = "remind" }, label = { Text(str(R.string.remind_at, dateLabel(it).lowercase())) }) }
-                    AssistChip(
-                        onClick = { dialog = "priority" },
-                        label = { Text(if (task.priority == Priority.NONE) str(R.string.priority) else task.priority.title()) },
-                    )
-                    for (tag in task.tags) {
-                        InputChip(
-                            selected = false,
-                            onClick = { model.act { it.removeTag(task.id, tag) } },
-                            label = { Text("#$tag") },
-                            trailingIcon = { Icon(Icons.Outlined.Close, str(R.string.remove_tag), Modifier.size(16.dp)) },
-                        )
-                    }
-                    Box {
-                        AssistChip(onClick = { addMenu = true }, label = { Icon(Icons.Outlined.Add, str(R.string.add_field), Modifier.size(18.dp)) })
-                        DropdownMenu(expanded = addMenu, onDismissRequest = { addMenu = false }) {
-                            @Composable
-                            fun item(label: String, action: () -> Unit) =
-                                DropdownMenuItem(text = { Text(label) }, onClick = { addMenu = false; action() })
-                            if (task.repeat == null) item(str(R.string.repeat)) { dialog = "repeat" }
-                            if (task.remind == null) item(str(R.string.reminder)) { dialog = "remind" }
-                            item(str(R.string.tag)) { dialog = "tag" }
-                            if (editing.subtasks.isEmpty() && !subtaskField) item(str(R.string.subtask)) { subtaskField = true }
-                            item(str(R.string.file_or_image)) { pickFiles.launch("*/*") }
+                // R96: what is set stands at the left with its value, what is not at the right as a light icon.
+                FieldsRow(
+                    Modifier.fillMaxWidth().padding(start = 52.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
+                    chips = {
+                        task.start?.let { ValueChip(dateLabel(it), Icons.Outlined.PlayArrow, str(R.string.start)) { dialog = "start" } }
+                        task.due?.let {
+                            val overdue = isOverdue(it) && task.done == null
+                            ValueChip(dateLabel(it), Icons.Outlined.Event, str(R.string.due), color = if (overdue) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface) { dialog = "due" }
                         }
-                    }
-                }
+                        task.repeat?.let { ValueChip(it.summary(), Icons.Outlined.Repeat, str(R.string.repeat)) { dialog = "repeat" } }
+                        task.remind?.let { ValueChip(dateLabel(it), Icons.Outlined.Notifications, str(R.string.reminder)) { dialog = "remind" } }
+                        if (task.priority != Priority.NONE) {
+                            ValueChip(task.priority.title(), Icons.Outlined.Flag, str(R.string.priority), color = PriorityColor) { dialog = "priority" }
+                        }
+                        for (tag in task.tags) {
+                            ValueChip("#$tag", trailing = Icons.Outlined.Close, trailingLabel = str(R.string.remove_tag)) { model.act { it.removeTag(task.id, tag) } }
+                        }
+                    },
+                    icons = {
+                        if (task.start == null) LightIcon(Icons.Outlined.PlayArrow, str(R.string.start)) { dialog = "start" }
+                        if (task.due == null) LightIcon(Icons.Outlined.Event, str(R.string.due)) { dialog = "due" }
+                        if (task.repeat == null) LightIcon(Icons.Outlined.Repeat, str(R.string.repeat)) { dialog = "repeat" }
+                        if (task.remind == null) LightIcon(Icons.Outlined.Notifications, str(R.string.reminder)) { dialog = "remind" }
+                        if (task.priority == Priority.NONE) LightIcon(Icons.Outlined.Flag, str(R.string.priority)) { dialog = "priority" }
+                        LightIcon(Icons.Outlined.Tag, str(R.string.tag)) { dialog = "tag" }
+                        if (editing.subtasks.isEmpty() && !subtaskField) LightIcon(Icons.Outlined.Checklist, str(R.string.subtask)) { subtaskField = true }
+                        LightIcon(Icons.Outlined.AttachFile, str(R.string.file_or_image)) { pickFiles.launch("*/*") }
+                    },
+                )
             }
 
             for (file in editing.attachments) {
@@ -508,11 +491,16 @@ fun EditorSheet(editing: Editing, state: UiState, model: MainViewModel, onRemind
             }
 
             val showSubtasks = editing.subtasks.isNotEmpty() || subtaskField
-            if (showSubtasks) HorizontalDivider(Modifier.padding(vertical = 8.dp))
-            for (sub in editing.subtasks) {
-                TaskRow(sub, state, onToggle = { model.toggleDone(sub) }, onOpen = { model.open(sub.id) }, model = model, showOrigin = false)
+            // R96: thin lines between the subtasks, none before the first of them.
+            val line = @Composable { HorizontalDivider(Modifier.padding(start = 52.dp, end = 16.dp), color = MaterialTheme.colorScheme.outlineVariant) }
+            editing.subtasks.forEachIndexed { index, sub ->
+                if (index > 0) line()
+                TaskRow(sub, state, onToggle = { model.toggleDone(sub) }, onOpen = { model.open(sub.id) }, model = model, showOrigin = false, subtask = true)
             }
-            if (showSubtasks && !locked) SubtaskField { model.addSubtask(task.id, it) }
+            if (showSubtasks && !locked) {
+                if (editing.subtasks.isNotEmpty()) line()
+                SubtaskField { model.addSubtask(task.id, it) }
+            }
         }
     }
 

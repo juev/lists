@@ -39,3 +39,22 @@ internal fun finalPriority(picked: Priority?, created: Priority, typed: Priority
     Priority.NONE -> typed
     else -> picked
 }
+
+/**
+ * The due date the card shows as set (R64): the one picked in the card, else
+ * the one the title names, else the one the list gives. It is the date
+ * [finalDue] leaves the task with.
+ */
+internal fun shownDue(picked: String?, typed: String?, preset: String?): String? = picked ?: typed ?: preset
+
+/**
+ * The priority the card shows as set (R64), the one [finalPriority] leaves
+ * the task with: a chosen one first; with the field untouched or set to
+ * "none" the one the title names; the default of the list only while the
+ * field is untouched.
+ */
+internal fun shownPriority(picked: Priority?, typed: Priority, preset: Priority?): Priority = when (picked) {
+    null -> typed.takeIf { it != Priority.NONE } ?: preset ?: Priority.NONE
+    Priority.NONE -> typed
+    else -> picked
+}
