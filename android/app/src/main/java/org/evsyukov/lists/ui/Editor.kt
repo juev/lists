@@ -131,6 +131,7 @@ import org.evsyukov.lists.LookPrefs
 import org.evsyukov.lists.Repo
 import org.evsyukov.lists.EventPrefs
 import org.evsyukov.lists.SystemCalendars
+import org.evsyukov.lists.TodayNotice
 import org.evsyukov.lists.Secrets
 import org.evsyukov.lists.dateLabel
 import org.evsyukov.lists.displayName
@@ -1064,6 +1065,7 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
         }
     }
     var notifyOn by remember { mutableStateOf(NotifyPrefs.enabled(context)) }
+    var todayNotice by remember { mutableStateOf(TodayNotice.enabled(context)) }
     // R66: asked again on the way back from the system screen where the leave is given.
     var exactAlarms by remember { mutableStateOf(Reminders.exact(context)) }
     // S31: the same on the way back from the system dialog about the battery.
@@ -1261,6 +1263,13 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
                                     Text(str(R.string.exact_alarms_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                             }
+                            // R104: apart from the reminders, and so not under their switch.
+                            SwitchRow(str(R.string.today_notice_setting), todayNotice) {
+                                todayNotice = it
+                                TodayNotice.setEnabled(context, it)
+                                if (it) onNotifications()
+                            }
+                            Text(str(R.string.today_notice_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         "sync" -> {
                             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {

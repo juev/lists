@@ -230,6 +230,12 @@
     <string name="ordinal_5">5th</string>
     <string name="quick_add">New task</string>
     <string name="reminders_channel">Reminders</string>
+    <string name="quick_add_channel">Quick add</string>
+    <string name="today_notice_title">Today: %1$s</string>
+    <string name="today_notice_empty">Nothing for today</string>
+    <string name="today_notice_more">%1$s more</string>
+    <string name="today_notice_setting">Today\'s tasks in the notification shade</string>
+    <string name="today_notice_hint">A permanent notification with the tasks of Today and a button for a new task.</string>
     <string name="password_missing">Enter the password in the sync settings.</string>
     <string name="password_store_failed">The password could not be saved in the system keychain: %1$s</string>
     <string name="caldav_hint">Lists become calendars and tasks stay visible to other CalDAV apps. Attachments up to 5 MB are synced, up to 20 MB per task.</string>
