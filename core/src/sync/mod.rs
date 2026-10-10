@@ -342,16 +342,21 @@ impl Store {
     /// S19: tells the other devices that there is something to read. Nothing
     /// here can fail the run.
     fn poke_peers(&self, remote: &dyn Remote, me: &str) {
+        let urls = self.peer_addresses(remote, me);
+        self.poke(urls.iter().map(String::as_str));
+    }
+
+    /// The addresses the other devices take nudges at (S18). A storage that cannot be read names none.
+    fn peer_addresses(&self, remote: &dyn Remote, me: &str) -> Vec<String> {
         let own = format!("{me}.json");
         let names = remote.list(&format!("{ROOT}/push")).unwrap_or_default();
-        let urls: Vec<String> = names
+        names
             .iter()
             .filter(|name| **name != own && name.ends_with(".json"))
             .filter_map(|name| remote.get(&format!("{ROOT}/push/{name}")).ok().flatten())
             .filter_map(|data| serde_json::from_slice::<PushRecord>(&data).ok())
             .map(|record| record.url)
-            .collect();
-        self.poke(urls.iter().map(String::as_str));
+            .collect()
     }
 
     /// Replaces this device's log files with one snapshot of its full state.
@@ -533,9 +538,16 @@ impl Store {
             db::meta_del(&self.lock().conn, "force_snapshot")?;
         }
 
+        // S41: the addresses are read when they are needed anyway, and once after the server was set.
+        let unsettled = db::meta_get(&self.lock().conn, crate::push::UNSETTLED_KEY)?.is_some();
+        let peers = (report.pushed > 0 || unsettled).then(|| self.peer_addresses(remote, &me));
+        if let Some(peers) = &peers {
+            self.share_topic(peers.iter().map(String::as_str))?;
+            db::meta_del(&self.lock().conn, crate::push::UNSETTLED_KEY)?;
+        }
         self.publish_push(remote, &me)?;
-        if report.pushed > 0 {
-            self.poke_peers(remote, &me);
+        if let Some(peers) = peers.filter(|_| report.pushed > 0) {
+            self.poke(peers.iter().map(String::as_str));
         }
         Ok(report)
     }

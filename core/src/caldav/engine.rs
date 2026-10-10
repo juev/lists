@@ -678,6 +678,13 @@ fn sync(store: &Store, client: &Client, calendars: Vec<Calendar>) -> Result<Sync
         .and_then(|raw| base64::engine::general_purpose::STANDARD.decode(raw.trim()).ok())
         .and_then(|json| serde_json::from_slice(&json).ok())
         .unwrap_or_default();
+    // S41: the table is read on every run, so the topic is compared on every run.
+    store.share_topic(
+        nudged
+            .iter()
+            .filter(|(device, _)| **device != me)
+            .map(|(_, url)| url.as_str()),
+    )?;
     let endpoint = store.push_endpoint()?;
     if nudged.get(&me) != endpoint.as_ref() {
         match &endpoint {
