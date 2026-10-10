@@ -62,7 +62,7 @@ class ListsApp : Application() {
         super.onCreate()
         instance = this
         SyncWorker.schedule(this)
-        Repo.scope.launch { Reminders.refresh(this@ListsApp); TodayNotice.refresh(this@ListsApp) }
+        Repo.scope.launch { Reminders.refresh(this@ListsApp); TodayNotice.refresh(this@ListsApp); IconCount.refresh(this@ListsApp) }
     }
 
     companion object {
@@ -92,7 +92,11 @@ object Repo {
     fun changed() {
         revision.update { it + 1 }
         pending?.cancel()
-        pending = scope.launch { Reminders.refresh(ListsApp.instance); TodayNotice.refresh(ListsApp.instance) }
+        pending = scope.launch {
+            Reminders.refresh(ListsApp.instance)
+            TodayNotice.refresh(ListsApp.instance)
+            IconCount.refresh(ListsApp.instance)
+        }
         SyncWorker.soon(ListsApp.instance)
     }
 
@@ -109,6 +113,7 @@ object Repo {
             if (result.getOrNull()?.pulled?.let { it > 0u } == true) {
                 Reminders.refresh(ListsApp.instance)
                 TodayNotice.refresh(ListsApp.instance)
+                IconCount.refresh(ListsApp.instance)
             }
             result
         }
@@ -406,7 +411,7 @@ class ReminderReceiver : BroadcastReceiver() {
 
 /**
  * Alarms do not survive a reboot, and they are set anew when the leave for exact ones is given (R66).
- * The ongoing notification does not survive a reboot or an update of the app either (R104).
+ * The ongoing notifications do not survive a reboot or an update of the app either (R104, R106).
  */
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
@@ -418,6 +423,7 @@ class BootReceiver : BroadcastReceiver() {
             Repo.scope.launch {
                 Reminders.refresh(context.applicationContext)
                 TodayNotice.refresh(context.applicationContext)
+                IconCount.refresh(context.applicationContext)
                 result.finish()
             }
         }

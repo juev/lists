@@ -177,9 +177,11 @@ Each device has its own notification settings, and they do not sync:
 
 A reminder set on a task itself replaces the one derived from its due date. The web interface does not notify.
 
-On macOS the icon in the Dock carries a count of tasks. Settings → Notifications → "Count on the icon" chooses what is counted: "Today" (the open tasks of the Today view, the overdue ones among them; the default), "Overdue tasks" or "Do not show". With nothing to count the icon has no number. The choice belongs to the Mac and does not sync. Android has no count on the icon.
+On macOS the icon in the Dock carries a count of tasks. Settings → Notifications → "Count on the icon" chooses what is counted: "Today" (the open tasks of the Today view, the overdue ones among them; the default), "Overdue tasks" or "Do not show". With nothing to count the icon has no number. The choice belongs to the Mac and does not sync.
 
 On Android, Settings → Notifications → "Today's tasks in the notification shade" keeps a permanent notification with the open tasks of Today: their count, the first five titles and a "New task" button that opens quick entry. It is off by default and does not depend on "Show notifications". It is silent and has a channel of its own, "Quick add", which the system settings can hide apart from the reminders. It comes back when it is swiped away, after a restart of the device and after an update of the app; only the switch removes it.
+
+On Android the launcher icon can carry a count as well: Settings → Notifications → "Count on the icon" offers "Today", "Overdue tasks" and "Do not show", and it is off by default. Android lets an app mark its icon only through a notification, so the count comes with a silent notification of its own, "Today: N" or "Overdue: N", in the channel "Count on the icon"; with nothing to count there is neither. What the icon shows is up to the home screen: some draw the number, others a dot and the number in the menu that opens when the icon is held. The notification comes back when it is swiped away and after a restart of the device; "Do not show" removes it. A reminder that still lies in the notification shade is counted by the home screen on top of this number. The choice belongs to the device and does not sync.
 
 On Android 13 and newer a notification arrives at its minute only when "Alarms & reminders" is allowed for Lists. Until then the notification settings show "Reminders may come late": tap it and allow. Without it the system may deliver a notification up to an hour late.
 

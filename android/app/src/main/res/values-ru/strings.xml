@@ -235,6 +235,11 @@
     <string name="today_notice_more">ещё %1$s</string>
     <string name="today_notice_setting">Задачи на сегодня в шторке</string>
     <string name="today_notice_hint">Постоянное уведомление с задачами на сегодня и кнопкой новой задачи.</string>
+    <string name="icon_count">Число на значке</string>
+    <string name="icon_count_overdue_choice">Просроченные</string>
+    <string name="icon_count_none">Не показывать</string>
+    <string name="icon_count_overdue">Просроченные: %1$s</string>
+    <string name="icon_count_hint">Число несёт тихое уведомление. Некоторые главные экраны показывают на значке точку, а число — при долгом нажатии на значок.</string>
     <string name="password_missing">Введите пароль в настройках синхронизации.</string>
     <string name="password_store_failed">Не удалось сохранить пароль в системной связке ключей: %1$s</string>
     <string name="caldav_hint">Списки станут календарями, а задачи будут видны другим CalDAV-приложениям. Вложения синхронизируются до 5 МБ, не больше 20 МБ на задачу.</string>

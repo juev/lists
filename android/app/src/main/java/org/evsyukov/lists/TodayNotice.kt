@@ -20,7 +20,10 @@ import java.time.ZoneId
  * button for quick entry. A setting of this device; not synced.
  */
 object TodayNotice {
-    private const val CHANNEL = "quick_add"
+    private const val CHANNEL = "today_notice"
+
+    /** The channel of the builds before R106. It badged the icon, and an app cannot take that back from a channel that exists. */
+    private const val OLD_CHANNEL = "quick_add"
     private const val ID = 104
     private const val MIDNIGHT = "org.evsyukov.lists.TODAY_NOTICE.MIDNIGHT"
 
@@ -46,6 +49,7 @@ object TodayNotice {
     @Synchronized
     fun refresh(context: Context) {
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
+        manager.deleteNotificationChannel(OLD_CHANNEL)
         val alarms = context.getSystemService(AlarmManager::class.java)
         val midnight = PendingIntent.getBroadcast(
             context, 0, Intent(context, TodayNoticeReceiver::class.java).setAction(MIDNIGHT),
@@ -66,8 +70,10 @@ object TodayNotice {
         val open = runCatching { Repo.store.tasks(Scope.Today) }.getOrElse { return }.filter { it.done == null }
         val (overdue, rest) = open.partition { dueDayPassed(it.due) }
         val (titles, more) = listed((overdue + rest).map { it.title })
+        // R106: the count on the icon has a notification of its own; this one is not counted.
         manager.createNotificationChannel(
             NotificationChannel(CHANNEL, context.getString(R.string.quick_add_channel), NotificationManager.IMPORTANCE_LOW)
+                .apply { setShowBadge(false) }
         )
         val app = PendingIntent.getActivity(
             context, 0, Intent(context, MainActivity::class.java).setAction("today"),
