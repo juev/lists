@@ -55,6 +55,8 @@ import UserNotifications
 /// `dockcount:today`, `dockcount:overdue` and `dockcount:none` (choose what the Dock icon counts the way Settings does, R103),
 /// `dockcount` alone prints the choice, the label the Dock tile carries and the counts it is taken from,
 /// `menu:Title` (prints whether the menu bar item with that title is enabled),
+/// `rowmenu:300,140` (prints the items of the menu a right click at that point of the window would open, without opening it;
+/// `rowmenu:300,140=Title` also chooses the item with that title), `undo` (prints what ⌘Z would take back and takes it back),
 /// `sidebar` (prints how many rows each list of the main window has, the sidebar among them),
 /// `copytext:text`, `copysecret:text` and `copyfile:path` (fill the pasteboard quick entry reads; with `LISTS_DEBUG_PASTEBOARD=name` that is a pasteboard of its own, not the general one),
 /// `clipnotes:on` and `clipnotes:off` (flip the setting of R58), `quicknote` (shows quick entry transparent and without the keyboard, and prints the note it starts with; `quicknote:/path.png` also draws the card into a file),
@@ -321,6 +323,35 @@ enum DebugScript {
                     let items = (NSApp.mainMenu?.items ?? []).flatMap { $0.submenu?.items ?? [] }
                     let item = items.first { $0.title == argument }
                     print("debug: menu \(argument) \(item.map { $0.isEnabled ? "enabled" : "disabled" } ?? "missing")")
+                case "rowmenu":
+                    // The menu a right click at the point would open, asked of the views without opening it.
+                    let parts = argument.split(separator: "=", maxSplits: 1).map(String.init)
+                    let xy = (parts.first ?? "").split(separator: ",").compactMap { Double($0) }
+                    if xy.count == 2, let window = target, let root = window.contentView?.superview ?? window.contentView,
+                       let event = NSEvent.mouseEvent(
+                        with: .rightMouseDown, location: NSPoint(x: xy[0], y: Double(window.frame.height) - xy[1]), modifierFlags: [],
+                        timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
+                        eventNumber: 0, clickCount: 1, pressure: 1) {
+                        // A subtask inside the row of its parent answers first, as it does to the click.
+                        var menu = SubtaskMenuView.area(at: event.locationInWindow, in: window)?.subtaskMenu()
+                        var view = root.hitTest(event.locationInWindow)
+                        while let current = view, menu == nil {
+                            menu = current.menu(for: event)
+                            view = current.superview
+                        }
+                        menu?.update()
+                        print("debug: row menu \(menu?.items.map(\.title) ?? [])")
+                        if parts.count == 2, let menu, let index = menu.items.firstIndex(where: { $0.title == parts[1] }) {
+                            menu.performActionForItem(at: index)
+                        }
+                    } else {
+                        print("debug: row menu none")
+                    }
+                case "undo":
+                    // What ⌘Z does: a hidden window has no keyboard to take the press.
+                    let manager = AppModel.shared.undoManager
+                    print("debug: undo \(manager?.canUndo == true ? manager?.undoActionName ?? "" : "nothing")")
+                    manager?.undo()
                 case "sidebar": print("debug: sidebar rows \(tableRows(in: target?.contentView?.superview))")
                 case "cards":
                     let model = AppModel.shared

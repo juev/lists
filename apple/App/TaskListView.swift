@@ -232,7 +232,8 @@ struct TaskRow: View {
         }
         // Rows set the font themselves: a List does not hand its environment font to them.
         .font(AppFont.style(.body))
-        .contextMenu { menu }
+        .contextMenu { RowMenuItems(items: menuItems) }
+        .background { if depth > 0 { SubtaskMenuArea(items: { menuItems }) } }
         if isExpanded {
             content
                 .onExitCommand { model.closeCard(task.id) }
@@ -384,50 +385,180 @@ struct TaskRow: View {
         }
     }
 
-    @ViewBuilder
-    private var menu: some View {
+    /// The menu of the task. One description for both ways it is drawn: by SwiftUI for a row of
+    /// the list and by AppKit for a subtask inside the row of its parent (`SubtaskMenuArea`).
+    private var menuItems: [RowMenuItem] {
         if inTrash {
-            Button(L("Restore")) { model.perform { try $0.restoreTask(id: task.id) } }
-        } else if task.isLog {
-            Button(L("Delete record"), role: .destructive) { model.delete(task) }
-        } else {
-            Menu(L("Due")) {
-                Button(L("Today")) { model.setDue(task, Moment.today()) }
-                Button(L("Tomorrow")) { model.setDue(task, shiftDate(date: Moment.today(), days: 1)) }
-                Button(L("In a week")) { model.setDue(task, shiftDate(date: Moment.today(), days: 7)) }
+            return [RowMenuItem(title: L("Restore")) { model.perform { try $0.restoreTask(id: task.id) } }]
+        }
+        if task.isLog {
+            return [RowMenuItem(title: L("Delete record"), destructive: true) { model.delete(task) }]
+        }
+        var due = [
+            RowMenuItem(title: L("Today")) { model.setDue(task, Moment.today()) },
+            RowMenuItem(title: L("Tomorrow")) { model.setDue(task, shiftDate(date: Moment.today(), days: 1)) },
+            RowMenuItem(title: L("In a week")) { model.setDue(task, shiftDate(date: Moment.today(), days: 7)) },
+            RowMenuItem.divider,
+            RowMenuItem(title: L("Choose…")) { if !isExpanded { model.toggleExpanded(task.id) } },
+        ]
+        if task.due != nil { due.append(RowMenuItem(title: L("Clear due date")) { model.setDue(task, nil) }) }
+        var items = [
+            RowMenuItem(title: L("Due"), children: due),
+            RowMenuItem(title: L("Priority"), children: Priority.all.map { priority in
+                RowMenuItem(title: priority.title, on: task.priority == priority) {
+                    model.perform { try $0.setPriority(id: task.id, priority: priority) }
+                }
+            }),
+            RowMenuItem(title: L("Move to list"), children: model.lists.filter { !$0.archived }.map { list in
+                RowMenuItem(title: model.listName(list), disabled: task.parentId == nil && task.listId == list.id) {
+                    model.perform { try $0.moveToList(id: task.id, listId: list.id) }
+                }
+            }),
+            RowMenuItem(title: L("Add subtask")) { model.showSubtasks(task.id) },
+        ]
+        if task.parentId == nil {
+            items.append(RowMenuItem(title: task.isProject ? L("Turn back into a task") : L("Make it a project")) {
+                model.perform { try $0.setProject(id: task.id, project: !task.isProject) }
+            })
+        }
+        items.append(RowMenuItem(title: L("Duplicate")) { model.perform { _ = try $0.duplicateTask(id: task.id) } })
+        // R91: the files of the task, all of them, without looking for the menu of one.
+        if task.attachments > 1 {
+            items.append(RowMenuItem(title: L("Save All…")) { model.saveAllAttachments(of: task.id) })
+        }
+        if task.done == nil {
+            items.append(RowMenuItem(title: L("Won't do")) { model.wontDo(task) })
+        }
+        items.append(.divider)
+        items.append(RowMenuItem(title: L("Delete"), destructive: true) { model.delete(task) })
+        return items
+    }
+}
+
+/// An item of the menu of a task row.
+struct RowMenuItem {
+    var title = ""
+    /// The check mark of an item that has one.
+    var on: Bool?
+    var disabled = false
+    var destructive = false
+    var isDivider = false
+    /// The items of a submenu.
+    var children: [RowMenuItem]?
+    var action: () -> Void = {}
+
+    static let divider = RowMenuItem(isDivider: true)
+}
+
+/// The items as the content of a SwiftUI menu.
+struct RowMenuItems: View {
+    let items: [RowMenuItem]
+
+    var body: some View {
+        ForEach(items.indices, id: \.self) { index in
+            let item = items[index]
+            if item.isDivider {
                 Divider()
-                Button(L("Choose…")) { if !isExpanded { model.toggleExpanded(task.id) } }
-                if task.due != nil { Button(L("Clear due date")) { model.setDue(task, nil) } }
+            } else if let children = item.children {
+                Menu(item.title) { RowMenuItems(items: children) }
+            } else if let on = item.on {
+                Toggle(item.title, isOn: Binding(get: { on }, set: { _ in item.action() }))
+            } else {
+                Button(item.title, role: item.destructive ? .destructive : nil, action: item.action)
+                    .disabled(item.disabled)
             }
-            Menu(L("Priority")) {
-                ForEach(Priority.all, id: \.self) { priority in
-                    Toggle(priority.title, isOn: Binding(
-                        get: { task.priority == priority },
-                        set: { _ in model.perform { try $0.setPriority(id: task.id, priority: priority) } }))
-                }
+        }
+    }
+}
+
+/// The place of a subtask inside the row of its parent, for the right click (#201). SwiftUI gives
+/// the context menu of a list row to the whole row: over a subtask it opened the menu of the task
+/// the row belongs to, and "Won't do" or "Delete" chosen there went to that task. An AppKit view
+/// under the subtask marks its place, and a right click there opens the menu of the subtask.
+struct SubtaskMenuArea: NSViewRepresentable {
+    let items: () -> [RowMenuItem]
+
+    func makeNSView(context: Context) -> SubtaskMenuView { SubtaskMenuView() }
+
+    func updateNSView(_ view: SubtaskMenuView, context: Context) { view.items = items }
+}
+
+final class SubtaskMenuView: NSView {
+    var items: () -> [RowMenuItem] = { [] }
+    private var actions: [() -> Void] = []
+
+    private static let areas = NSHashTable<SubtaskMenuView>.weakObjects()
+    private static var monitor: Any?
+
+    /// The view marks a place and takes nothing from the pointer: clicks go to the row over it.
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window == nil {
+            Self.areas.remove(self)
+        } else {
+            Self.areas.add(self)
+            Self.watch()
+        }
+    }
+
+    /// The subtask at a point of the window: the innermost one when subtasks are nested.
+    static func area(at point: NSPoint, in window: NSWindow) -> SubtaskMenuView? {
+        areas.allObjects
+            .filter { $0.window === window && !$0.isHiddenOrHasHiddenAncestor && $0.convert($0.bounds, to: nil).contains(point) }
+            .min { $0.bounds.height < $1.bounds.height }
+    }
+
+    /// The menu of the subtask, built from the same items as the menu of a row of the list.
+    func subtaskMenu() -> NSMenu {
+        actions = []
+        return menu(of: items())
+    }
+
+    private func menu(of items: [RowMenuItem]) -> NSMenu {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        for item in items {
+            if item.isDivider {
+                menu.addItem(.separator())
+                continue
             }
-            Menu(L("Move to list")) {
-                ForEach(model.lists.filter { !$0.archived }, id: \.id) { list in
-                    Button(model.listName(list)) { model.perform { try $0.moveToList(id: task.id, listId: list.id) } }
-                        .disabled(task.parentId == nil && task.listId == list.id)
-                }
+            let entry = NSMenuItem(title: item.title, action: nil, keyEquivalent: "")
+            if let children = item.children {
+                entry.submenu = self.menu(of: children)
+            } else {
+                entry.action = #selector(run(_:))
+                entry.target = self
+                entry.tag = actions.count
+                actions.append(item.action)
+                entry.state = item.on == true ? .on : .off
+                entry.isEnabled = !item.disabled
             }
-            Button(L("Add subtask")) { model.showSubtasks(task.id) }
-            if task.parentId == nil {
-                Button(task.isProject ? L("Turn back into a task") : L("Make it a project")) {
-                    model.perform { try $0.setProject(id: task.id, project: !task.isProject) }
-                }
+            menu.addItem(entry)
+        }
+        return menu
+    }
+
+    @objc private func run(_ item: NSMenuItem) {
+        if actions.indices.contains(item.tag) { actions[item.tag]() }
+    }
+
+    /// Right clicks and ⌃clicks are looked at before the list gets them. Text and files have menus
+    /// of their own, and a click on them is left alone.
+    private static func watch() {
+        guard monitor == nil else { return }
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.rightMouseDown, .leftMouseDown]) { event in
+            guard event.type == .rightMouseDown || event.modifierFlags.contains(.control),
+                  let window = event.window, let area = area(at: event.locationInWindow, in: window)
+            else { return event }
+            var view = (window.contentView?.superview ?? window.contentView)?.hitTest(event.locationInWindow)
+            while let current = view {
+                if current is NSText || current is FilePointerView { return event }
+                view = current.superview
             }
-            Button(L("Duplicate")) { model.perform { _ = try $0.duplicateTask(id: task.id) } }
-            // R91: the files of the task, all of them, without looking for the menu of one.
-            if task.attachments > 1 {
-                Button(L("Save All…")) { model.saveAllAttachments(of: task.id) }
-            }
-            if task.done == nil {
-                Button(L("Won't do")) { model.wontDo(task) }
-            }
-            Divider()
-            Button(L("Delete"), role: .destructive) { model.delete(task) }
+            NSMenu.popUpContextMenu(area.subtaskMenu(), with: event, for: area)
+            return nil
         }
     }
 }
