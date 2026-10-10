@@ -331,4 +331,10 @@
     <string name="widget_description">Открытые задачи «Сегодня», «Входящих» или списка и кнопка новой задачи.</string>
     <string name="widget_choose">Показывать в виджете</string>
     <string name="widget_empty">Задач нет</string>
+    <string name="select">Выбрать</string>
+    <string name="selected_count">Выбрано: %1$s</string>
+    <string name="batch_completed">Выполнено: %1$s</string>
+    <string name="batch_deleted">Удалено: %1$s</string>
+    <string name="batch_moved">Перемещено: %1$s</string>
+    <string name="batch_changed">Изменено: %1$s</string>
 </resources>

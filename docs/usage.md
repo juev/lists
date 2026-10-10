@@ -247,6 +247,8 @@ On a phone the app stays in portrait and does not turn with the device. The quic
 
 The title of the view stands large at the top of the list; the menu, search and the sync icon are in the row above it. A long press on Inbox, a list or a filter in the panel with the lists opens its settings; while one of them is open, so does Configure in the menu behind the "More" button at the end of that row. Swipe right to complete, swipe left to set the due date; a swipe to the right that starts at the left edge of the screen opens the panel with the lists instead. Pull down at the top of a list to sync right away; this works once sync is set up. Long-press for the menu: due date, priority, move to list, add subtask, duplicate, won't do, delete.
 
+Several tasks can be changed in one action. A long press on a task opens its menu, and "Select" there turns the selection mode on with that task selected. A tap on a row selects it or takes the selection off; a drag over the circles at the right edge selects the rows the finger passes. The bar at the bottom holds "Complete", "Due", "Move to list", "Delete" and, under "More", "Start", "Priority", "Tag" and "Won't do". An action applies to every selected task, closes the mode and shows one bar with the number of tasks it changed; "Undo" there takes the whole batch back. "Done", the cross and Back leave the mode without a change.
+
 ## Widgets on Android
 
 The home screen takes two widgets with tasks: a small one, 2×2 cells, and a large one, 4×4; either can be resized. When a widget is placed it asks what to show: Today, Inbox or one of the lists. Each widget keeps its own choice, and where the home screen offers to reconfigure a widget the choice can be changed.

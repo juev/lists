@@ -1,7 +1,9 @@
 package org.evsyukov.lists.ui
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -21,12 +23,16 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.DriveFileMove
 import androidx.compose.material.icons.automirrored.outlined.List
 import androidx.compose.material.icons.automirrored.outlined.Notes
 import androidx.compose.material.icons.filled.CalendarMonth
@@ -45,10 +51,12 @@ import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.CloudDone
 import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.CloudSync
+import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.FilterList
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Inventory2
 import androidx.compose.material.icons.outlined.Menu
+import androidx.compose.material.icons.outlined.MoreHoriz
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Repeat
 import androidx.compose.material.icons.outlined.Search
@@ -189,6 +197,12 @@ fun MainScreen(model: MainViewModel, onReminderSet: () -> Unit) {
     var clearMenu by remember { mutableStateOf(false) }
     var clearCompleted by remember { mutableStateOf<ClearCompleted?>(null) }
     var duePickerFor by remember { mutableStateOf<TaskItem?>(null) }
+    // R109: the selection mode and the dialog of the action that asks for a value.
+    val selection = state.selection
+    val selecting = selection != null
+    var batchDialog by remember { mutableStateOf<String?>(null) }
+    val rows = rememberLazyListState()
+    BackHandler(enabled = selecting) { model.endSelection() }
     var adding by rememberSaveable { mutableStateOf(false) }
     // R97: what the card held when it was closed, once the person asks for it back.
     var restored by remember { mutableStateOf<NewTaskEntry?>(null) }
@@ -208,6 +222,7 @@ fun MainScreen(model: MainViewModel, onReminderSet: () -> Unit) {
 
     ModalNavigationDrawer(
         drawerState = drawer,
+        gesturesEnabled = !selecting,
         drawerContent = {
             Drawer(
                 state = state,
@@ -222,7 +237,15 @@ fun MainScreen(model: MainViewModel, onReminderSet: () -> Unit) {
     ) {
         Scaffold(
             topBar = {
-                TopAppBar(
+                if (selection != null) {
+                    TopAppBar(
+                        title = { Text(str(R.string.selected_count, selection.size.toString()), style = MaterialTheme.typography.titleMedium) },
+                        navigationIcon = {
+                            IconButton(onClick = model::endSelection) { Icon(Icons.Outlined.Close, str(R.string.close)) }
+                        },
+                        actions = { TextButton(onClick = model::endSelection) { Text(str(R.string.done)) } },
+                    )
+                } else TopAppBar(
                     title = {
                         val query = state.search
                         // R95: the title of the view stands at the top of the content; the bar holds the search field only.
@@ -252,6 +275,14 @@ fun MainScreen(model: MainViewModel, onReminderSet: () -> Unit) {
             snackbarHost = { SnackbarHost(snackbar) },
             bottomBar = {
                 when {
+                    selection != null -> SelectionBar(enabled = selection.isNotEmpty()) { action ->
+                        when (action) {
+                            "complete" -> model.batch(BatchAction.Complete)
+                            "delete" -> model.batch(BatchAction.Delete)
+                            "wont" -> model.batch(BatchAction.WontDo)
+                            else -> batchDialog = action
+                        }
+                    }
                     state.effectiveScope == Scope.Trash && state.sections.any { it.tasks.isNotEmpty() } ->
                         Row(Modifier.fillMaxWidth().navigationBarsPadding().padding(8.dp), horizontalArrangement = Arrangement.End) {
                             TextButton(onClick = { confirmEmptyTrash = true }) { Text(str(R.string.empty_trash), color = MaterialTheme.colorScheme.error) }
@@ -270,7 +301,7 @@ fun MainScreen(model: MainViewModel, onReminderSet: () -> Unit) {
                 }
             },
             floatingActionButton = {
-                if (!state.readOnly) {
+                if (!state.readOnly && !selecting) {
                     FloatingActionButton(
                         onClick = { restoreOffer?.cancel(); restored = null; adding = true },
                         shape = CircleShape,
@@ -284,14 +315,17 @@ fun MainScreen(model: MainViewModel, onReminderSet: () -> Unit) {
                 Modifier
                     .fillMaxSize()
                     .padding(padding)
-                    .pullToRefresh(isRefreshing = pulled, state = pull, enabled = state.sync.configured) {
+                    .pullToRefresh(isRefreshing = pulled, state = pull, enabled = state.sync.configured && !selecting) {
                         scope.launch {
                             pulled = true
                             Repo.sync()
                             pulled = false
                         }
                     }
-                    .edgeSwipe { scope.launch { drawer.open() } },
+                    .then(
+                        if (selecting) Modifier.dragSelect(rows, model::startDrag, model::dragSelection)
+                        else Modifier.edgeSwipe { scope.launch { drawer.open() } }
+                    ),
             ) {
                 // R78: the block stands in Today only, and only while there is an event to show.
                 val eventsShown = state.effectiveScope == Scope.Today && events.isNotEmpty()
@@ -304,7 +338,7 @@ fun MainScreen(model: MainViewModel, onReminderSet: () -> Unit) {
                     }
                 } else {
                     // Room below the last row, so that the add button does not cover it.
-                    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 88.dp)) {
+                    LazyColumn(Modifier.fillMaxSize(), state = rows, contentPadding = PaddingValues(bottom = 88.dp)) {
                         if (state.search == null) item(key = "title") { ViewTitle(state) }
                         if (eventsShown) item(key = "events") { EventsBlock(events) }
                         for (section in state.sections) {
@@ -313,8 +347,15 @@ fun MainScreen(model: MainViewModel, onReminderSet: () -> Unit) {
                                     GroupHeading(title)
                                 }
                             }
-                            items(section.tasks, key = { "${section.key}:${it.id}" }) { task ->
-                                SwipeRow(
+                            items(section.tasks, key = { rowKey(section.key, it.id) }) { task ->
+                                if (selection != null) {
+                                    Surface {
+                                        TaskRow(
+                                            task, state, onToggle = {}, onOpen = {}, model = model, showOrigin = state.showsOrigin(),
+                                            selected = task.id in selection, onSelect = { model.toggleSelected(task.id) },
+                                        )
+                                    }
+                                } else SwipeRow(
                                     task = task,
                                     state = state,
                                     onToggle = { model.toggleDone(task) },
@@ -355,6 +396,18 @@ fun MainScreen(model: MainViewModel, onReminderSet: () -> Unit) {
             onPick = { value -> model.act { it.setDue(task.id, value) } },
             onDismiss = { duePickerFor = null },
         )
+    }
+    when (batchDialog) {
+        "due" -> MomentDialog(str(R.string.due), null, onPick = { value -> value?.let { model.batch(BatchAction.Due(it)) } }) { batchDialog = null }
+        "start" -> MomentDialog(str(R.string.start_title), null, onPick = { value -> value?.let { model.batch(BatchAction.Start(it)) } }) { batchDialog = null }
+        "list" -> {
+            val lists = state.lists.filter { !it.archived }
+            ChoiceDialog(str(R.string.move_to_list), lists.map { it.displayName() }, -1, { batchDialog = null }) { model.batch(BatchAction.MoveTo(lists[it].id)) }
+        }
+        "priority" -> ChoiceDialog(str(R.string.priority), priorities.map { it.title() }, -1, { batchDialog = null }) {
+            model.batch(BatchAction.SetPriority(priorities[it]))
+        }
+        "tag" -> TagDialog(state.tags.map { it.name }, { batchDialog = null }) { model.batch(BatchAction.Tag(it)) }
     }
     editingList?.let { ListDialog(it, model) { editingList = null } }
     if (creatingList) ListDialog(null, model) { creatingList = false }
@@ -682,7 +735,7 @@ private fun SwipeRow(task: TaskItem, state: UiState, onToggle: () -> Unit, onOpe
             }
         },
     ) {
-        Surface { TaskRow(task, state, onToggle, onOpen, model, showOrigin = state.showsOrigin()) }
+        Surface { TaskRow(task, state, onToggle, onOpen, model, showOrigin = state.showsOrigin(), selectable = task.selectable()) }
     }
 }
 
@@ -702,18 +755,29 @@ fun TaskRow(
     showOrigin: Boolean,
     // A subtask in the card of its task (R96): a round mark, and grey without a strike when it is done.
     subtask: Boolean = false,
+    // R109: the menu of the row offers "Select"; only a row of a view does.
+    selectable: Boolean = false,
+    // R109: set in the selection mode, where the whole row only selects.
+    selected: Boolean? = null,
+    onSelect: () -> Unit = {},
 ) {
     var menu by remember { mutableStateOf(false) }
     val done = task.done != null
     Row(
         Modifier
             .fillMaxWidth()
-            .combinedClickable(onClick = onOpen, onLongClick = { menu = true })
+            .then(
+                if (selected == null) Modifier.combinedClickable(onClick = onOpen, onLongClick = { menu = true })
+                else Modifier
+                    .background(if (selected) viewTint(ViewTint.Blue).copy(alpha = 0.12f) else Color.Transparent)
+                    .toggleable(value = selected, role = Role.Checkbox, onValueChange = { onSelect() })
+            )
             .padding(start = 4.dp, end = 16.dp, top = 6.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        IconButton(onClick = onToggle, enabled = !task.deleted && !task.isLog) {
-            Mark(task.markState(), if (done) str(R.string.reopen) else str(R.string.complete), round = subtask)
+        IconButton(onClick = if (selected == null) onToggle else onSelect, enabled = !task.deleted && !task.isLog) {
+            // In the selection mode the mark selects like the rest of the row, and says nothing else.
+            Mark(task.markState(), if (selected != null) null else if (done) str(R.string.reopen) else str(R.string.complete), round = subtask)
         }
         if (task.isProject) {
             Icon(Icons.Outlined.Folder, str(R.string.project), Modifier.padding(end = 6.dp).size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -753,9 +817,86 @@ fun TaskRow(
                 modifier = Modifier.padding(start = 8.dp),
             )
         }
+        if (selected != null) SelectCircle(selected)
         Box {
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                TaskMenu(task, state, model, onOpen) { menu = false }
+                TaskMenu(task, state, model, onOpen, selectable) { menu = false }
+            }
+        }
+    }
+}
+
+/** R109: the circle at the right edge of a row in the selection mode. */
+@Composable
+private fun SelectCircle(selected: Boolean) {
+    val blue = viewTint(ViewTint.Blue)
+    Box(
+        Modifier
+            .padding(start = 12.dp)
+            .size(22.dp)
+            .then(if (selected) Modifier.background(blue, CircleShape) else Modifier.border(1.5.dp, MaterialTheme.colorScheme.outline, CircleShape)),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (selected) Icon(Icons.Outlined.Check, null, Modifier.size(14.dp), tint = Color.White)
+    }
+}
+
+/** The key of a task row in the list of a view; [taskOfRow] reads the task back from it. */
+private fun rowKey(section: String, id: String) = "t:$section:$id"
+
+private fun taskOfRow(key: Any): String? = (key as? String)?.takeIf { it.startsWith("t:") }?.substringAfterLast(':')
+
+/**
+ * R109: a drag that starts on the circles at the right edge selects the rows
+ * the finger passes. The movement is taken before the list sees it, so the
+ * list does not scroll; a tap passes through to the row.
+ */
+private fun Modifier.dragSelect(rows: LazyListState, onStart: () -> Unit, onDrag: (from: String, to: String) -> Unit) = pointerInput(Unit) {
+    val strip = 56.dp.toPx()
+    fun rowAt(y: Float): String? = rows.layoutInfo.visibleItemsInfo
+        .firstOrNull { y >= it.offset && y < it.offset + it.size }
+        ?.let { taskOfRow(it.key) }
+    awaitEachGesture {
+        val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+        if (down.position.x < size.width - strip) return@awaitEachGesture
+        val from = rowAt(down.position.y) ?: return@awaitEachGesture
+        var dy = 0f
+        var taken = false
+        while (true) {
+            val change = awaitPointerEvent(PointerEventPass.Initial).changes.firstOrNull { it.id == down.id } ?: break
+            if (!change.pressed) break
+            dy += change.positionChange().y
+            if (!taken && abs(dy) > viewConfiguration.touchSlop) {
+                taken = true
+                onStart()
+            }
+            if (taken) {
+                change.consume()
+                rowAt(change.position.y)?.let { onDrag(from, it) }
+            }
+        }
+    }
+}
+
+/** R109: the actions on the selected tasks, in a bar that floats over the bottom of the list. */
+@Composable
+private fun SelectionBar(enabled: Boolean, onAction: (String) -> Unit) {
+    var more by remember { mutableStateOf(false) }
+    Box(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 24.dp, vertical = 12.dp), contentAlignment = Alignment.Center) {
+        Surface(shape = RoundedCornerShape(28.dp), tonalElevation = 3.dp, shadowElevation = 6.dp) {
+            Row(Modifier.padding(horizontal = 12.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                IconButton(enabled = enabled, onClick = { onAction("complete") }) { Icon(Icons.Outlined.Check, str(R.string.complete)) }
+                IconButton(enabled = enabled, onClick = { onAction("due") }) { Icon(Icons.Outlined.CalendarMonth, str(R.string.due)) }
+                IconButton(enabled = enabled, onClick = { onAction("list") }) { Icon(Icons.AutoMirrored.Outlined.DriveFileMove, str(R.string.move_to_list)) }
+                IconButton(enabled = enabled, onClick = { onAction("delete") }) { Icon(Icons.Outlined.Delete, str(R.string.delete)) }
+                Box {
+                    IconButton(enabled = enabled, onClick = { more = true }) { Icon(Icons.Outlined.MoreHoriz, str(R.string.more)) }
+                    DropdownMenu(expanded = more, onDismissRequest = { more = false }) {
+                        for ((action, title) in listOf("start" to R.string.start, "priority" to R.string.priority, "tag" to R.string.tag, "wont" to R.string.wont_do)) {
+                            DropdownMenuItem(text = { Text(str(title)) }, onClick = { more = false; onAction(action) })
+                        }
+                    }
+                }
             }
         }
     }
@@ -785,7 +926,7 @@ private fun Marks(task: TaskItem, parent: String?) {
 
 /** The whole context menu: six actions, the rest lives in the editor. */
 @Composable
-private fun TaskMenu(task: TaskItem, state: UiState, model: MainViewModel, onOpen: () -> Unit, close: () -> Unit) {
+private fun TaskMenu(task: TaskItem, state: UiState, model: MainViewModel, onOpen: () -> Unit, selectable: Boolean, close: () -> Unit) {
     var sub by remember { mutableStateOf<String?>(null) }
     fun run(action: () -> Unit) {
         close()
@@ -814,6 +955,8 @@ private fun TaskMenu(task: TaskItem, state: UiState, model: MainViewModel, onOpe
             )
         }
         else -> {
+            // R109: the way into the selection mode, with this task selected.
+            if (selectable) DropdownMenuItem(text = { Text(str(R.string.select)) }, onClick = { run { model.startSelection(task.id) } })
             DropdownMenuItem(text = { Text(str(R.string.due)) }, onClick = { sub = "due" })
             DropdownMenuItem(text = { Text(str(R.string.priority)) }, onClick = { sub = "priority" })
             DropdownMenuItem(text = { Text(str(R.string.move_to_list)) }, onClick = { sub = "list" })

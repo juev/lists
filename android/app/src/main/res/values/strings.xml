@@ -332,4 +332,10 @@
     <string name="widget_description">The open tasks of Today, Inbox or a list, with a button for a new task.</string>
     <string name="widget_choose">Show in the widget</string>
     <string name="widget_empty">No tasks</string>
+    <string name="select">Select</string>
+    <string name="selected_count">Selected: %1$s</string>
+    <string name="batch_completed">Completed: %1$s</string>
+    <string name="batch_deleted">Deleted: %1$s</string>
+    <string name="batch_moved">Moved: %1$s</string>
+    <string name="batch_changed">Changed: %1$s</string>
 </resources>

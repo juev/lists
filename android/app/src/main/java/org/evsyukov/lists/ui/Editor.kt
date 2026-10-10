@@ -684,7 +684,7 @@ fun MultiChoiceDialog(title: String, options: List<String>, selected: List<Boole
 }
 
 @Composable
-private fun TagDialog(known: List<String>, onDismiss: () -> Unit, onAdd: (String) -> Unit) {
+internal fun TagDialog(known: List<String>, onDismiss: () -> Unit, onAdd: (String) -> Unit) {
     var text by rememberSaveable { mutableStateOf("") }
     FormDialog(
         title = str(R.string.tag),
