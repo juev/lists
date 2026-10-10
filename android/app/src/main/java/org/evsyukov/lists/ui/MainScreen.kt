@@ -101,6 +101,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -709,11 +710,14 @@ private fun Modifier.edgeSwipe(onSwipe: () -> Unit) = pointerInput(Unit) {
 @Composable
 private fun SwipeRow(task: TaskItem, state: UiState, onToggle: () -> Unit, onOpen: () -> Unit, onPickDue: () -> Unit, model: MainViewModel) {
     val locked = task.deleted || task.isLog
+    // The state keeps the callback it was made with: it must reach the task as it is now, not as it was then.
+    val toggle by rememberUpdatedState(onToggle)
+    val pickDue by rememberUpdatedState(onPickDue)
     val swipe = rememberSwipeToDismissBoxState(
         confirmValueChange = { value ->
             when (value) {
-                SwipeToDismissBoxValue.StartToEnd -> onToggle()
-                SwipeToDismissBoxValue.EndToStart -> onPickDue()
+                SwipeToDismissBoxValue.StartToEnd -> toggle()
+                SwipeToDismissBoxValue.EndToStart -> pickDue()
                 SwipeToDismissBoxValue.Settled -> {}
             }
             false
