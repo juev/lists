@@ -28,10 +28,8 @@ import androidx.compose.material.icons.automirrored.outlined.List
 import androidx.compose.material.icons.automirrored.outlined.Send
 import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.Close
-import androidx.compose.material.icons.outlined.CloseFullscreen
 import androidx.compose.material.icons.outlined.Event
 import androidx.compose.material.icons.outlined.Flag
-import androidx.compose.material.icons.outlined.OpenInFull
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Repeat
 import androidx.compose.material3.Button
@@ -270,7 +268,7 @@ fun NewTaskCard(
     }
     val attached = files + picked
     // What the user chose in portrait; it comes back when the screen is turned upright again.
-    var expanded by entry::expanded
+    val expanded = entry.expanded
     val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val full = expanded || landscape
     val focus = remember { FocusRequester() }
@@ -317,12 +315,6 @@ fun NewTaskCard(
                 keyboardActions = KeyboardActions(onDone = { submit() }),
                 modifier = Modifier.weight(1f).focusRequester(focus),
             )
-            if (!landscape) {
-                IconButton(onClick = { expanded = !expanded }) {
-                    if (expanded) Icon(Icons.Outlined.CloseFullscreen, str(R.string.collapse_card))
-                    else Icon(Icons.Outlined.OpenInFull, str(R.string.expand_card), tint = MaterialTheme.colorScheme.outline)
-                }
-            }
             // Compact, the card is saved from the strip at its bottom.
             if (full) {
                 IconButton(onClick = { submit() }, enabled = text.isNotBlank()) {

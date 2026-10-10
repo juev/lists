@@ -2,6 +2,7 @@ package org.evsyukov.lists
 
 import android.app.PendingIntent
 import android.content.Intent
+import android.content.res.Configuration
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -12,6 +13,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
@@ -22,12 +24,16 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
+import org.evsyukov.lists.ui.CardHandle
 import org.evsyukov.lists.ui.NewTaskCard
+import org.evsyukov.lists.ui.NewTaskEntry
 import org.evsyukov.lists.ui.TaskDraft
 import org.evsyukov.lists.ui.createFrom
 import org.evsyukov.lists.ui.describe
@@ -69,18 +75,26 @@ class QuickAddActivity : ComponentActivity() {
                         modifier = Modifier.fillMaxWidth().padding(12.dp)
                             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {},
                     ) {
-                        NewTaskCard(
-                            lists = lists,
-                            listId = EntryPrefs.defaultListId(this@QuickAddActivity, lists),
-                            // Typed text is parsed for dates and tags, unless that is turned off; shared text is taken as is.
-                            parse = shared.title.isEmpty() && EntryPrefs.parse(this@QuickAddActivity),
-                            onSubmit = ::save,
-                            modifier = Modifier.padding(8.dp),
-                            title = shared.title,
-                            notes = shared.notes,
-                            files = shared.files,
-                            pastedNotes = pasted,
-                        )
+                        val listId = EntryPrefs.defaultListId(this@QuickAddActivity, lists)
+                        val entry = rememberSaveable(saver = NewTaskEntry.Saver) { NewTaskEntry(shared.title, shared.notes, listId) }
+                        val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+                        Column {
+                            // R97: the same handle as in the main window. In landscape the card has one size.
+                            if (!landscape) CardHandle(entry.expanded, { entry.expanded = it }, onClose = ::finish)
+                            NewTaskCard(
+                                lists = lists,
+                                listId = listId,
+                                // Typed text is parsed for dates and tags, unless that is turned off; shared text is taken as is.
+                                parse = shared.title.isEmpty() && EntryPrefs.parse(this@QuickAddActivity),
+                                onSubmit = ::save,
+                                modifier = Modifier.padding(8.dp),
+                                title = shared.title,
+                                notes = shared.notes,
+                                files = shared.files,
+                                pastedNotes = pasted,
+                                entry = entry,
+                            )
+                        }
                     }
                 }
             }
