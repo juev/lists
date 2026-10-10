@@ -100,6 +100,7 @@
 
         <receiver android:name=".ReminderReceiver" android:exported="false" />
         <receiver android:name=".TodayNoticeReceiver" android:exported="false" />
+        <receiver android:name=".IconCountReceiver" android:exported="false" />
         <receiver
             android:name=".BootReceiver"
             android:exported="true">

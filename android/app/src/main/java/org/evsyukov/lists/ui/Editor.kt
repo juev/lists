@@ -130,6 +130,7 @@ import org.evsyukov.lists.EntryPrefs
 import org.evsyukov.lists.LookPrefs
 import org.evsyukov.lists.Repo
 import org.evsyukov.lists.EventPrefs
+import org.evsyukov.lists.IconCount
 import org.evsyukov.lists.SystemCalendars
 import org.evsyukov.lists.TodayNotice
 import org.evsyukov.lists.Secrets
@@ -1066,6 +1067,8 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
     }
     var notifyOn by remember { mutableStateOf(NotifyPrefs.enabled(context)) }
     var todayNotice by remember { mutableStateOf(TodayNotice.enabled(context)) }
+    var iconCount by remember { mutableStateOf(IconCount.choice(context)) }
+    val iconCountLabels = listOf(str(R.string.today), str(R.string.icon_count_overdue_choice), str(R.string.icon_count_none))
     // R66: asked again on the way back from the system screen where the leave is given.
     var exactAlarms by remember { mutableStateOf(Reminders.exact(context)) }
     // S31: the same on the way back from the system dialog about the battery.
@@ -1270,6 +1273,9 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
                                 if (it) onNotifications()
                             }
                             Text(str(R.string.today_notice_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            // R106: like R104, not under the switch of the reminders.
+                            SettingRow(str(R.string.icon_count), iconCountLabels[IconCount.choices.indexOf(iconCount)]) { choosing = "iconCount" }
+                            Text(str(R.string.icon_count_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         "sync" -> {
                             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1420,6 +1426,11 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
         "lead" -> MultiChoiceDialog(str(R.string.due_at_time_setting), NotifyPrefs.leads.map(::leadLabel), NotifyPrefs.leads.map { it in leads }, { choosing = null }) { index, on ->
             leads = if (on) (leads + NotifyPrefs.leads[index]).distinct().sorted() else leads - NotifyPrefs.leads[index]
             saveNotify()
+        }
+        "iconCount" -> ChoiceDialog(str(R.string.icon_count), iconCountLabels, IconCount.choices.indexOf(iconCount), { choosing = null }) {
+            iconCount = IconCount.choices[it]
+            IconCount.setChoice(context, iconCount)
+            if (iconCount != "none") onNotifications()
         }
         "logLevel" -> ChoiceDialog(str(R.string.log_level), logLabels, logLevels.indexOf(logLevel), { choosing = null }) {
             logLevel = logLevels[it]
