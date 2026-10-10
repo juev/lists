@@ -157,7 +157,8 @@ class MainViewModel : ViewModel() {
                 )
             }
         }
-        next.onSuccess { fresh -> _state.update { fresh.copy(notice = it.notice, search = it.search) } }
+        // A view chosen while this was read stays: the reload started by that choice brings its tasks.
+        next.onSuccess { fresh -> _state.update { if (it.scope != current.scope) it else fresh.copy(notice = it.notice, search = it.search) } }
             .onFailure { error -> _state.update { it.copy(notice = Notice(describe(error)), loaded = true) } }
         // Kept rows leave by the clock, not by a change: look again when the first one is due.
         val wait = withContext(Dispatchers.IO) { runCatching { Repo.store.secondsUntilKeptLeaves() }.getOrNull() }
