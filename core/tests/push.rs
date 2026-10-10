@@ -39,8 +39,9 @@ impl Inbox {
         Some(format!("{}/{name}", self.base))
     }
 
-    /// What arrived since the last look.
+    /// What arrived since the last look. Nudges leave after the run (S19): they are waited for first.
     fn take(&self) -> Vec<String> {
+        finish_pushes();
         std::mem::take(&mut self.got.lock().unwrap())
     }
 }
@@ -255,6 +256,7 @@ impl Ntfy {
                     reader.read_line(&mut first).unwrap();
                     let mut length = 0;
                     let mut authorization = "-".to_string();
+                    let mut title = String::new();
                     loop {
                         let mut header = String::new();
                         reader.read_line(&mut header).unwrap();
@@ -266,6 +268,9 @@ impl Ntfy {
                         }
                         if header.to_ascii_lowercase().starts_with("authorization:") {
                             authorization = header["authorization:".len()..].trim().to_string();
+                        }
+                        if header.to_ascii_lowercase().starts_with("x-title:") {
+                            title = header["x-title:".len()..].trim().to_string();
                         }
                     }
                     let mut body = vec![0; length];
@@ -311,8 +316,11 @@ impl Ntfy {
                         (Some("POST"), Some(path)) => {
                             for (topic, listener) in held.lock().unwrap().iter_mut() {
                                 if topic == path {
-                                    let _ = listener
-                                        .write_all(b"{\"id\":\"x\",\"event\":\"message\",\"message\":\"sync\"}\n");
+                                    // Like ntfy: the title of the message is the header it came with.
+                                    let event = format!(
+                                        "{{\"id\":\"x\",\"event\":\"message\",\"title\":\"{title}\",\"message\":\"sync\"}}\n"
+                                    );
+                                    let _ = listener.write_all(event.as_bytes());
                                 }
                             }
                             stream
@@ -341,8 +349,9 @@ impl Ntfy {
         *self.elsewhere.lock().unwrap() = Some(other.base.clone());
     }
 
-    /// What arrived since the last look.
+    /// What arrived since the last look. Nudges leave after the run (S19): they are waited for first.
     fn take(&self) -> Vec<String> {
+        finish_pushes();
         std::mem::take(&mut self.seen.lock().unwrap())
     }
 
@@ -391,7 +400,6 @@ fn s22_an_edit_elsewhere_wakes_the_waiting_device() {
         topic.starts_with(&format!("{}/", ntfy.base)) && topic.len() == ntfy.base.len() + 33,
         "{topic}"
     );
-    assert_ne!(a.push_endpoint().unwrap(), b.push_endpoint().unwrap());
 
     let woken = waiting(&b);
     ntfy.wait_for_listeners(1);
@@ -605,12 +613,203 @@ fn s29_a_device_that_only_sends_names_its_server() {
     phone.set_push_token(Some("tk_wrong".into()));
     add(&phone, "и ещё");
     assert!(phone.sync_now().unwrap().pushed > 0);
+    // S19: the nudge leaves after the run, and so does what its answer says.
+    finish_pushes();
     assert!(phone.push_refused());
     phone.set_push_token(Some(TOKEN.into()));
     add(&phone, "последняя");
     phone.sync_now().unwrap();
+    finish_pushes();
     assert!(!phone.push_refused());
 
     phone.set_push_send_server(None).unwrap();
     assert_eq!(phone.push_send_server().unwrap(), None);
+}
+
+/// A push service that takes a second to answer; remembers when each request came.
+fn slow_inbox() -> (String, Arc<Mutex<Vec<std::time::Instant>>>) {
+    let server = Arc::new(Server::http("127.0.0.1:0").unwrap());
+    let base = format!("http://127.0.0.1:{}", server.server_addr().to_ip().unwrap().port());
+    let came: Arc<Mutex<Vec<std::time::Instant>>> = Arc::default();
+    let seen = came.clone();
+    std::thread::spawn(move || {
+        for request in server.incoming_requests() {
+            seen.lock().unwrap().push(std::time::Instant::now());
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_secs(1));
+                let _ = request.respond(Response::empty(200));
+            });
+        }
+    });
+    (base, came)
+}
+
+#[test]
+fn s19_nudges_leave_together_and_the_run_does_not_wait_for_them() {
+    let storage = tempfile::tempdir().unwrap();
+    let (base, came) = slow_inbox();
+    let (a, b, c) = (device(), device(), device());
+    for d in [&a, &b, &c] {
+        d.set_sync_config(folder(&storage)).unwrap();
+    }
+    b.set_push_endpoint(Some(format!("{base}/b"))).unwrap();
+    c.set_push_endpoint(Some(format!("{base}/c"))).unwrap();
+    b.sync_now().unwrap();
+    c.sync_now().unwrap();
+
+    add(&a, "от A");
+    let started = std::time::Instant::now();
+    assert!(a.sync_now().unwrap().pushed > 0);
+    let run = started.elapsed();
+    assert!(
+        run < std::time::Duration::from_millis(900),
+        "the run waited for an answer: {run:?}"
+    );
+
+    finish_pushes();
+    let whole = started.elapsed();
+    let came = came.lock().unwrap().clone();
+    assert_eq!(came.len(), 2);
+    for moment in &came {
+        let after = moment.duration_since(started);
+        assert!(
+            after < std::time::Duration::from_millis(900),
+            "a request waited for the other: {after:?}"
+        );
+    }
+    assert!(
+        whole >= std::time::Duration::from_secs(1),
+        "the answers were not waited for: {whole:?}"
+    );
+    assert!(
+        whole < std::time::Duration::from_millis(1900),
+        "one after the other: {whole:?}"
+    );
+}
+
+/// Two devices that take nudges through `ntfy`; returns them with the addresses they first made up.
+fn sharers(ntfy: &Ntfy, config: impl Fn(&Device)) -> (Device, Device, String, String) {
+    let (a, b) = (device(), device());
+    for d in [&a, &b] {
+        d.set_push_retry_for_tests(50);
+        config(d);
+        d.set_push_server(Some(ntfy.base.clone())).unwrap();
+    }
+    let (first, second) = (a.push_endpoint().unwrap().unwrap(), b.push_endpoint().unwrap().unwrap());
+    assert_ne!(first, second, "each makes up a topic of its own");
+    a.sync_now().unwrap();
+    b.sync_now().unwrap();
+    // Whichever of the two has to move does so on a run that reads the addresses.
+    add(&a, "от A");
+    a.sync_now().unwrap();
+    b.sync_now().unwrap();
+    finish_pushes();
+    (a, b, first, second)
+}
+
+#[test]
+fn s41_devices_on_one_server_come_to_one_topic() {
+    let storage = tempfile::tempdir().unwrap();
+    let ntfy = Ntfy::start();
+    let (a, b, first, second) = sharers(&ntfy, |d| d.set_sync_config(folder(&storage)).unwrap());
+    let shared = first.clone().min(second.clone());
+    assert_eq!(a.push_endpoint().unwrap().unwrap(), shared);
+    assert_eq!(b.push_endpoint().unwrap().unwrap(), shared);
+
+    // One request reaches the topic; the other device wakes, the sender passes its own nudge by.
+    let (at_a, at_b) = (waiting(&a), waiting(&b));
+    ntfy.wait_for_listeners(2);
+    ntfy.take();
+    add(&a, "ещё от A");
+    a.sync_now().unwrap();
+    assert_eq!(ntfy.take(), [format!("POST {} -", path_of(Some(shared.clone())))]);
+    assert!(at_b.recv_timeout(SOON).unwrap(), "the other device is woken");
+    assert!(
+        at_a.recv_timeout(std::time::Duration::from_millis(400)).is_err(),
+        "the sender woke itself"
+    );
+
+    // The shared topic outlives the setting being turned off and on.
+    b.set_push_server(None).unwrap();
+    b.set_push_server(Some(ntfy.base.clone())).unwrap();
+    assert_eq!(b.push_endpoint().unwrap().unwrap(), shared);
+}
+
+#[test]
+fn s41_an_address_of_another_kind_keeps_to_itself() {
+    let storage = tempfile::tempdir().unwrap();
+    let ntfy = Ntfy::start();
+    let (a, b, first, second) = sharers(&ntfy, |d| d.set_sync_config(folder(&storage)).unwrap());
+    let shared = first.min(second);
+    ntfy.take();
+
+    // The way a phone is addressed: on the same server, and not a topic of this app.
+    let phone = device();
+    phone.set_sync_config(folder(&storage)).unwrap();
+    let given = format!("{}/upAbCdEf123456?up=1", ntfy.base);
+    phone.set_push_endpoint(Some(given.clone())).unwrap();
+    phone.sync_now().unwrap();
+    add(&phone, "с телефона");
+    phone.sync_now().unwrap();
+    assert_eq!(phone.push_endpoint().unwrap().unwrap(), given);
+    assert_eq!(
+        ntfy.take(),
+        [format!("POST {} -", path_of(Some(shared.clone())))],
+        "one request for both"
+    );
+
+    b.sync_now().unwrap();
+    add(&b, "от B");
+    b.sync_now().unwrap();
+    let mut asked = ntfy.take();
+    asked.sort();
+    let mut expected = [
+        format!("POST {} -", path_of(Some(shared.clone()))),
+        "POST /upAbCdEf123456?up=1 -".to_string(),
+    ];
+    expected.sort();
+    assert_eq!(asked, expected);
+    assert_eq!(a.push_endpoint().unwrap().unwrap(), shared);
+    assert_eq!(b.push_endpoint().unwrap().unwrap(), shared);
+}
+
+#[test]
+fn s41_a_device_on_another_server_keeps_its_topic() {
+    let storage = tempfile::tempdir().unwrap();
+    let (here, there) = (Ntfy::start(), Ntfy::start());
+    let (a, b) = (device(), device());
+    a.set_sync_config(folder(&storage)).unwrap();
+    b.set_sync_config(folder(&storage)).unwrap();
+    a.set_push_server(Some(here.base.clone())).unwrap();
+    b.set_push_server(Some(there.base.clone())).unwrap();
+    let (first, second) = (a.push_endpoint().unwrap().unwrap(), b.push_endpoint().unwrap().unwrap());
+    for d in [&a, &b, &a, &b] {
+        add(d, "правка");
+        d.sync_now().unwrap();
+    }
+    finish_pushes();
+    assert_eq!(a.push_endpoint().unwrap().unwrap(), first);
+    assert_eq!(b.push_endpoint().unwrap().unwrap(), second);
+}
+
+#[test]
+fn s41_through_caldav() {
+    let dav = caldav();
+    let ntfy = Ntfy::start();
+    let (a, b, first, second) = sharers(&ntfy, |d| {
+        d.set_sync_config(SyncConfig::CalDav {
+            url: dav.url.clone(),
+            user: "user".into(),
+        })
+        .unwrap();
+        d.set_sync_password(Some("secret".into()));
+    });
+    let shared = first.min(second);
+    assert_eq!(a.push_endpoint().unwrap().unwrap(), shared);
+    assert_eq!(b.push_endpoint().unwrap().unwrap(), shared);
+
+    ntfy.take();
+    add(&b, "от B");
+    b.sync_now().unwrap();
+    assert_eq!(ntfy.take(), [format!("POST {} -", path_of(Some(shared)))]);
 }

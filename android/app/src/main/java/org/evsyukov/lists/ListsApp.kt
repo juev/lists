@@ -35,6 +35,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import uniffi.lists_core.LogLevel
+import uniffi.lists_core.finishPushes
 import uniffi.lists_core.NotificationKind
 import uniffi.lists_core.NotifySettings
 import uniffi.lists_core.Store
@@ -112,6 +113,8 @@ object Repo {
             result
         }
         if (result.isSuccess) moveAttachments()
+        // S19: nudges leave after the run; a background worker must not report done, and be stopped, before they have gone.
+        finishPushes()
         result
     }
 
