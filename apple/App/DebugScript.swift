@@ -50,6 +50,7 @@ import UserNotifications
 /// `keepdone:5` (sets for how many seconds a completed task stays in view), `keepdone:day` (until the end of the day) and `keepdone` alone (prints it),
 /// `sound:Glass` (chooses the sound of notifications without playing it, `sound:` the standard one; `sound` alone leaves the choice as it is) prints the choice,
 /// whether a notification gets the standard sound, where the copy for the notification centre is and the sounds on offer; no notification is scheduled,
+/// `notifications` (prints whether the system allows notifications for the app and the requests it holds; nothing is asked and nothing is scheduled),
 /// `appearance:dark`, `appearance:light` and `appearance:system` (choose the look the way Settings does),
 /// `appearance` alone prints the choice and the look each window of the app has, the quick-entry panel among them,
 /// `dockcount:today`, `dockcount:overdue` and `dockcount:none` (choose what the Dock icon counts the way Settings does, R103),
@@ -289,6 +290,15 @@ enum DebugScript {
                     let sound = NotifySound.notification(chosen)
                     let copy = NotifySound.copy(of: chosen).map { FileManager.default.fileExists(atPath: $0.path) ? $0.path : "none" } ?? "no group"
                     print("debug: sound \(chosen.isEmpty ? "standard" : chosen), on \(AppModel.shared.notifySound), plays \(AppModel.shared.notifySoundChoice ?? "nothing"), standard \(sound == .default), copy \(copy), offered \(NotifySound.names)")
+                case "notifications":
+                    // What the system holds for the app: nothing is asked of the person and nothing is scheduled.
+                    let center = UNUserNotificationCenter.current()
+                    let status = await center.notificationSettings().authorizationStatus
+                    let names: [UNAuthorizationStatus: String] = [.notDetermined: "not asked", .denied: "denied", .authorized: "allowed", .provisional: "provisional"]
+                    let pending = await center.pendingNotificationRequests().map { request in
+                        "\(request.identifier) \((request.trigger as? UNCalendarNotificationTrigger)?.nextTriggerDate().map(String.init(describing:)) ?? "no date")"
+                    }
+                    print("debug: notifications \(names[status] ?? "status \(status.rawValue)"), pending \(pending)")
                 case "appearance":
                     if step.contains(":") {
                         AppModel.shared.appearance = argument
