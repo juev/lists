@@ -326,4 +326,9 @@
     <string name="empty_wont_do">Нет задач «не буду делать»</string>
     <string name="save">Сохранить</string>
     <string name="draft_discarded">Черновик удалён</string>
+    <string name="widget_small">Задачи, малый</string>
+    <string name="widget_large">Задачи, большой</string>
+    <string name="widget_description">Открытые задачи «Сегодня», «Входящих» или списка и кнопка новой задачи.</string>
+    <string name="widget_choose">Показывать в виджете</string>
+    <string name="widget_empty">Задач нет</string>
 </resources>

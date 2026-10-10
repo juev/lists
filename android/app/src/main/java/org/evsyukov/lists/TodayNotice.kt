@@ -115,6 +115,8 @@ class TodayNoticeReceiver : BroadcastReceiver() {
         val result = goAsync()
         Repo.scope.launch {
             TodayNotice.refresh(context.applicationContext)
+            // R107: a widget with Today turns to the new day with it.
+            TaskWidgets.refresh(context.applicationContext)
             result.finish()
         }
     }

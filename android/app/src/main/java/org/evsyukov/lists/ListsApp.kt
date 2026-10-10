@@ -62,7 +62,12 @@ class ListsApp : Application() {
         super.onCreate()
         instance = this
         SyncWorker.schedule(this)
-        Repo.scope.launch { Reminders.refresh(this@ListsApp); TodayNotice.refresh(this@ListsApp); IconCount.refresh(this@ListsApp) }
+        Repo.scope.launch {
+            Reminders.refresh(this@ListsApp)
+            TodayNotice.refresh(this@ListsApp)
+            IconCount.refresh(this@ListsApp)
+            TaskWidgets.refresh(this@ListsApp)
+        }
     }
 
     companion object {
@@ -85,7 +90,7 @@ object Repo {
     private var moving: Job? = null
 
     /**
-     * Call after a local write: refreshes screens and reminders, syncs after two quiet seconds.
+     * Call after a local write: refreshes screens, reminders and widgets, syncs after two quiet seconds.
      * The sync is handed to the system, so it still happens when the process is gone by then
      * (a task shared into the app closes its window at once) or the network comes back later.
      */
@@ -96,6 +101,7 @@ object Repo {
             Reminders.refresh(ListsApp.instance)
             TodayNotice.refresh(ListsApp.instance)
             IconCount.refresh(ListsApp.instance)
+            TaskWidgets.refresh(ListsApp.instance)
         }
         SyncWorker.soon(ListsApp.instance)
     }
@@ -114,6 +120,7 @@ object Repo {
                 Reminders.refresh(ListsApp.instance)
                 TodayNotice.refresh(ListsApp.instance)
                 IconCount.refresh(ListsApp.instance)
+                TaskWidgets.refresh(ListsApp.instance)
             }
             result
         }
@@ -421,7 +428,8 @@ class ReminderReceiver : BroadcastReceiver() {
 
 /**
  * Alarms do not survive a reboot, and they are set anew when the leave for exact ones is given (R66).
- * The ongoing notifications do not survive a reboot or an update of the app either (R104, R106).
+ * The ongoing notifications do not survive a reboot or an update of the app either (R104, R106),
+ * and the widgets are drawn anew (R107).
  */
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
@@ -434,6 +442,7 @@ class BootReceiver : BroadcastReceiver() {
                 Reminders.refresh(context.applicationContext)
                 TodayNotice.refresh(context.applicationContext)
                 IconCount.refresh(context.applicationContext)
+                TaskWidgets.refresh(context.applicationContext)
                 result.finish()
             }
         }
