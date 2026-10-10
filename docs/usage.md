@@ -225,7 +225,7 @@ If access was refused, the settings say so in a line that opens the system setti
 | ⌘Z | undo |
 | ⌃⌥Space | quick entry from any app |
 
-Text size (five steps) and typeface (system, rounded, serif, monospaced) are chosen in Settings.
+Text size (five steps) and typeface (system, rounded, serif, monospaced) are chosen in Settings. On Android Settings has Text size with the same five steps and no choice of typeface; the step multiplies the font size set in the system, so the system setting keeps working and the step corrects it for Lists alone.
 
 ## Light and dark
 
