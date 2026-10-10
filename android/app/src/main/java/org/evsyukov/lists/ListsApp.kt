@@ -34,6 +34,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import uniffi.lists_core.LogLevel
 import uniffi.lists_core.NotificationKind
 import uniffi.lists_core.NotifySettings
 import uniffi.lists_core.Store
@@ -50,6 +51,9 @@ class ListsApp : Application() {
         Store.open(File(filesDir, "lists").absolutePath).also {
             it.setSyncPassword(Secrets.load(this))
             it.setPushToken(Secrets.load(this, Secrets.PUSH_TOKEN))
+            // R102: where a log of events begins for this run.
+            val version = runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrNull() ?: "?"
+            it.log(LogLevel.INFO, "app", "started $version on Android ${android.os.Build.VERSION.RELEASE}")
         }
     }
 

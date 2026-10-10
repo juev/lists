@@ -295,6 +295,7 @@ struct SettingsView: View {
                         }
                     }
                 }
+                LogSection()
             }
             .formStyle(.grouped)
             .tabItem { Label(L("General"), systemImage: "gearshape") }

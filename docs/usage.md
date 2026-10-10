@@ -259,6 +259,19 @@ Backups live in the data folder of the app and go away with it, so save a copy e
 
 Restoring replaces everything on the device with what the backup holds; the state before it is saved as one more backup first. With sync on, the app asks what to do with the storage: **merge** keeps what happened since the backup (a later edit wins, and what was deleted since stays deleted), **replace the data of the storage** gives the restored state to the storage and to every other device, where the rest goes to the Trash. The web server has no schedule of backups and no settings for them: back up its data volume, see [self-hosting](self-hosting.md). The one backup it does make is the one before a change of how the data is stored; it lies in `backups` of the data volume and is restored with the app for macOS or Android.
 
+## Log
+
+The apps for macOS and Android keep a log: a text file, `log.txt`, in the data folder of the app. Settings → General → Log chooses how much goes into it:
+
+- **None** (Off on Android): nothing is written.
+- **Errors**, the default: a sync run, a backup or an import that failed, and a push server that refused access. A sync failure that repeats the one before it word for word is written once.
+- **Events**: also the start of the app with its version, each sync run that changed something with the number of changes received and sent, backups made and restored, and what an import brought.
+- **Detailed**: also the sync runs that changed nothing and the passes over the content of attachments.
+
+The log holds what the app did and the text of errors. Titles, notes, names of lists and tags, passwords and tokens do not get into it; the text of a sync error is the one the settings show and may name the address of the server. The file is kept on the device, is not synced and is not part of a backup. When it grows past 1 MB it becomes `log.1.txt` and a new file is started.
+
+To send the log to someone, use Show in Finder on macOS or Share the log on Android; Clear removes both files. The web server writes to its standard error stream, as before.
+
 ## Import
 
 | Source | File |

@@ -42,6 +42,32 @@ fn r102_a_failed_sync_is_an_error_line() {
 }
 
 #[test]
+fn r102_a_failure_that_repeats_is_an_error_once() {
+    let a = device();
+    a.set_sync_config(unreachable()).unwrap();
+    assert!(a.sync_now().is_err());
+    assert!(a.sync_now().is_err());
+    assert_eq!(log_of(&a).lines().count(), 1, "{}", log_of(&a));
+
+    a.set_log_level(LogLevel::Debug).unwrap();
+    assert!(a.sync_now().is_err());
+    assert!(log_of(&a).contains(" DEBUG sync: failed again: "), "{}", log_of(&a));
+}
+
+#[test]
+fn r102_a_failure_after_a_run_that_went_through_is_an_error_again() {
+    let storage = tempfile::tempdir().unwrap();
+    let a = device();
+    a.set_sync_config(unreachable()).unwrap();
+    assert!(a.sync_now().is_err());
+    a.set_sync_config(folder(&storage)).unwrap();
+    a.sync_now().unwrap();
+    a.set_sync_config(unreachable()).unwrap();
+    assert!(a.sync_now().is_err());
+    assert_eq!(log_of(&a).matches(" ERROR sync: ").count(), 2, "{}", log_of(&a));
+}
+
+#[test]
 fn r102_a_sync_that_went_through_is_an_event_and_not_an_error() {
     let storage = tempfile::tempdir().unwrap();
     let a = device();

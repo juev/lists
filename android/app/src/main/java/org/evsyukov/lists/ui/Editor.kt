@@ -155,6 +155,7 @@ import uniffi.lists_core.Attachment
 import uniffi.lists_core.ConnectionCheck
 import uniffi.lists_core.DueWindow
 import uniffi.lists_core.FilterSpec
+import uniffi.lists_core.LogLevel
 import uniffi.lists_core.FilterStatus
 import uniffi.lists_core.KeepDone
 import uniffi.lists_core.SavedFilter
@@ -265,6 +266,23 @@ private fun shareAttachments(context: Context, files: List<Attachment>) {
             file.localPath?.let { FileProvider.getUriForFile(context, "${context.packageName}.files", File(it), file.name) }
         })
         val intent = Intent(Intent.ACTION_SEND_MULTIPLE).setType(shareType(files.map { it.mime }))
+            .putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris).readable(uris)
+        context.startActivity(Intent.createChooser(intent, null))
+    }
+}
+
+/**
+ * R102: hands the files of the log to another app. They go as copies in the
+ * cache: the folder they live in holds the database and is not opened to others.
+ */
+private fun shareLog(context: Context, files: List<String>) {
+    runCatching {
+        val out = File(context.cacheDir, "logs").apply { mkdirs() }
+        val uris = ArrayList(files.map { path ->
+            val copy = File(path).copyTo(File(out, File(path).name), overwrite = true)
+            FileProvider.getUriForFile(context, "${context.packageName}.files", copy)
+        })
+        val intent = Intent(Intent.ACTION_SEND_MULTIPLE).setType("text/plain")
             .putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris).readable(uris)
         context.startActivity(Intent.createChooser(intent, null))
     }
@@ -1076,6 +1094,10 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
     var allDay by remember { mutableStateOf(NotifyPrefs.allDay(context)) }
     var summary by remember { mutableStateOf(NotifyPrefs.summary(context)) }
     var choosing by remember { mutableStateOf<String?>(null) }
+    val logLevels = listOf(LogLevel.OFF, LogLevel.ERROR, LogLevel.INFO, LogLevel.DEBUG)
+    val logLabels = listOf(str(R.string.log_off), str(R.string.log_errors), str(R.string.log_events), str(R.string.log_detailed))
+    var logLevel by remember { mutableStateOf(Repo.store.logLevel()) }
+    var logFiles by remember { mutableStateOf(Repo.store.logFiles()) }
     // R101: the section on screen, none for the list of sections. Saved: a new text size rebuilds the activity (R100).
     var section by rememberSaveable { mutableStateOf<String?>(null) }
     val sections = listOf(
@@ -1156,6 +1178,18 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
                             SettingRow(str(R.string.appearance), lookLabels[LookPrefs.choices.indexOf(LookPrefs.appearance(context))]) { choosing = "appearance" }
                             SettingRow(str(R.string.text_size), sizeLabels[LookPrefs.textScales.indexOf(LookPrefs.textScale(context))]) { choosing = "textSize" }
                             SettingRow(str(R.string.completed_leave), keepDoneLabel(state.keepDone)) { choosing = "keepDone" }
+                            HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                            // R102: the level of the log and the way to its files.
+                            Text(str(R.string.log), style = MaterialTheme.typography.labelLarge)
+                            SettingRow(str(R.string.log_level), logLabels[logLevels.indexOf(logLevel)]) { choosing = "logLevel" }
+                            if (logFiles.isNotEmpty()) {
+                                SettingRow(str(R.string.share_log), "") { shareLog(context, logFiles) }
+                                SettingRow(str(R.string.clear_log), "") {
+                                    runCatching { Repo.store.clearLog() }
+                                    logFiles = Repo.store.logFiles()
+                                }
+                            }
+                            Text(str(R.string.log_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         "tasks" -> {
                             Text(str(R.string.new_tasks_setting), style = MaterialTheme.typography.labelLarge)
@@ -1377,6 +1411,11 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
         "lead" -> MultiChoiceDialog(str(R.string.due_at_time_setting), NotifyPrefs.leads.map(::leadLabel), NotifyPrefs.leads.map { it in leads }, { choosing = null }) { index, on ->
             leads = if (on) (leads + NotifyPrefs.leads[index]).distinct().sorted() else leads - NotifyPrefs.leads[index]
             saveNotify()
+        }
+        "logLevel" -> ChoiceDialog(str(R.string.log_level), logLabels, logLevels.indexOf(logLevel), { choosing = null }) {
+            logLevel = logLevels[it]
+            runCatching { Repo.store.setLogLevel(logLevel) }
+            logFiles = Repo.store.logFiles()
         }
         "keepDone" -> {
             // What R68 offers, and the value in force when another device set something else.
