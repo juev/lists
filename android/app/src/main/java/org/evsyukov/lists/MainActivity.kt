@@ -83,6 +83,8 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent { AppTheme(bars = true) { MainScreen(model, onReminderSet = ::ensureNotifications) } }
         openFromIntent(intent)
+        // Not when the activity is rebuilt: the view chosen since then stays.
+        if (savedInstanceState == null) openView(intent)
         // S31: who had sync on before the request existed is asked here, once.
         if (savedInstanceState == null && runCatching { Repo.store.syncConfig() !is SyncConfig.Off }.getOrDefault(false)) {
             Background.askOnce(this)
@@ -102,10 +104,16 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         openFromIntent(intent)
+        openView(intent)
     }
 
     private fun openFromIntent(intent: Intent?) {
         intent?.getStringExtra(EXTRA_TASK)?.let(model::open)
+    }
+
+    /** R107: a widget opens the app in the view it shows. */
+    private fun openView(intent: Intent?) {
+        WidgetView.decode(intent?.getStringExtra(EXTRA_VIEW))?.let { model.select(it.scope) }
     }
 
     /** Asked only when the first reminder is set: without one the permission is of no use. */
@@ -115,5 +123,6 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_TASK = "task"
+        const val EXTRA_VIEW = "view"
     }
 }

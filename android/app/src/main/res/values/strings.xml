@@ -327,4 +327,9 @@
     <string name="empty_wont_do">No tasks marked \"won\'t do\"</string>
     <string name="save">Save</string>
     <string name="draft_discarded">Draft discarded</string>
+    <string name="widget_small">Tasks, small</string>
+    <string name="widget_large">Tasks, large</string>
+    <string name="widget_description">The open tasks of Today, Inbox or a list, with a button for a new task.</string>
+    <string name="widget_choose">Show in the widget</string>
+    <string name="widget_empty">No tasks</string>
 </resources>

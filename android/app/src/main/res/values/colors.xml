@@ -1,4 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="launcher_background">#2F6FED</color>
+    <!-- R107: the widgets follow the appearance of the system; values-night holds the dark ones. -->
+    <color name="widget_background">#FFFFFF</color>
+    <color name="widget_text">#1C1B1F</color>
+    <color name="widget_muted">#74777F</color>
 </resources>
