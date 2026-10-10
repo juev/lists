@@ -1063,6 +1063,10 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
     var parse by remember { mutableStateOf(EntryPrefs.parse(context)) }
     var clipboard by remember { mutableStateOf(EntryPrefs.clipboard(context)) }
     val lookLabels = listOf(str(R.string.appearance_system), str(R.string.appearance_light), str(R.string.appearance_dark))
+    val sizeLabels = listOf(
+        str(R.string.text_size_small), str(R.string.text_size_default), str(R.string.text_size_large),
+        str(R.string.text_size_larger), str(R.string.text_size_largest),
+    )
     var allDay by remember { mutableStateOf(NotifyPrefs.allDay(context)) }
     var summary by remember { mutableStateOf(NotifyPrefs.summary(context)) }
     var choosing by remember { mutableStateOf<String?>(null) }
@@ -1122,6 +1126,7 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
         content = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 SettingRow(str(R.string.appearance), lookLabels[LookPrefs.choices.indexOf(LookPrefs.appearance(context))]) { choosing = "appearance" }
+                SettingRow(str(R.string.text_size), sizeLabels[LookPrefs.textScales.indexOf(LookPrefs.textScale(context))]) { choosing = "textSize" }
                 SettingRow(str(R.string.completed_leave), keepDoneLabel(state.keepDone)) { choosing = "keepDone" }
                 HorizontalDivider(Modifier.padding(vertical = 8.dp))
                 Text(str(R.string.notifications), style = MaterialTheme.typography.labelLarge)
@@ -1336,6 +1341,11 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
         "backups" -> BackupsDialog(model) { choosing = null }
         "appearance" -> ChoiceDialog(str(R.string.appearance), lookLabels, LookPrefs.choices.indexOf(LookPrefs.appearance(context)), { choosing = null }) {
             LookPrefs.setAppearance(context, LookPrefs.choices[it])
+        }
+        "textSize" -> ChoiceDialog(str(R.string.text_size), sizeLabels, LookPrefs.textScales.indexOf(LookPrefs.textScale(context)), { choosing = null }) {
+            LookPrefs.setTextScale(context, LookPrefs.textScales[it])
+            // The size is part of the configuration of the activity: it is rebuilt, and the settings stay open.
+            (context as? Activity)?.recreate()
         }
         "lead" -> MultiChoiceDialog(str(R.string.due_at_time_setting), NotifyPrefs.leads.map(::leadLabel), NotifyPrefs.leads.map { it in leads }, { choosing = null }) { index, on ->
             leads = if (on) (leads + NotifyPrefs.leads[index]).distinct().sorted() else leads - NotifyPrefs.leads[index]
