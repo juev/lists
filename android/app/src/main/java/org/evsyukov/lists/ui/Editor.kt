@@ -84,6 +84,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -888,9 +889,13 @@ internal fun FormDialog(
     onDismiss: () -> Unit,
     confirmButton: @Composable () -> Unit,
     dismissButton: @Composable () -> Unit,
+    /** Takes the whole window whatever its height: the settings, which are a screen and not a question (R101). */
+    fullScreen: Boolean = false,
+    /** Stands before the title of a dialog that takes the whole window. */
+    navigation: (@Composable () -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
-    if (LocalConfiguration.current.screenHeightDp >= LOW_WINDOW_DP) {
+    if (!fullScreen && LocalConfiguration.current.screenHeightDp >= LOW_WINDOW_DP) {
         AlertDialog(
             modifier = Modifier.windowInsetsPadding(WindowInsets.safeDrawing),
             onDismissRequest = onDismiss,
@@ -904,7 +909,8 @@ internal fun FormDialog(
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(Modifier.fillMaxSize()) {
             Column(Modifier.windowInsetsPadding(WindowInsets.safeDrawing)) {
-                Row(Modifier.fillMaxWidth().padding(start = 24.dp, end = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.fillMaxWidth().padding(start = if (navigation != null) 8.dp else 24.dp, end = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    navigation?.invoke()
                     Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     dismissButton()
                     confirmButton()
@@ -1070,6 +1076,12 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
     var allDay by remember { mutableStateOf(NotifyPrefs.allDay(context)) }
     var summary by remember { mutableStateOf(NotifyPrefs.summary(context)) }
     var choosing by remember { mutableStateOf<String?>(null) }
+    // R101: the section on screen, none for the list of sections. Saved: a new text size rebuilds the activity (R100).
+    var section by rememberSaveable { mutableStateOf<String?>(null) }
+    val sections = listOf(
+        "general" to str(R.string.settings_general), "tasks" to str(R.string.settings_tasks),
+        "notifications" to str(R.string.notifications), "sync" to str(R.string.sync), "backups" to str(R.string.backups),
+    )
     fun saveNotify() {
         NotifyPrefs.save(context, notifyOn, leads, allDay, summary)
         if (notifyOn) onNotifications()
@@ -1121,160 +1133,178 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
     }
 
     FormDialog(
-        title = str(R.string.settings),
-        onDismiss = onDismiss,
+        title = sections.firstOrNull { it.first == section }?.second ?: str(R.string.settings),
+        // "Back" in a section leads to the list of sections, in the list it closes the settings.
+        onDismiss = { if (section != null) section = null else onDismiss() },
+        fullScreen = true,
+        navigation = if (section == null) null else {
+            { IconButton(onClick = { section = null }) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, str(R.string.back)) } }
+        },
         content = {
-            Column(Modifier.verticalScroll(rememberScrollState())) {
-                SettingRow(str(R.string.appearance), lookLabels[LookPrefs.choices.indexOf(LookPrefs.appearance(context))]) { choosing = "appearance" }
-                SettingRow(str(R.string.text_size), sizeLabels[LookPrefs.textScales.indexOf(LookPrefs.textScale(context))]) { choosing = "textSize" }
-                SettingRow(str(R.string.completed_leave), keepDoneLabel(state.keepDone)) { choosing = "keepDone" }
-                HorizontalDivider(Modifier.padding(vertical = 8.dp))
-                Text(str(R.string.notifications), style = MaterialTheme.typography.labelLarge)
-                SwitchRow(str(R.string.show_notifications), notifyOn) { notifyOn = it; saveNotify() }
-                if (notifyOn) {
-                    SettingRow(
-                        str(R.string.due_at_time_setting),
-                        if (leads.isEmpty()) str(R.string.sync_off) else leads.joinToString(", ") { leadLabel(it) },
-                    ) { choosing = "lead" }
-                    SettingRow(str(R.string.due_on_day_setting), timeLabel(allDay)) { choosing = "allDay" }
-                    SettingRow(str(R.string.summary_setting), timeLabel(summary)) { choosing = "summary" }
-                    SettingRow(str(R.string.notification_sound), str(R.string.choose)) {
-                        context.startActivity(Reminders.channelSettings(context))
-                    }
-                    if (!exactAlarms && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-                        SettingRow(str(R.string.exact_alarms), str(R.string.allow)) {
-                            context.startActivity(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.parse("package:${context.packageName}")))
+            // R101: a list of sections, each opened on its own. Scrolling starts anew in each.
+            key(section) {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    when (section) {
+                        null -> {
+                            for ((id, title) in sections) {
+                                SettingRow(title, "") { if (id == "backups") choosing = "backups" else section = id }
+                            }
+                            HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                            SettingRow(str(R.string.import_file), "") { pickImport.launch(arrayOf("*/*")) }
                         }
-                        Text(str(R.string.exact_alarms_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-                HorizontalDivider(Modifier.padding(vertical = 8.dp))
-                Text(str(R.string.calendar_events), style = MaterialTheme.typography.labelLarge)
-                SwitchRow(str(R.string.show_calendar_events), eventsOn) {
-                    eventsOn = it
-                    EventPrefs.setEnabled(context, it)
-                    // R78: the permission is asked when the setting is turned on, not before.
-                    if (it && !calendarGranted) askCalendar.launch(android.Manifest.permission.READ_CALENDAR)
-                    scope.launch { SystemCalendars.refresh(context) }
-                }
-                if (eventsOn && !calendarGranted) {
-                    // After a refusal the system shows its dialog no more: the way is through its settings.
-                    SettingRow(str(R.string.calendar_no_access), str(R.string.allow)) {
-                        context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}")))
-                    }
-                }
-                // R78: the system gives all the calendars at once, the choice among them is made here.
-                for (calendar in calendars) {
-                    val shown = calendar.id !in hiddenCalendars
-                    Row(
-                        Modifier.fillMaxWidth().toggleable(shown, role = Role.Checkbox) { show ->
-                            hiddenCalendars = if (show) hiddenCalendars - calendar.id else hiddenCalendars + calendar.id
-                            EventPrefs.setHidden(context, hiddenCalendars)
-                            scope.launch { SystemCalendars.refresh(context) }
-                        },
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Box(Modifier.size(10.dp).background(Color(calendar.color), CircleShape))
-                        Column(Modifier.weight(1f).padding(start = 10.dp)) {
-                            Text(calendar.name)
-                            if (calendar.account.isNotEmpty() && calendar.account != calendar.name) {
-                                Text(calendar.account, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        "general" -> {
+                            SettingRow(str(R.string.appearance), lookLabels[LookPrefs.choices.indexOf(LookPrefs.appearance(context))]) { choosing = "appearance" }
+                            SettingRow(str(R.string.text_size), sizeLabels[LookPrefs.textScales.indexOf(LookPrefs.textScale(context))]) { choosing = "textSize" }
+                            SettingRow(str(R.string.completed_leave), keepDoneLabel(state.keepDone)) { choosing = "keepDone" }
+                        }
+                        "tasks" -> {
+                            Text(str(R.string.new_tasks_setting), style = MaterialTheme.typography.labelLarge)
+                            val listChoices = state.lists.filter { !it.archived && it.id != "inbox" }
+                            SettingRow(
+                                str(R.string.default_list),
+                                when (newTaskList) {
+                                    "inbox" -> str(R.string.inbox)
+                                    "last" -> str(R.string.last_used_list)
+                                    else -> listChoices.firstOrNull { it.id == newTaskList }?.name ?: str(R.string.inbox)
+                                },
+                            ) { choosing = "newTaskList" }
+                            SwitchRow(str(R.string.parse_title), parse) { parse = it; EntryPrefs.setParse(context, it) }
+                            SwitchRow(str(R.string.clipboard_note), clipboard) { clipboard = it; EntryPrefs.setClipboard(context, it) }
+                            HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                            Text(str(R.string.calendar_events), style = MaterialTheme.typography.labelLarge)
+                            SwitchRow(str(R.string.show_calendar_events), eventsOn) {
+                                eventsOn = it
+                                EventPrefs.setEnabled(context, it)
+                                // R78: the permission is asked when the setting is turned on, not before.
+                                if (it && !calendarGranted) askCalendar.launch(android.Manifest.permission.READ_CALENDAR)
+                                scope.launch { SystemCalendars.refresh(context) }
+                            }
+                            if (eventsOn && !calendarGranted) {
+                                // After a refusal the system shows its dialog no more: the way is through its settings.
+                                SettingRow(str(R.string.calendar_no_access), str(R.string.allow)) {
+                                    context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}")))
+                                }
+                            }
+                            // R78: the system gives all the calendars at once, the choice among them is made here.
+                            for (calendar in calendars) {
+                                val shown = calendar.id !in hiddenCalendars
+                                Row(
+                                    Modifier.fillMaxWidth().toggleable(shown, role = Role.Checkbox) { show ->
+                                        hiddenCalendars = if (show) hiddenCalendars - calendar.id else hiddenCalendars + calendar.id
+                                        EventPrefs.setHidden(context, hiddenCalendars)
+                                        scope.launch { SystemCalendars.refresh(context) }
+                                    },
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Box(Modifier.size(10.dp).background(Color(calendar.color), CircleShape))
+                                    Column(Modifier.weight(1f).padding(start = 10.dp)) {
+                                        Text(calendar.name)
+                                        if (calendar.account.isNotEmpty() && calendar.account != calendar.name) {
+                                            Text(calendar.account, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                    }
+                                    Checkbox(checked = shown, onCheckedChange = null, modifier = Modifier.padding(12.dp))
+                                }
+                            }
+                            Text(str(R.string.calendar_events_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        "notifications" -> {
+                            SwitchRow(str(R.string.show_notifications), notifyOn) { notifyOn = it; saveNotify() }
+                            if (notifyOn) {
+                                SettingRow(
+                                    str(R.string.due_at_time_setting),
+                                    if (leads.isEmpty()) str(R.string.sync_off) else leads.joinToString(", ") { leadLabel(it) },
+                                ) { choosing = "lead" }
+                                SettingRow(str(R.string.due_on_day_setting), timeLabel(allDay)) { choosing = "allDay" }
+                                SettingRow(str(R.string.summary_setting), timeLabel(summary)) { choosing = "summary" }
+                                SettingRow(str(R.string.notification_sound), str(R.string.choose)) {
+                                    context.startActivity(Reminders.channelSettings(context))
+                                }
+                                if (!exactAlarms && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                                    SettingRow(str(R.string.exact_alarms), str(R.string.allow)) {
+                                        context.startActivity(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.parse("package:${context.packageName}")))
+                                    }
+                                    Text(str(R.string.exact_alarms_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
                             }
                         }
-                        Checkbox(checked = shown, onCheckedChange = null, modifier = Modifier.padding(12.dp))
-                    }
-                }
-                Text(str(R.string.calendar_events_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                HorizontalDivider(Modifier.padding(vertical = 8.dp))
-                Text(str(R.string.new_tasks_setting), style = MaterialTheme.typography.labelLarge)
-                val listChoices = state.lists.filter { !it.archived && it.id != "inbox" }
-                SettingRow(
-                    str(R.string.default_list),
-                    when (newTaskList) {
-                        "inbox" -> str(R.string.inbox)
-                        "last" -> str(R.string.last_used_list)
-                        else -> listChoices.firstOrNull { it.id == newTaskList }?.name ?: str(R.string.inbox)
-                    },
-                ) { choosing = "newTaskList" }
-                SwitchRow(str(R.string.parse_title), parse) { parse = it; EntryPrefs.setParse(context, it) }
-                SwitchRow(str(R.string.clipboard_note), clipboard) { clipboard = it; EntryPrefs.setClipboard(context, it) }
-                HorizontalDivider(Modifier.padding(vertical = 8.dp))
-                SettingRow(str(R.string.backups), str(R.string.backups_open)) { choosing = "backups" }
-                HorizontalDivider(Modifier.padding(vertical = 8.dp))
-                Text(str(R.string.sync), style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(bottom = 4.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    for ((value, label) in listOf("off" to str(R.string.sync_off), "webdav" to "WebDAV", "caldav" to "CalDAV")) {
-                        FilterChip(selected = kind == value, onClick = { kind = value }, label = { Text(label) })
-                    }
-                }
-                if (enabled) {
-                    OutlinedTextField(url, { url = it.trim() }, singleLine = true, label = { Text(str(R.string.address)) }, placeholder = { Text("https://…/dav/files/me") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, autoCorrectEnabled = false))
-                    OutlinedTextField(user, { user = it }, singleLine = true, label = { Text(str(R.string.user)) }, keyboardOptions = KeyboardOptions(autoCorrectEnabled = false))
-                    OutlinedTextField(password, { password = it }, singleLine = true, label = { Text(str(R.string.password)) }, visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false))
-                    Text(
-                        str(if (kind == "caldav") R.string.caldav_hint else R.string.webdav_hint),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 8.dp),
-                    )
-                    // Asks the server with what the fields hold now; nothing is saved (S26).
-                    TextButton(enabled = !testing, onClick = {
-                        val config = if (kind == "caldav") SyncConfig.CalDav(url, user) else SyncConfig.WebDav(url, user)
-                        val secret = password
-                        tested = null
-                        testing = true
-                        scope.launch {
-                            val result = withContext(Dispatchers.IO) { runCatching { checkSyncConnection(config, secret) } }
-                            testing = false
-                            testFailed = result.isFailure
-                            tested = result.fold(
-                                { str(if (it == ConnectionCheck.WILL_CREATE) R.string.connected_will_create else R.string.connected) },
-                                { str(R.string.no_connection, describe(it)) },
-                            )
-                        }
-                    }) { Text(str(R.string.test_connection)) }
-                    (if (testing) str(R.string.testing_connection) else tested)?.let {
-                        Text(it, style = MaterialTheme.typography.bodySmall, color = if (testFailed && !testing) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    val noDistributor = str(R.string.push_no_distributor)
-                    SwitchRow(str(R.string.push_switch), push) { on ->
-                        val activity = context.activity()
-                        if (!on) {
-                            Push.disable(context)
-                            push = false
-                        } else if (activity != null) {
-                            Push.enable(activity) { found ->
-                                push = found
-                                if (found) Background.askOnce(activity)
-                                error = if (found) null else noDistributor
+                        "sync" -> {
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                for ((value, label) in listOf("off" to str(R.string.sync_off), "webdav" to "WebDAV", "caldav" to "CalDAV")) {
+                                    FilterChip(selected = kind == value, onClick = { kind = value }, label = { Text(label) })
+                                }
                             }
+                            if (enabled) {
+                                OutlinedTextField(url, { url = it.trim() }, singleLine = true, label = { Text(str(R.string.address)) }, placeholder = { Text("https://…/dav/files/me") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, autoCorrectEnabled = false))
+                                OutlinedTextField(user, { user = it }, singleLine = true, label = { Text(str(R.string.user)) }, keyboardOptions = KeyboardOptions(autoCorrectEnabled = false))
+                                OutlinedTextField(password, { password = it }, singleLine = true, label = { Text(str(R.string.password)) }, visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false))
+                                Text(
+                                    str(if (kind == "caldav") R.string.caldav_hint else R.string.webdav_hint),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(top = 8.dp),
+                                )
+                                // Asks the server with what the fields hold now; nothing is saved (S26).
+                                TextButton(enabled = !testing, onClick = {
+                                    val config = if (kind == "caldav") SyncConfig.CalDav(url, user) else SyncConfig.WebDav(url, user)
+                                    val secret = password
+                                    tested = null
+                                    testing = true
+                                    scope.launch {
+                                        val result = withContext(Dispatchers.IO) { runCatching { checkSyncConnection(config, secret) } }
+                                        testing = false
+                                        testFailed = result.isFailure
+                                        tested = result.fold(
+                                            { str(if (it == ConnectionCheck.WILL_CREATE) R.string.connected_will_create else R.string.connected) },
+                                            { str(R.string.no_connection, describe(it)) },
+                                        )
+                                    }
+                                }) { Text(str(R.string.test_connection)) }
+                                (if (testing) str(R.string.testing_connection) else tested)?.let {
+                                    Text(it, style = MaterialTheme.typography.bodySmall, color = if (testFailed && !testing) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                                val noDistributor = str(R.string.push_no_distributor)
+                                SwitchRow(str(R.string.push_switch), push) { on ->
+                                    val activity = context.activity()
+                                    if (!on) {
+                                        Push.disable(context)
+                                        push = false
+                                    } else if (activity != null) {
+                                        Push.enable(activity) { found ->
+                                            push = found
+                                            if (found) Background.askOnce(activity)
+                                            error = if (found) null else noDistributor
+                                        }
+                                    }
+                                }
+                                Text(str(R.string.push_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                SwitchRow(str(R.string.push_sign_in), pushSignIn) { pushSignIn = it }
+                                if (pushSignIn) {
+                                    OutlinedTextField(pushServer, { pushServer = it.trim() }, singleLine = true, label = { Text(str(R.string.push_server)) }, placeholder = { Text("https://ntfy.example.org") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, autoCorrectEnabled = false))
+                                    OutlinedTextField(pushToken, { pushToken = it.trim() }, singleLine = true, label = { Text(str(R.string.push_token)) }, placeholder = { Text("tk_…") }, visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false))
+                                    Text(str(R.string.push_token_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp))
+                                    if (pushRefused) {
+                                        Text(str(R.string.push_refused), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                                    }
+                                }
+                                SettingRow(str(R.string.background_work), str(if (unrestricted) R.string.background_unrestricted else R.string.background_restricted)) { Background.open(context) }
+                                Text(str(R.string.background_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            } else {
+                                Text(str(R.string.local_only), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            val waiting = state.sync.attachmentsWaiting.takeIf { it > 0u }?.let { str(R.string.attachments_waiting, it.toString()) }
+                            val status = error
+                                ?: state.sync.lastError?.let { str(R.string.last_sync_failed, it) }
+                                ?: listOfNotNull(state.sync.lastOk?.let { str(R.string.synced_at, dateLabel(it).lowercase()) }, waiting).joinToString("\n").ifEmpty { null }
+                            if (syncing) Text(str(R.string.syncing), Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodySmall)
+                            else if (status != null) Text(status, Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodySmall, color = if (error != null || state.sync.lastError != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
-                    Text(str(R.string.push_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    SwitchRow(str(R.string.push_sign_in), pushSignIn) { pushSignIn = it }
-                    if (pushSignIn) {
-                        OutlinedTextField(pushServer, { pushServer = it.trim() }, singleLine = true, label = { Text(str(R.string.push_server)) }, placeholder = { Text("https://ntfy.example.org") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, autoCorrectEnabled = false))
-                        OutlinedTextField(pushToken, { pushToken = it.trim() }, singleLine = true, label = { Text(str(R.string.push_token)) }, placeholder = { Text("tk_…") }, visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false))
-                        Text(str(R.string.push_token_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp))
-                        if (pushRefused) {
-                            Text(str(R.string.push_refused), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-                        }
-                    }
-                    SettingRow(str(R.string.background_work), str(if (unrestricted) R.string.background_unrestricted else R.string.background_restricted)) { Background.open(context) }
-                    Text(str(R.string.background_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                } else {
-                    Text(str(R.string.local_only), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                val waiting = state.sync.attachmentsWaiting.takeIf { it > 0u }?.let { str(R.string.attachments_waiting, it.toString()) }
-                val status = error
-                    ?: state.sync.lastError?.let { str(R.string.last_sync_failed, it) }
-                    ?: listOfNotNull(state.sync.lastOk?.let { str(R.string.synced_at, dateLabel(it).lowercase()) }, waiting).joinToString("\n").ifEmpty { null }
-                if (syncing) Text(str(R.string.syncing), Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodySmall)
-                else if (status != null) Text(status, Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodySmall, color = if (error != null || state.sync.lastError != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
             }
         },
         confirmButton = {
-            TextButton(onClick = {
+            if (section == "sync") TextButton(onClick = {
                 val config = when (kind) {
                     "webdav" -> SyncConfig.WebDav(url, user)
                     "caldav" -> SyncConfig.CalDav(url, user)
@@ -1299,10 +1329,7 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
             }, enabled = !testing) { Text(str(R.string.save_and_sync)) }
         },
         dismissButton = {
-            Row {
-                TextButton(onClick = { pickImport.launch(arrayOf("*/*")) }) { Text(str(R.string.import_file)) }
-                TextButton(onClick = onDismiss) { Text(str(R.string.close)) }
-            }
+            if (section == null) TextButton(onClick = onDismiss) { Text(str(R.string.close)) }
         },
     )
     joining?.let { config ->
