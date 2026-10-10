@@ -140,7 +140,7 @@ Storage cannot tell a device that something changed, so an edit made elsewhere w
 - **Mac app and web server**: give them the address of an [ntfy](https://ntfy.sh) server, the public `https://ntfy.sh` or your own, in Settings → Sync → Push server and in `LISTS_PUSH_SERVER`.
 - **Android**: install a [UnifiedPush](https://unifiedpush.org) app such as ntfy, open it once, then turn on Settings → Sync → "Sync at once after a change elsewhere". This works with the app closed too.
 
-The request carries no data, only "sync now"; tasks still travel through your storage. Each device listens on a random topic name. On a server open to everyone that name is the only protection: the ntfy server can see when you edit, not what. Devices may use different servers, as long as each can reach the others'.
+The request carries no data, only "sync now"; tasks still travel through your storage. The Mac app and the web server that use the same ntfy server listen on one topic with a random name, so one request reaches them all; they agree on the name through the storage, with nothing to set up. A phone keeps the address its UnifiedPush app gave it and gets a request of its own. On a server open to everyone the name of the topic is the only protection: the ntfy server can see when you edit, not what. Devices may use different servers, as long as each can reach the others'; a device on another server keeps a topic of its own. The requests go out together after the sync run has finished, so an address that does not answer does not hold the run back.
 
 #### An ntfy server that requires sign-in
 
