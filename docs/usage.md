@@ -243,7 +243,7 @@ On a phone the app stays in portrait and does not turn with the device. The quic
 
 ## Gestures on Android
 
-The title of the view stands large at the top of the list; the menu, search and the sync icon are in the row above it. A long press on Inbox, a list or a filter in the panel with the lists opens its settings. Swipe right to complete, swipe left to set the due date; a swipe to the right that starts at the left edge of the screen opens the panel with the lists instead. Pull down at the top of a list to sync right away; this works once sync is set up. Long-press for the menu: due date, priority, move to list, add subtask, duplicate, won't do, delete.
+The title of the view stands large at the top of the list; the menu, search and the sync icon are in the row above it. A long press on Inbox, a list or a filter in the panel with the lists opens its settings; while one of them is open, so does Configure in the menu behind the "More" button at the end of that row. Swipe right to complete, swipe left to set the due date; a swipe to the right that starts at the left edge of the screen opens the panel with the lists instead. Pull down at the top of a list to sync right away; this works once sync is set up. Long-press for the menu: due date, priority, move to list, add subtask, duplicate, won't do, delete.
 
 ## Backups
 
