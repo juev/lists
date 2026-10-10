@@ -25,7 +25,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -287,6 +289,8 @@ fun EditorSheet(editing: Editing, state: UiState, model: MainViewModel, onRemind
     val locked = task.deleted || task.isLog
     val context = LocalContext.current
     val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    // R99: stretched to the whole screen with the handle; the next task opens at the height of its content.
+    var tall by rememberSaveable(task.id) { mutableStateOf(false) }
     var dialog by rememberSaveable(task.id) { mutableStateOf<String?>(null) }
     var menu by remember { mutableStateOf(false) }
     // Subtasks are not mentioned until the task has one or the user asks for the field.
@@ -343,8 +347,12 @@ fun EditorSheet(editing: Editing, state: UiState, model: MainViewModel, onRemind
     }
     fun shareAll() = withAll({ if (it.isNotEmpty()) shareAttachments(context, it); emptyList() }, null, R.string.files_not_downloaded)
 
-    ModalBottomSheet(onDismissRequest = { model.open(null) }, sheetState = sheet) {
-        Column(Modifier.verticalScroll(rememberScrollState()).navigationBarsPadding().padding(bottom = 16.dp)) {
+    ModalBottomSheet(
+        onDismissRequest = { model.open(null) },
+        sheetState = sheet,
+        dragHandle = { CardHandle(tall, { tall = it }, if (tall) Modifier.statusBarsPadding() else Modifier) },
+    ) {
+        Column((if (tall) Modifier.fillMaxHeight() else Modifier).verticalScroll(rememberScrollState()).navigationBarsPadding().padding(bottom = 16.dp)) {
             task.parentId?.let { parent ->
                 TextButton(onClick = { model.open(parent) }, modifier = Modifier.padding(start = 8.dp)) {
                     Icon(Icons.AutoMirrored.Outlined.ArrowBack, null, Modifier.size(16.dp))

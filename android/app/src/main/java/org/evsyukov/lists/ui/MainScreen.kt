@@ -54,7 +54,6 @@ import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Tag
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.DropdownMenu
@@ -554,7 +553,9 @@ private fun NewTaskSheet(state: UiState, restored: NewTaskEntry?, onAdd: (TaskDr
         onDismissRequest = { onDismiss(entry) },
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         sheetMaxWidth = Dp.Unspecified,
-        dragHandle = { CardHandle(entry) },
+        dragHandle = {
+            CardHandle(entry.expanded, { entry.expanded = it }, if (entry.expanded) Modifier.statusBarsPadding() else Modifier)
+        },
     ) {
         NewTaskCard(
             lists = state.lists.filter { !it.archived },
@@ -565,42 +566,6 @@ private fun NewTaskSheet(state: UiState, restored: NewTaskEntry?, onAdd: (TaskDr
             keepOpen = true,
             entry = entry,
         )
-    }
-}
-
-/**
- * The handle of the new-task card (R97): a drag up expands the card, a drag
- * down collapses an expanded one. A drag down on a compact card is left to
- * the sheet, which closes.
- */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun CardHandle(entry: NewTaskEntry) {
-    Box(
-        Modifier.fillMaxWidth().pointerInput(entry) {
-            awaitEachGesture {
-                val down = awaitFirstDown(requireUnconsumed = false)
-                val wasExpanded = entry.expanded
-                var dy = 0f
-                var decided = false
-                while (true) {
-                    val change = awaitPointerEvent().changes.firstOrNull { it.id == down.id } ?: break
-                    if (!change.pressed) break
-                    dy += change.positionChange().y
-                    if (!decided && abs(dy) > viewConfiguration.touchSlop) {
-                        decided = true
-                        if (dy < 0) entry.expanded = true else if (wasExpanded) entry.expanded = false
-                    }
-                    // Kept from the sheet, or it would follow the finger and close a card that only changes its size.
-                    if (dy < 0 || wasExpanded) change.consume()
-                }
-            }
-        },
-        contentAlignment = Alignment.Center,
-    ) {
-        // Expanded, the card reaches the top of the screen: the handle stays below the status bar,
-        // where a drag belongs to the system.
-        BottomSheetDefaults.DragHandle(if (entry.expanded) Modifier.statusBarsPadding() else Modifier)
     }
 }
 
