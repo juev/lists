@@ -39,6 +39,10 @@ pub struct Store {
     /// One look at the backup schedule at a time, so that two callers do not both find it due (R88).
     pub(crate) backup_lock: Mutex<()>,
     pub(crate) dir: PathBuf,
+    /// The level of the log (R102) as its code, read on every line that may be written.
+    pub(crate) log_level: std::sync::atomic::AtomicU8,
+    /// One writer of the log file at a time.
+    pub(crate) log_lock: Mutex<()>,
     pub(crate) compact_after: Mutex<u32>,
     pub(crate) sync_password: Mutex<Option<String>>,
     /// The storage this process has already checked the format of and listed the snapshots of.
@@ -575,6 +579,8 @@ impl Store {
             blob_lock: Mutex::new(()),
             backup_lock: Mutex::new(()),
             dir,
+            log_level: std::sync::atomic::AtomicU8::new(crate::log::LogLevel::Error.code()),
+            log_lock: Mutex::new(()),
             compact_after: Mutex::new(64),
             sync_password: Mutex::new(None),
             storage_seen: Mutex::new(None),
@@ -584,6 +590,8 @@ impl Store {
             push_refused: Mutex::new((false, false)),
             caldav_renders: AtomicU64::new(0),
         });
+        // An earlier schema has the table the level is kept in as well.
+        store.load_log_level()?;
         if outdated {
             // Without the backup the migration does not start: the data stays as it was.
             // Asked of the registers alone: the derived tables are as the earlier version left them.

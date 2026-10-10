@@ -18,6 +18,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
+
+use crate::LogLevel;
 use sha2::{Digest, Sha256};
 
 use crate::db::{self, is_sha256, Change, Touched, KIND_ATTACHMENT, KIND_FILTER, KIND_LIST, KIND_SETTINGS, KIND_TASK};
@@ -959,6 +961,14 @@ impl Store {
             Ok(Some(report)) => Ok(report),
             Err(e) => Err(e),
         };
+        // R102: a run that changed nothing is said at the most detailed level only.
+        let quiet = matches!(&result, Ok(report) if report.pulled == 0 && report.pushed == 0);
+        self.note_result(
+            "sync",
+            &result,
+            if quiet { LogLevel::Debug } else { LogLevel::Info },
+            |report| format!("run finished: {} received, {} sent", report.pulled, report.pushed),
+        );
         let inner = self.lock();
         match &result {
             Ok(_) => {
@@ -984,10 +994,17 @@ impl Store {
     /// CalDAV, where the content travels inside the task, and while another
     /// pass is going.
     pub fn sync_attachments(&self) -> Result<AttachmentReport> {
-        match self.file_storage()? {
-            Some(remote) => self.sync_attachments_with(remote.as_ref()),
-            None => Ok(AttachmentReport::default()),
-        }
+        let Some(remote) = self.file_storage()? else {
+            return Ok(AttachmentReport::default());
+        };
+        let result = self.sync_attachments_with(remote.as_ref());
+        self.note_result("attachments", &result, LogLevel::Debug, |report| {
+            format!(
+                "pass finished: {} sent, {} received, {} waiting",
+                report.uploaded, report.downloaded, report.waiting
+            )
+        });
+        result
     }
 
     /// S35: downloads the content of one attachment now, ahead of the pass.

@@ -10,6 +10,7 @@ mod db;
 mod error;
 mod hlc;
 mod import;
+mod log;
 mod markdown;
 mod model;
 mod order;
@@ -22,6 +23,7 @@ pub mod sync;
 pub use backup::{Backup, BackupSettings};
 pub use error::{AppError, Result};
 pub use import::ImportReport;
+pub use log::LogLevel;
 pub use markdown::{
     markdown_layout, markdown_newline, MarkdownAlign, MarkdownBlock, MarkdownCell, MarkdownEdit, MarkdownKind,
     MarkdownLayout, MarkdownSpan, MarkdownTable, MarkdownTableRow,
