@@ -62,7 +62,7 @@ object TodayNotice {
         }
         // What is due today changes with the day, not with a change of the data.
         val nextDay = LocalDate.now().plusDays(1).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
-        alarms?.setAndAllowWhileIdle(AlarmManager.RTC, nextDay + 1000, midnight)
+        alarms?.let { Reminders.atDayChange(context, it, nextDay + 1000, midnight) }
         if (Build.VERSION.SDK_INT >= 33 &&
             context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) return

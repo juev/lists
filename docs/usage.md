@@ -183,7 +183,7 @@ On Android, Settings → Notifications → "Today's tasks in the notification sh
 
 On Android the launcher icon can carry a count as well: Settings → Notifications → "Count on the icon" offers "Today", "Overdue tasks" and "Do not show", and it is off by default. Android lets an app mark its icon only through a notification, so the count comes with a silent notification of its own, "Today: N" or "Overdue: N", in the channel "Count on the icon"; with nothing to count there is neither. What the icon shows is up to the home screen: some draw the number, others a dot and the number in the menu that opens when the icon is held. The notification comes back when it is swiped away and after a restart of the device; "Do not show" removes it. A reminder that still lies in the notification shade is counted by the home screen on top of this number. The choice belongs to the device and does not sync.
 
-On Android 13 and newer a notification arrives at its minute only when "Alarms & reminders" is allowed for Lists. Until then the notification settings show "Reminders may come late": tap it and allow. Without it the system may deliver a notification up to an hour late.
+On Android 13 and newer a notification arrives at its minute only when "Alarms & reminders" is allowed for Lists; the same goes for the renewal of the notification with today's tasks and of the count on the icon right after midnight. Until then the notification settings show "Reminders may come late": tap it and allow. Without it the system may deliver a notification up to an hour late.
 
 ## Calendar events in Today
 

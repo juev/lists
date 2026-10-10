@@ -327,6 +327,16 @@ object Reminders {
         Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
             context.getSystemService(AlarmManager::class.java)?.canScheduleExactAlarms() == true
 
+    /**
+     * R104, R106: the alarm of the change of the day. Exact where the leave is
+     * given (R66); an inexact one may come up to an hour late, and the
+     * notification would show yesterday until then. It does not wake the device.
+     */
+    fun atDayChange(context: Context, alarms: AlarmManager, at: Long, alarm: PendingIntent) {
+        if (exact(context)) alarms.setExactAndAllowWhileIdle(AlarmManager.RTC, at, alarm)
+        else alarms.setAndAllowWhileIdle(AlarmManager.RTC, at, alarm)
+    }
+
     fun refresh(context: Context) {
         val alarms = context.getSystemService(AlarmManager::class.java) ?: return
         val exact = exact(context)
