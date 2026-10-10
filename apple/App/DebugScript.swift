@@ -56,7 +56,8 @@ import UserNotifications
 /// `dockcount` alone prints the choice, the label the Dock tile carries and the counts it is taken from,
 /// `menu:Title` (prints whether the menu bar item with that title is enabled),
 /// `rowmenu:300,140` (prints the items of the menu a right click at that point of the window would open, without opening it;
-/// `rowmenu:300,140=Title` also chooses the item with that title), `undo` (prints what ⌘Z would take back and takes it back),
+/// `rowmenu:300,140=Title` also chooses the item with that title; asking the list for the menu of a row leaves its highlight over the row,
+/// and a later `rowmenu` in the same run finds the highlight under the pointer in place of the row, so a subtask is asked first), `undo` (prints what ⌘Z would take back and takes it back),
 /// `sidebar` (prints how many rows each list of the main window has, the sidebar among them),
 /// `copytext:text`, `copysecret:text` and `copyfile:path` (fill the pasteboard quick entry reads; with `LISTS_DEBUG_PASTEBOARD=name` that is a pasteboard of its own, not the general one),
 /// `clipnotes:on` and `clipnotes:off` (flip the setting of R58), `quicknote` (shows quick entry transparent and without the keyboard, and prints the note it starts with; `quicknote:/path.png` also draws the card into a file),

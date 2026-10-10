@@ -503,11 +503,24 @@ final class SubtaskMenuView: NSView {
         }
     }
 
-    /// The subtask at a point of the window: the innermost one when subtasks are nested.
+    /// The subtask a right click at a point of the window is for: the innermost one when subtasks
+    /// are nested. None when the click lands on text or on a file, which have menus of their own,
+    /// or on something outside the row of the subtask, such as a toolbar the list has scrolled under.
     static func area(at point: NSPoint, in window: NSWindow) -> SubtaskMenuView? {
-        areas.allObjects
-            .filter { $0.window === window && !$0.isHiddenOrHasHiddenAncestor && $0.convert($0.bounds, to: nil).contains(point) }
-            .min { $0.bounds.height < $1.bounds.height }
+        guard let hit = (window.contentView?.superview ?? window.contentView)?.hitTest(point),
+              let area = areas.allObjects
+                .filter({ $0.window === window && !$0.isHiddenOrHasHiddenAncestor && $0.convert($0.bounds, to: nil).contains(point) })
+                .min(by: { $0.bounds.height < $1.bounds.height })
+        else { return nil }
+        var row: NSView? = area
+        while let current = row, !(current is NSTableRowView) { row = current.superview }
+        guard let row, hit.isDescendant(of: row) else { return nil }
+        var view: NSView? = hit
+        while let current = view, current !== row {
+            if current is NSText || current is FilePointerView { return nil }
+            view = current.superview
+        }
+        return area
     }
 
     /// The menu of the subtask, built from the same items as the menu of a row of the list.
@@ -544,19 +557,13 @@ final class SubtaskMenuView: NSView {
         if actions.indices.contains(item.tag) { actions[item.tag]() }
     }
 
-    /// Right clicks and ⌃clicks are looked at before the list gets them. Text and files have menus
-    /// of their own, and a click on them is left alone.
+    /// Right clicks and ⌃clicks are looked at before the list gets them.
     private static func watch() {
         guard monitor == nil else { return }
         monitor = NSEvent.addLocalMonitorForEvents(matching: [.rightMouseDown, .leftMouseDown]) { event in
             guard event.type == .rightMouseDown || event.modifierFlags.contains(.control),
                   let window = event.window, let area = area(at: event.locationInWindow, in: window)
             else { return event }
-            var view = (window.contentView?.superview ?? window.contentView)?.hitTest(event.locationInWindow)
-            while let current = view {
-                if current is NSText || current is FilePointerView { return event }
-                view = current.superview
-            }
             NSMenu.popUpContextMenu(area.subtaskMenu(), with: event, for: area)
             return nil
         }
