@@ -1,7 +1,9 @@
 //! A content-free nudge between devices: "something changed, sync now".
 //! Rules: S18–S23 and S27–S30 in docs/specs/sync.md.
 
+use std::collections::BTreeSet;
 use std::io::{BufRead, BufReader};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use sha2::{Digest, Sha256};
@@ -15,6 +17,41 @@ const ENDPOINT_KEY: &str = "push_endpoint";
 const SERVER_KEY: &str = "push_server";
 const TOPIC_KEY: &str = "push_topic";
 const SEND_SERVER_KEY: &str = "push_send_server";
+/// Set while the topic has not been compared with those in the storage since the server was set (S41).
+pub(crate) const UNSETTLED_KEY: &str = "push_unsettled";
+
+/// Batches of nudges on their way, in this process.
+static IN_FLIGHT: AtomicUsize = AtomicUsize::new(0);
+
+struct Flight;
+
+impl Flight {
+    fn start() -> Flight {
+        IN_FLIGHT.fetch_add(1, Ordering::SeqCst);
+        Flight
+    }
+}
+
+impl Drop for Flight {
+    fn drop(&mut self) {
+        IN_FLIGHT.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// S19: returns when the nudges this process was sending have gone out or
+/// given up. For a caller that the system may stop as soon as it says its
+/// work is done; nobody else has to wait.
+#[uniffi::export]
+pub fn finish_pushes() {
+    while IN_FLIGHT.load(Ordering::SeqCst) > 0 {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+/// S22: the name a device makes up for itself, and so the mark of a topic of this app.
+fn is_topic(name: &str) -> bool {
+    name.len() == 32 && name.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
 /// ntfy sends a keep-alive line every 45 seconds; silence longer than this is a dead connection.
 const SILENCE: Duration = Duration::from_secs(120);
 
@@ -41,26 +78,57 @@ fn server_address(server: Option<&str>) -> Result<Option<&str>> {
 }
 
 impl Store {
-    /// Asks whoever listens at each address to sync. Best effort: an address that
-    /// does not answer changes nothing for the sender.
+    /// Asks whoever listens at each address to sync (S19). The requests leave
+    /// together on a thread of their own, so the caller, a sync run, does not
+    /// wait for them. Best effort: an address that does not answer changes
+    /// nothing for the sender. An address named twice is asked once (S41).
     pub(crate) fn poke<'a>(&self, urls: impl IntoIterator<Item = &'a str>) {
+        let urls: BTreeSet<String> = urls.into_iter().filter(|u| is_http(u)).map(str::to_string).collect();
+        let Some(store) = self.me.upgrade().filter(|_| !urls.is_empty()) else {
+            return;
+        };
+        let flight = Flight::start();
+        std::thread::spawn(move || {
+            store.send_nudges(&urls);
+            drop(flight);
+        });
+    }
+
+    fn send_nudges(&self, urls: &BTreeSet<String>) {
         let agent = ureq::AgentBuilder::new().timeout(Duration::from_secs(5)).build();
         let own = self.own_server();
         let token = self.token();
-        let (mut passed, mut denied) = (false, false);
-        for url in urls.into_iter().filter(|u| is_http(u)) {
-            // S28: the token goes to the own server and nowhere else.
-            let at_home = own.is_some() && origin(url) == own;
-            let mut request = agent.post(url);
-            if let Some(token) = token.as_ref().filter(|_| at_home) {
-                request = request.set("Authorization", &format!("Bearer {token}"));
-            }
-            let answer = request.send_string("sync");
-            if at_home {
-                passed |= answer.is_ok();
-                denied |= refused(&answer);
-            }
-        }
+        let sender = self.device_id();
+        // For each address: whether it is on the own server, and the answer.
+        let answers: Vec<(bool, std::result::Result<(), bool>)> = std::thread::scope(|scope| {
+            let asked: Vec<_> = urls
+                .iter()
+                .map(|url| {
+                    let (agent, own, token, sender) = (&agent, &own, &token, &sender);
+                    scope.spawn(move || {
+                        // S28: the token goes to the own server and nowhere else.
+                        let at_home = own.is_some() && origin(url) == *own;
+                        // S41: who sent it, so that a device on the same topic can pass its own by.
+                        let mut request = agent.post(url).set("X-Title", sender);
+                        if let Some(token) = token.as_ref().filter(|_| at_home) {
+                            request = request.set("Authorization", &format!("Bearer {token}"));
+                        }
+                        let answer = request.send_string("sync");
+                        (at_home, answer.as_ref().map(|_| ()).map_err(|_| refused(&answer)))
+                    })
+                })
+                .collect();
+            asked.into_iter().filter_map(|thread| thread.join().ok()).collect()
+        });
+        let unanswered = answers.iter().filter(|(_, answer)| answer.is_err()).count();
+        self.note(LogLevel::Debug, "push", || {
+            format!(
+                "nudges sent to {} addresses, {unanswered} did not take it",
+                answers.len()
+            )
+        });
+        let passed = answers.iter().any(|(at_home, answer)| *at_home && answer.is_ok());
+        let denied = answers.iter().any(|(at_home, answer)| *at_home && *answer == Err(true));
         if passed || denied {
             let was = std::mem::replace(&mut self.refusals().1, denied);
             if denied && !was {
@@ -69,6 +137,25 @@ impl Store {
                 });
             }
         }
+    }
+
+    /// S41: makes the topic of this device the one its server shares. Of the
+    /// addresses of the other devices that are topics on the same server, and
+    /// its own, the least becomes its own.
+    pub(crate) fn share_topic<'a>(&self, others: impl IntoIterator<Item = &'a str>) -> Result<()> {
+        let (Some(server), Some(own)) = (self.push_server()?, self.push_endpoint()?) else {
+            return Ok(());
+        };
+        let home = format!("{server}/");
+        let least = others
+            .into_iter()
+            .filter(|address| address.strip_prefix(&home).is_some_and(is_topic))
+            .min();
+        if let Some(least) = least.filter(|least| *least < own.as_str()) {
+            db::meta_set(&self.lock().conn, TOPIC_KEY, &least[home.len()..])?;
+            self.set_push_endpoint(Some(least.to_string()))?;
+        }
+        Ok(())
     }
 
     fn own_server(&self) -> Option<url::Origin> {
@@ -131,6 +218,8 @@ impl Store {
             }
         };
         db::meta_set(&self.lock().conn, SERVER_KEY, server)?;
+        // S41: the next run looks whether the storage already names a topic on this server.
+        db::meta_set(&self.lock().conn, UNSETTLED_KEY, "1")?;
         self.set_push_endpoint(Some(format!("{server}/{topic}")))
     }
 
@@ -211,9 +300,11 @@ impl Store {
             pause();
             return false;
         };
+        // S41: the topic is shared, and what this device posted to it comes back.
+        let own = format!(r#""title":"{}""#, self.device_id());
         for line in BufReader::new(response.into_reader()).lines() {
             match line {
-                Ok(line) if line.contains(r#""event":"message""#) => return true,
+                Ok(line) if line.contains(r#""event":"message""#) && !line.contains(&own) => return true,
                 Ok(_) => {
                     // Any other line, a keep-alive among them, is the moment to
                     // notice that the setting changed.

@@ -39,6 +39,8 @@ pub struct Store {
     /// One look at the backup schedule at a time, so that two callers do not both find it due (R88).
     pub(crate) backup_lock: Mutex<()>,
     pub(crate) dir: PathBuf,
+    /// The store itself, for work that outlives the call that started it (S19).
+    pub(crate) me: std::sync::Weak<Store>,
     /// The level of the log (R102) as its code, read on every line that may be written.
     pub(crate) log_level: std::sync::atomic::AtomicU8,
     /// One writer of the log file at a time.
@@ -573,7 +575,8 @@ impl Store {
             }
         };
         let clock = Clock::new(&device, db::max_stamp(&conn)?.as_deref());
-        let store = Arc::new(Store {
+        let store = Arc::new_cyclic(|me| Store {
+            me: me.clone(),
             inner: Mutex::new(Inner { conn, clock, now: None }),
             sync_lock: Mutex::new(()),
             blob_lock: Mutex::new(()),
