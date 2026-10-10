@@ -241,6 +241,8 @@ struct SettingsView: View {
         }
     }
 
+    /// The tab shown; the window opens on the one used last.
+    @AppStorage("settingsTab") private var tab = "general"
     @State private var kind = Kind.off
     @State private var url = ""
     @State private var user = ""
@@ -257,194 +259,219 @@ struct SettingsView: View {
     @State private var replacing: Replacement?
 
     var body: some View {
-        Form {
-            Section(L("Appearance")) {
-                @Bindable var model = model
-                Picker(L("Appearance"), selection: $model.appearance) {
-                    Text(L("Same as the system")).tag("system")
-                    Text(L("Light")).tag("light")
-                    Text(L("Dark")).tag("dark")
-                }
-            }
-            Section(L("Text")) {
-                @Bindable var model = model
-                Picker(L("Size"), selection: $model.textScale) {
-                    ForEach(AppFont.scales, id: \.1) { name, value in Text(L(name)).tag(value) }
-                }
-                Picker(L("Typeface"), selection: $model.fontDesign) {
-                    ForEach(AppFont.designs, id: \.1) { name, value in Text(L(name)).tag(value) }
-                }
-            }
-            Section(L("Sidebar")) {
-                @Bindable var model = model
-                ForEach(Scope.builtins, id: \.self) { scope in
-                    Picker(scope.builtinTitle, selection: Binding(get: { model.sidebarShow(scope) }, set: { model.setSidebarShow(scope, $0) })) {
-                        ForEach(SidebarShow.allCases, id: \.self) { Text($0.title).tag($0) }
+        // R101: five tabs. The state of every tab lives in this view, so what is typed under Sync stays while the window is open.
+        TabView(selection: $tab) {
+            Form {
+                Section(L("Appearance")) {
+                    @Bindable var model = model
+                    Picker(L("Appearance"), selection: $model.appearance) {
+                        Text(L("Same as the system")).tag("system")
+                        Text(L("Light")).tag("light")
+                        Text(L("Dark")).tag("dark")
                     }
                 }
-            }
-            Section(L("Calendar events")) {
-                @Bindable var model = model
-                Toggle(L("Show calendar events in Today"), isOn: $model.showCalendarEvents)
-                if model.showCalendarEvents {
-                    if model.calendarAccess == .denied {
-                        Button(L("Lists has no access to the calendars. Open System Settings…")) {
-                            SystemCalendars.shared.openPrivacySettings()
+                Section(L("Text")) {
+                    @Bindable var model = model
+                    Picker(L("Size"), selection: $model.textScale) {
+                        ForEach(AppFont.scales, id: \.1) { name, value in Text(L(name)).tag(value) }
+                    }
+                    Picker(L("Typeface"), selection: $model.fontDesign) {
+                        ForEach(AppFont.designs, id: \.1) { name, value in Text(L(name)).tag(value) }
+                    }
+                }
+                Section(L("Sidebar")) {
+                    @Bindable var model = model
+                    ForEach(Scope.builtins, id: \.self) { scope in
+                        Picker(scope.builtinTitle, selection: Binding(get: { model.sidebarShow(scope) }, set: { model.setSidebarShow(scope, $0) })) {
+                            ForEach(SidebarShow.allCases, id: \.self) { Text($0.title).tag($0) }
                         }
                     }
-                    // R78: the system gives all the calendars at once, the choice among them is made here.
-                    ForEach(model.eventCalendars) { calendar in
-                        Toggle(isOn: Binding(
-                            get: { !model.hiddenCalendars.contains(calendar.id) },
-                            set: { if $0 { model.hiddenCalendars.remove(calendar.id) } else { model.hiddenCalendars.insert(calendar.id) } })) {
-                            HStack(spacing: 6) {
-                                Circle().fill(calendar.color).frame(width: 8, height: 8)
-                                Text(calendar.title)
-                                Text(calendar.source).foregroundStyle(.secondary)
+                }
+                Section(L("Completed tasks")) {
+                    // What R68 offers, and the value in force when another device set something else.
+                    Picker(L("Leave the view"), selection: Binding(get: { model.keepDone }, set: { model.setKeepDone($0) })) {
+                        ForEach(Self.keepChoices(model.keepDone), id: \.self) { keep in
+                            Text(Self.keepTitle(keep)).tag(keep)
+                        }
+                    }
+                }
+            }
+            .formStyle(.grouped)
+            .tabItem { Label(L("General"), systemImage: "gearshape") }
+            .tag("general")
+            Form {
+                Section(L("New tasks")) {
+                    @Bindable var model = model
+                    Picker(L("Default list"), selection: $model.newTaskList) {
+                        Text(L("Inbox")).tag("inbox")
+                        Text(L("Last used list")).tag("last")
+                        Divider()
+                        ForEach(model.lists.filter { !$0.archived && $0.id != "inbox" }, id: \.id) { Text($0.name).tag($0.id) }
+                    }
+                    Text(L("Used by quick entry and by views that show several lists, such as Today."))
+                        .font(AppFont.style(.caption)).foregroundStyle(.secondary)
+                    Toggle(L("Recognize dates, priority, tags and lists in the title"), isOn: $model.parseQuickText)
+                    Text(L("“report friday 10:00 !! #work @Projects” sets the due date, the priority, a tag and the list. Off: the title is kept as typed."))
+                        .font(AppFont.style(.caption)).foregroundStyle(.secondary)
+                    Toggle(L("Start the note with the clipboard in quick entry"), isOn: $model.clipboardNotes)
+                    Text(L("Text or a link copied just before the quick-entry window is opened becomes the note. Each copy is used once."))
+                        .font(AppFont.style(.caption)).foregroundStyle(.secondary)
+                    Picker(L("Return in the notes"), selection: $model.returnAddsLine) {
+                        Text(L("Starts a new line")).tag(true)
+                        Text(L("Finishes editing")).tag(false)
+                    }
+                    Text(model.returnAddsLine
+                        ? L("Esc finishes editing.")
+                        : L("⌥Return starts a new line."))
+                        .font(AppFont.style(.caption)).foregroundStyle(.secondary)
+                }
+                Section(L("Quick Entry")) {
+                    KeyboardShortcuts.Recorder(L("Shortcut:"), name: .quickEntry)
+                }
+                Section(L("Calendar events")) {
+                    @Bindable var model = model
+                    Toggle(L("Show calendar events in Today"), isOn: $model.showCalendarEvents)
+                    if model.showCalendarEvents {
+                        if model.calendarAccess == .denied {
+                            Button(L("Lists has no access to the calendars. Open System Settings…")) {
+                                SystemCalendars.shared.openPrivacySettings()
                             }
                         }
-                        .toggleStyle(.checkbox)
-                    }
-                }
-                Text(L("Events are read from the calendars of this Mac and are shown above the tasks. They are not synced, and this setting applies to this Mac only."))
-                    .font(AppFont.style(.caption)).foregroundStyle(.secondary)
-            }
-            Section(L("Completed tasks")) {
-                // What R68 offers, and the value in force when another device set something else.
-                Picker(L("Leave the view"), selection: Binding(get: { model.keepDone }, set: { model.setKeepDone($0) })) {
-                    ForEach(Self.keepChoices(model.keepDone), id: \.self) { keep in
-                        Text(Self.keepTitle(keep)).tag(keep)
-                    }
-                }
-            }
-            Section(L("Notifications")) {
-                @Bindable var model = model
-                Toggle(L("Show notifications"), isOn: $model.notifyEnabled)
-                // Several can be on at once: a day before and again fifteen minutes before.
-                LabeledContent(L("Task due at a time")) {
-                    Menu {
-                        ForEach(Self.leads, id: \.self) { minutes in
-                            Toggle(Self.leadTitle(minutes), isOn: Binding(
-                                get: { model.notifyLeads.contains(minutes) },
-                                set: { if $0 { model.notifyLeads.insert(minutes) } else { model.notifyLeads.remove(minutes) } }))
+                        // R78: the system gives all the calendars at once, the choice among them is made here.
+                        ForEach(model.eventCalendars) { calendar in
+                            Toggle(isOn: Binding(
+                                get: { !model.hiddenCalendars.contains(calendar.id) },
+                                set: { if $0 { model.hiddenCalendars.remove(calendar.id) } else { model.hiddenCalendars.insert(calendar.id) } })) {
+                                HStack(spacing: 6) {
+                                    Circle().fill(calendar.color).frame(width: 8, height: 8)
+                                    Text(calendar.title)
+                                    Text(calendar.source).foregroundStyle(.secondary)
+                                }
+                            }
+                            .toggleStyle(.checkbox)
                         }
-                    } label: {
-                        Text(model.notifyLeads.isEmpty
-                            ? L("Off")
-                            : model.notifyLeads.sorted().map(Self.leadTitle).joined(separator: ", "))
                     }
-                    .fixedSize()
+                    Text(L("Events are read from the calendars of this Mac and are shown above the tasks. They are not synced, and this setting applies to this Mac only."))
+                        .font(AppFont.style(.caption)).foregroundStyle(.secondary)
                 }
-                Picker(L("Task due on a day"), selection: $model.notifyAllDay) {
-                    Text(L("Off")).tag("")
-                    ForEach(Self.times, id: \.self) { Text(L("At %@", $0)).tag($0) }
-                }
-                Picker(L("Summary of the day"), selection: $model.notifySummary) {
-                    Text(L("Off")).tag("")
-                    ForEach(Self.times, id: \.self) { Text(L("At %@", $0)).tag($0) }
-                }
-                Toggle(L("Play a sound"), isOn: $model.notifySound)
-                if model.notifySound {
-                    // R36: the chosen sound is heard at once.
-                    Picker(L("Sound"), selection: Binding(
-                        get: { NotifySound.names.contains(model.notifySoundName) ? model.notifySoundName : "" },
-                        set: { model.notifySoundName = $0; NotifySound.play($0) })) {
-                        Text(L("Standard")).tag("")
-                        Divider()
-                        ForEach(NotifySound.names, id: \.self) { Text($0).tag($0) }
+            }
+            .formStyle(.grouped)
+            .tabItem { Label(L("Tasks"), systemImage: "checklist") }
+            .tag("tasks")
+            Form {
+                Section(L("Notifications")) {
+                    @Bindable var model = model
+                    Toggle(L("Show notifications"), isOn: $model.notifyEnabled)
+                    // Several can be on at once: a day before and again fifteen minutes before.
+                    LabeledContent(L("Task due at a time")) {
+                        Menu {
+                            ForEach(Self.leads, id: \.self) { minutes in
+                                Toggle(Self.leadTitle(minutes), isOn: Binding(
+                                    get: { model.notifyLeads.contains(minutes) },
+                                    set: { if $0 { model.notifyLeads.insert(minutes) } else { model.notifyLeads.remove(minutes) } }))
+                            }
+                        } label: {
+                            Text(model.notifyLeads.isEmpty
+                                ? L("Off")
+                                : model.notifyLeads.sorted().map(Self.leadTitle).joined(separator: ", "))
+                        }
+                        .fixedSize()
                     }
-                }
-                Text(L("A reminder set on a task is always shown. These settings apply to this Mac only."))
-                    .font(AppFont.style(.caption)).foregroundStyle(.secondary)
-            }
-            Section(L("New tasks")) {
-                @Bindable var model = model
-                Picker(L("Default list"), selection: $model.newTaskList) {
-                    Text(L("Inbox")).tag("inbox")
-                    Text(L("Last used list")).tag("last")
-                    Divider()
-                    ForEach(model.lists.filter { !$0.archived && $0.id != "inbox" }, id: \.id) { Text($0.name).tag($0.id) }
-                }
-                Text(L("Used by quick entry and by views that show several lists, such as Today."))
-                    .font(AppFont.style(.caption)).foregroundStyle(.secondary)
-                Toggle(L("Recognize dates, priority, tags and lists in the title"), isOn: $model.parseQuickText)
-                Text(L("“report friday 10:00 !! #work @Projects” sets the due date, the priority, a tag and the list. Off: the title is kept as typed."))
-                    .font(AppFont.style(.caption)).foregroundStyle(.secondary)
-                Toggle(L("Start the note with the clipboard in quick entry"), isOn: $model.clipboardNotes)
-                Text(L("Text or a link copied just before the quick-entry window is opened becomes the note. Each copy is used once."))
-                    .font(AppFont.style(.caption)).foregroundStyle(.secondary)
-                Picker(L("Return in the notes"), selection: $model.returnAddsLine) {
-                    Text(L("Starts a new line")).tag(true)
-                    Text(L("Finishes editing")).tag(false)
-                }
-                Text(model.returnAddsLine
-                    ? L("Esc finishes editing.")
-                    : L("⌥Return starts a new line."))
-                    .font(AppFont.style(.caption)).foregroundStyle(.secondary)
-            }
-            Section(L("Quick Entry")) {
-                KeyboardShortcuts.Recorder(L("Shortcut:"), name: .quickEntry)
-            }
-            BackupsSection()
-            Section(L("Sync")) {
-                Picker(L("Storage"), selection: $kind) {
-                    Text(L("Off")).tag(Kind.off)
-                    Text("WebDAV").tag(Kind.webdav)
-                    Text("CalDAV").tag(Kind.caldav)
-                    Text(L("Folder")).tag(Kind.folder)
-                }
-                switch kind {
-                case .off:
-                    Text(L("Data is kept on this Mac only.")).foregroundStyle(.secondary)
-                case .webdav:
-                    TextField(L("Address"), text: $url, prompt: Text("https://example.org/remote.php/dav/files/me"))
-                    TextField(L("User name"), text: $user)
-                    SecureField(L("Password"), text: $password)
-                    Text(L("For Nextcloud and similar servers use an app password. Data on the server is not encrypted."))
+                    Picker(L("Task due on a day"), selection: $model.notifyAllDay) {
+                        Text(L("Off")).tag("")
+                        ForEach(Self.times, id: \.self) { Text(L("At %@", $0)).tag($0) }
+                    }
+                    Picker(L("Summary of the day"), selection: $model.notifySummary) {
+                        Text(L("Off")).tag("")
+                        ForEach(Self.times, id: \.self) { Text(L("At %@", $0)).tag($0) }
+                    }
+                    Toggle(L("Play a sound"), isOn: $model.notifySound)
+                    if model.notifySound {
+                        // R36: the chosen sound is heard at once.
+                        Picker(L("Sound"), selection: Binding(
+                            get: { NotifySound.names.contains(model.notifySoundName) ? model.notifySoundName : "" },
+                            set: { model.notifySoundName = $0; NotifySound.play($0) })) {
+                            Text(L("Standard")).tag("")
+                            Divider()
+                            ForEach(NotifySound.names, id: \.self) { Text($0).tag($0) }
+                        }
+                    }
+                    Text(L("A reminder set on a task is always shown. These settings apply to this Mac only."))
                         .font(AppFont.style(.caption)).foregroundStyle(.secondary)
-                case .caldav:
-                    TextField(L("Address"), text: $url, prompt: Text("https://example.org/remote.php/dav"))
-                    TextField(L("User name"), text: $user)
-                    SecureField(L("Password"), text: $password)
-                    Text(L("Lists become calendars and tasks stay visible to other CalDAV apps. Attachments up to 5 MB are synced, up to 20 MB per task."))
-                        .font(AppFont.style(.caption)).foregroundStyle(.secondary)
-                case .folder:
+                }
+            }
+            .formStyle(.grouped)
+            .tabItem { Label(L("Notifications"), systemImage: "bell") }
+            .tag("notifications")
+            Form {
+                Section(L("Sync")) {
+                    Picker(L("Storage"), selection: $kind) {
+                        Text(L("Off")).tag(Kind.off)
+                        Text("WebDAV").tag(Kind.webdav)
+                        Text("CalDAV").tag(Kind.caldav)
+                        Text(L("Folder")).tag(Kind.folder)
+                    }
+                    switch kind {
+                    case .off:
+                        Text(L("Data is kept on this Mac only.")).foregroundStyle(.secondary)
+                    case .webdav:
+                        TextField(L("Address"), text: $url, prompt: Text("https://example.org/remote.php/dav/files/me"))
+                        TextField(L("User name"), text: $user)
+                        SecureField(L("Password"), text: $password)
+                        Text(L("For Nextcloud and similar servers use an app password. Data on the server is not encrypted."))
+                            .font(AppFont.style(.caption)).foregroundStyle(.secondary)
+                    case .caldav:
+                        TextField(L("Address"), text: $url, prompt: Text("https://example.org/remote.php/dav"))
+                        TextField(L("User name"), text: $user)
+                        SecureField(L("Password"), text: $password)
+                        Text(L("Lists become calendars and tasks stay visible to other CalDAV apps. Attachments up to 5 MB are synced, up to 20 MB per task."))
+                            .font(AppFont.style(.caption)).foregroundStyle(.secondary)
+                    case .folder:
+                        HStack {
+                            TextField(L("Path"), text: $folder)
+                            Button(L("Choose…"), action: chooseFolder)
+                        }
+                        Text(L("A folder synced by another tool or a network drive will do."))
+                            .font(AppFont.style(.caption)).foregroundStyle(.secondary)
+                    }
+                    if kind != .off {
+                        TextField(L("Push server"), text: $pushServer, prompt: Text("https://ntfy.sh"))
+                        Text(L("Optional. Through an ntfy server other devices ask this Mac to sync at once. No data passes through it."))
+                            .font(AppFont.style(.caption)).foregroundStyle(.secondary)
+                        Toggle(L("The push server requires sign-in"), isOn: $pushSignIn)
+                        if pushSignIn {
+                            SecureField(L("Push token"), text: $pushToken, prompt: Text("tk_…"))
+                            Text(L("An access token of the ntfy server. It is sent to this server and to no other."))
+                                .font(AppFont.style(.caption)).foregroundStyle(.secondary)
+                        }
+                        if pushRefused {
+                            Text(L("The push server refused access. Check the push token."))
+                                .font(AppFont.style(.caption)).foregroundStyle(.secondary)
+                        }
+                    }
                     HStack {
-                        TextField(L("Path"), text: $folder)
-                        Button(L("Choose…"), action: chooseFolder)
+                        Button(L("Save and sync"), action: save)
+                        if kind == .webdav || kind == .caldav {
+                            Button(L("Test connection"), action: test).disabled(testing)
+                        }
+                        if model.syncing || testing { ProgressView().controlSize(.small) }
+                        Spacer()
                     }
-                    Text(L("A folder synced by another tool or a network drive will do."))
-                        .font(AppFont.style(.caption)).foregroundStyle(.secondary)
-                }
-                if kind != .off {
-                    TextField(L("Push server"), text: $pushServer, prompt: Text("https://ntfy.sh"))
-                    Text(L("Optional. Through an ntfy server other devices ask this Mac to sync at once. No data passes through it."))
-                        .font(AppFont.style(.caption)).foregroundStyle(.secondary)
-                    Toggle(L("The push server requires sign-in"), isOn: $pushSignIn)
-                    if pushSignIn {
-                        SecureField(L("Push token"), text: $pushToken, prompt: Text("tk_…"))
-                        Text(L("An access token of the ntfy server. It is sent to this server and to no other."))
-                            .font(AppFont.style(.caption)).foregroundStyle(.secondary)
+                    if let text = message ?? status {
+                        Text(text).font(AppFont.style(.caption)).foregroundStyle(.secondary).textSelection(.enabled)
                     }
-                    if pushRefused {
-                        Text(L("The push server refused access. Check the push token."))
-                            .font(AppFont.style(.caption)).foregroundStyle(.secondary)
-                    }
-                }
-                HStack {
-                    Button(L("Save and sync"), action: save)
-                    if kind == .webdav || kind == .caldav {
-                        Button(L("Test connection"), action: test).disabled(testing)
-                    }
-                    if model.syncing || testing { ProgressView().controlSize(.small) }
-                    Spacer()
-                }
-                if let text = message ?? status {
-                    Text(text).font(AppFont.style(.caption)).foregroundStyle(.secondary).textSelection(.enabled)
                 }
             }
+            .formStyle(.grouped)
+            .tabItem { Label(L("Sync"), systemImage: "arrow.triangle.2.circlepath") }
+            .tag("sync")
+            Form {
+                BackupsSection()
+            }
+            .formStyle(.grouped)
+            .tabItem { Label(L("Backups"), systemImage: "externaldrive") }
+            .tag("backups")
         }
-        .formStyle(.grouped)
         .frame(width: 520)
         .onAppear(perform: load)
         .confirmationDialog(

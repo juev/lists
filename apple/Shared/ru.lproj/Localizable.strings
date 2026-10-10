@@ -364,3 +364,5 @@
 "All tasks, lists and filters on this Mac are replaced with what the backup %@ holds. The present state is saved as a backup first." = "Все задачи, списки и фильтры на этом Mac будут заменены содержимым копии %@. Текущее состояние сначала сохранится отдельной копией.";
 "Restored from %@." = "Восстановлено из копии %@.";
 "The copy is saved." = "Копия сохранена.";
+"General" = "Основные";
+"Tasks" = "Задачи";

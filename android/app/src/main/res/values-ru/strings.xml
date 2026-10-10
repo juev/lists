@@ -52,7 +52,6 @@
     <string name="password">Пароль</string>
     <string name="webdav_hint">Для Nextcloud и подобных укажите пароль приложения. Данные на сервере не шифруются.</string>
     <string name="backups">Резервные копии</string>
-    <string name="backups_open">Открыть</string>
     <string name="backups_create">Создавать копии</string>
     <string name="backups_never">Нет</string>
     <string name="backups_every_24">Каждые 24 часа</string>
@@ -287,6 +286,9 @@
     <string name="appearance_system">Как в системе</string>
     <string name="appearance_light">Светлое</string>
     <string name="appearance_dark">Тёмное</string>
+    <string name="settings_general">Основные</string>
+    <string name="settings_tasks">Задачи</string>
+    <string name="back">Назад</string>
     <string name="text_size">Размер текста</string>
     <string name="text_size_small">Мелкий</string>
     <string name="text_size_default">Обычный</string>

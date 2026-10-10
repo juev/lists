@@ -32,6 +32,7 @@ import UserNotifications
 /// `windows` (prints the windows of the app),
 /// `notes` (prints the note of the open card as it is drawn: what is hidden, what is replaced and which fonts differ),
 /// `shot:/path/to.png` (draws that note into a file, on screen or not),
+/// `settingstab:sync` (chooses the tab of the settings window: `general`, `tasks`, `notifications`, `sync`, `backups`), `settingsshot:/path/to.png` (draws the settings into a file from a window that is never shown),
 /// `winshot:/path/to.png` (draws the main window into a file, on screen or not; a hidden window draws no rows, those of the sidebar among them),
 /// `viewicons:/path/to.png` (draws the icons of the built-in views into a file in the light and the dark look and prints the symbol of each),
 /// `rowshot:/path/to.png` (draws the row of the selected task into a file, eight pixels to a point: a hidden window draws no rows;
@@ -434,6 +435,26 @@ enum DebugScript {
                         try? image.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: argument))
                         print("debug: window drawn, \(image.pixelsWide)x\(image.pixelsHigh) pixels")
                     }
+                case "settingstab": UserDefaults.standard.set(argument, forKey: "settingsTab")
+                case "settingsshot":
+                    // The settings drawn into a file from a window that is never shown: a hidden app opens no settings window.
+                    let window = settingsWindow ?? {
+                        let made = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 400), styleMask: [.titled], backing: .buffered, defer: false)
+                        made.isReleasedWhenClosed = false
+                        made.contentView = NSHostingView(rootView: SettingsView().environment(AppModel.shared))
+                        settingsWindow = made
+                        return made
+                    }()
+                    if let view = window.contentView {
+                        view.layoutSubtreeIfNeeded()
+                        window.setContentSize(view.fittingSize)
+                        view.layoutSubtreeIfNeeded()
+                        if let image = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
+                            view.cacheDisplay(in: view.bounds, to: image)
+                            try? image.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: argument))
+                            print("debug: settings drawn, \(image.pixelsWide)x\(image.pixelsHigh) pixels, tab \(UserDefaults.standard.string(forKey: "settingsTab") ?? "general")")
+                        }
+                    }
                 case "shot":
                     // The note drawn into a file: it need not be on screen for that.
                     if let view = notesView(in: target?.contentView), let image = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
@@ -528,6 +549,9 @@ enum DebugScript {
     private static var popoverWindow: NSWindow? {
         NSApp.windows.first { $0.isVisible && String(describing: type(of: $0)).contains("Popover") }
     }
+
+    /// The settings that `settingsshot` built off screen.
+    private static var settingsWindow: NSWindow?
 
     /// The date editor that `dateeditor` built off screen.
     private static var dateEditor: NSWindow?
