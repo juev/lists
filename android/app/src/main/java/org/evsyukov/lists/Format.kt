@@ -4,10 +4,8 @@ import uniffi.lists_core.Freq
 import uniffi.lists_core.Priority
 import uniffi.lists_core.Repeat
 import uniffi.lists_core.TaskList
-import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
-import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
 import java.util.Locale
@@ -41,14 +39,6 @@ fun dayOf(value: String): String = value.take(10)
 
 fun momentString(date: LocalDate, hour: Int?, minute: Int?): String =
     if (hour == null || minute == null) date.toString() else date.atTime(hour, minute).format(moment)
-
-/** "18:30" for a moment with a time, nothing for a bare day. */
-fun timeOf(value: String?): String? = value?.takeIf(::hasTime)?.takeLast(5)
-
-// The calendar of a date picker counts days in UTC, whatever the zone of the device.
-fun pickerMillis(day: LocalDate): Long = day.atStartOfDay().toInstant(ZoneOffset.UTC).toEpochMilli()
-
-fun pickerDay(millis: Long): LocalDate = Instant.ofEpochMilli(millis).atZone(ZoneOffset.UTC).toLocalDate()
 
 fun isOverdue(value: String): Boolean {
     if (!hasTime(value)) return dayOf(value) < today()

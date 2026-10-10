@@ -193,9 +193,6 @@
     <string name="deleted">Удалено</string>
     <string name="more">Ещё</string>
     <string name="one_word">одно слово</string>
-    <string name="pick_date">Выбрать дату…</string>
-    <string name="change_time">Изменить время…</string>
-    <string name="add_time">Добавить время…</string>
     <string name="remove_time">Убрать время</string>
     <string name="repeats_field">Число повторов (пусто — без конца)</string>
     <string name="archived_switch">В архиве</string>
@@ -337,4 +334,6 @@
     <string name="batch_deleted">Удалено: %1$s</string>
     <string name="batch_moved">Перемещено: %1$s</string>
     <string name="batch_changed">Изменено: %1$s</string>
+    <string name="previous_month">Предыдущий месяц</string>
+    <string name="next_month">Следующий месяц</string>
 </resources>
