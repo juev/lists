@@ -80,7 +80,7 @@ docker run -d --name lists \
   -p 8080:8080 \
   -v lists-data:/data \
   -e LISTS_WEB_PASSWORD='choose a password' \
-  ghcr.io/juev/lists:0.1.0
+  ghcr.io/juev/lists:0.2.0
 ```
 
 Open `http://<host>:8080` and sign in with the password. Sync, OpenID Connect, a Compose file and the reverse proxy are covered in [docs/self-hosting.md](docs/self-hosting.md).
@@ -177,7 +177,7 @@ LISTS_CALDAV_URL=https://example.org/dav/calendars/me/ LISTS_CALDAV_USER=me LIST
 
 ## Status
 
-Version 0.1.0. What is implemented and how each part was checked is listed at the end of [docs/specs/product.md](docs/specs/product.md).
+Version 0.2.0. What is implemented and how each part was checked is listed at the end of [docs/specs/product.md](docs/specs/product.md).
 
 Known gaps:
 
