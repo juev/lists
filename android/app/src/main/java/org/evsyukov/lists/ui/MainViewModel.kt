@@ -57,10 +57,15 @@ data class UiState(
     /** How long a completed task stays in its view; shared by all devices (R68). */
     val keepDone: KeepDone = KeepDone.Seconds(5u),
     val loaded: Boolean = false,
+    /** R109: the tasks selected for an action on several at once; null while the selection mode is off. */
+    val selection: Set<String>? = null,
 ) {
     val effectiveScope: Scope get() = search?.takeIf { it.isNotBlank() }?.let { Scope.Search(it) } ?: scope
 
     fun list(id: String): TaskList? = lists.firstOrNull { it.id == id }
+
+    /** The tasks of the view in the order of their rows. */
+    val shownIds: List<String> get() = sections.flatMap { section -> section.tasks.map { it.id } }
 
     val title: String
         get() = when (val s = scope) {
@@ -158,7 +163,13 @@ class MainViewModel : ViewModel() {
             }
         }
         // A view chosen while this was read stays: the reload started by that choice brings its tasks.
-        next.onSuccess { fresh -> _state.update { if (it.scope != current.scope) it else fresh.copy(notice = it.notice, search = it.search) } }
+        next.onSuccess { fresh ->
+            _state.update {
+                if (it.scope != current.scope) it
+                // R109: a task that a sync took out of the view drops out of the selection.
+                else fresh.copy(notice = it.notice, search = it.search, selection = it.selection?.kept(fresh.shownIds))
+            }
+        }
             .onFailure { error -> _state.update { it.copy(notice = Notice(describe(error)), loaded = true) } }
         // Kept rows leave by the clock, not by a change: look again when the first one is due.
         val wait = withContext(Dispatchers.IO) { runCatching { Repo.store.secondsUntilKeptLeaves() }.getOrNull() }
@@ -211,12 +222,12 @@ class MainViewModel : ViewModel() {
     }
 
     fun select(scope: Scope) {
-        _state.update { it.copy(scope = scope, search = null) }
+        _state.update { it.copy(scope = scope, search = null, selection = null) }
         viewModelScope.launch { reload() }
     }
 
     fun search(text: String?) {
-        _state.update { it.copy(search = text) }
+        _state.update { it.copy(search = text, selection = null) }
         viewModelScope.launch { reload() }
     }
 
@@ -275,6 +286,63 @@ class MainViewModel : ViewModel() {
     fun delete(task: TaskItem) {
         if (editingId == task.id) open(task.parentId)
         act(Notice(str(R.string.deleted)) { it.restoreTask(task.id) }) { it.deleteTask(task.id) }
+    }
+
+    /** R109: turns the selection mode on with this task selected. */
+    fun startSelection(id: String) = _state.update { it.copy(selection = setOf(id)) }
+
+    fun endSelection() {
+        dragBase = null
+        _state.update { it.copy(selection = null) }
+    }
+
+    fun toggleSelected(id: String) = _state.update { state ->
+        state.copy(selection = state.selection?.let { if (id in it) it - id else it + id })
+    }
+
+    /** What was selected when the drag over the circles began. */
+    private var dragBase: Set<String>? = null
+
+    fun startDrag() {
+        dragBase = _state.value.selection
+    }
+
+    /** R109: the drag over the circles has gone from one row to another. */
+    fun dragSelection(from: String, to: String) {
+        val base = dragBase ?: return
+        _state.update { state -> if (state.selection == null) state else state.copy(selection = dragged(base, state.shownIds, from, to)) }
+    }
+
+    /**
+     * R109: one action on every selected task, in the order of the rows. The
+     * mode closes, and one bar takes the whole batch back.
+     */
+    fun batch(action: BatchAction) {
+        val state = _state.value
+        val selected = state.selection ?: return
+        val ids = state.shownIds.filter { it in selected }
+        endSelection()
+        viewModelScope.launch {
+            val backs = mutableListOf<Pair<String, Back>>()
+            var changed = 0
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val store = Repo.store
+                    for (id in ids) {
+                        // Read anew: an action on a task may have changed its subtask that is selected too.
+                        val step = action.on(store.task(id)) ?: continue
+                        action.run(store, id)
+                        changed++
+                        step.back?.let { backs += id to it }
+                    }
+                }
+            }
+            val undo: (suspend (Store) -> Unit)? =
+                if (backs.isEmpty()) null else { store -> backs.asReversed().forEach { (id, back) -> back.run(store, id) } }
+            val text = result.exceptionOrNull()?.let(::describe) ?: str(action.done(), changed.toString())
+            _state.update { it.copy(notice = if (changed == 0 && result.isSuccess) null else Notice(text, undo)) }
+            Repo.changed()
+        }
     }
 
     /** Imports a file exported from another task manager and reports what came of it. */
