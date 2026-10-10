@@ -50,7 +50,8 @@ import UserNotifications
 /// `keepdone:5` (sets for how many seconds a completed task stays in view), `keepdone:day` (until the end of the day) and `keepdone` alone (prints it),
 /// `sound:Glass` (chooses the sound of notifications without playing it, `sound:` the standard one; `sound` alone leaves the choice as it is) prints the choice,
 /// whether a notification gets the standard sound, where the copy for the notification centre is and the sounds on offer; no notification is scheduled,
-/// `notifications` (prints whether the system allows notifications for the app and the requests it holds; nothing is asked and nothing is scheduled),
+/// `notifications` (prints whether the system allows notifications for the app and the requests it holds; nothing is asked and nothing is scheduled;
+/// `notifications:ask` also repeats the request for the permission and prints the answer, unless the app was never asked: that would open the dialog),
 /// `appearance:dark`, `appearance:light` and `appearance:system` (choose the look the way Settings does),
 /// `appearance` alone prints the choice and the look each window of the app has, the quick-entry panel among them,
 /// `dockcount:today`, `dockcount:overdue` and `dockcount:none` (choose what the Dock icon counts the way Settings does, R103),
@@ -299,6 +300,15 @@ enum DebugScript {
                         "\(request.identifier) \((request.trigger as? UNCalendarNotificationTrigger)?.nextTriggerDate().map(String.init(describing:)) ?? "no date")"
                     }
                     print("debug: notifications \(names[status] ?? "status \(status.rawValue)"), pending \(pending)")
+                    // `notifications:ask` repeats the request the app makes. Only where the answer is already
+                    // there: an app that was never asked would put the dialog of the system on screen.
+                    if argument == "ask", status != .notDetermined {
+                        do {
+                            print("debug: notifications asked, granted \(try await center.requestAuthorization(options: [.alert, .sound]))")
+                        } catch {
+                            print("debug: notifications asked, error \((error as NSError).domain) \((error as NSError).code): \(error.localizedDescription)")
+                        }
+                    }
                 case "appearance":
                     if step.contains(":") {
                         AppModel.shared.appearance = argument
