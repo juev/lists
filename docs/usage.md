@@ -179,6 +179,8 @@ A reminder set on a task itself replaces the one derived from its due date. The 
 
 On macOS the icon in the Dock carries a count of tasks. Settings → Notifications → "Count on the icon" chooses what is counted: "Today" (the open tasks of the Today view, the overdue ones among them; the default), "Overdue tasks" or "Do not show". With nothing to count the icon has no number. The choice belongs to the Mac and does not sync. Android has no count on the icon.
 
+On Android, Settings → Notifications → "Today's tasks in the notification shade" keeps a permanent notification with the open tasks of Today: their count, the first five titles and a "New task" button that opens quick entry. It is off by default and does not depend on "Show notifications". It is silent and has a channel of its own, "Quick add", which the system settings can hide apart from the reminders. It comes back when it is swiped away, after a restart of the device and after an update of the app; only the switch removes it.
+
 On Android 13 and newer a notification arrives at its minute only when "Alarms & reminders" is allowed for Lists. Until then the notification settings show "Reminders may come late": tap it and allow. Without it the system may deliver a notification up to an hour late.
 
 ## Calendar events in Today

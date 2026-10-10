@@ -61,7 +61,10 @@ fun AppTheme(bars: Boolean = false, content: @Composable () -> Unit) {
 
 class MainActivity : ComponentActivity() {
     private val model: MainViewModel by viewModels()
-    private val askNotifications = registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
+    private val askNotifications = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
+        // R104: the notification that waited for the permission is shown now.
+        Repo.scope.launch { TodayNotice.refresh(applicationContext) }
+    }
 
     override fun attachBaseContext(base: Context) {
         super.attachBaseContext(base)

@@ -229,6 +229,12 @@
     <string name="ordinal_5">5-й</string>
     <string name="quick_add">Новая задача</string>
     <string name="reminders_channel">Напоминания</string>
+    <string name="quick_add_channel">Быстрое добавление</string>
+    <string name="today_notice_title">Сегодня: %1$s</string>
+    <string name="today_notice_empty">На сегодня задач нет</string>
+    <string name="today_notice_more">ещё %1$s</string>
+    <string name="today_notice_setting">Задачи на сегодня в шторке</string>
+    <string name="today_notice_hint">Постоянное уведомление с задачами на сегодня и кнопкой новой задачи.</string>
     <string name="password_missing">Введите пароль в настройках синхронизации.</string>
     <string name="password_store_failed">Не удалось сохранить пароль в системной связке ключей: %1$s</string>
     <string name="caldav_hint">Списки станут календарями, а задачи будут видны другим CalDAV-приложениям. Вложения синхронизируются до 5 МБ, не больше 20 МБ на задачу.</string>
