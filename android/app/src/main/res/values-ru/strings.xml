@@ -287,6 +287,12 @@
     <string name="appearance_system">Как в системе</string>
     <string name="appearance_light">Светлое</string>
     <string name="appearance_dark">Тёмное</string>
+    <string name="text_size">Размер текста</string>
+    <string name="text_size_small">Мелкий</string>
+    <string name="text_size_default">Обычный</string>
+    <string name="text_size_large">Крупный</string>
+    <string name="text_size_larger">Крупнее</string>
+    <string name="text_size_largest">Самый крупный</string>
     <string name="completed_leave">Выполненные пропадают</string>
     <string name="leave_at_once">сразу</string>
     <string name="leave_after_minutes">через %1$d мин</string>

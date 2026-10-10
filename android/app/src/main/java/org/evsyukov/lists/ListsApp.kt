@@ -7,6 +7,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.res.Configuration
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
@@ -223,6 +224,31 @@ object LookPrefs {
     fun setAppearance(context: Context, value: String) {
         prefs(context).edit().putString("appearance", value).apply()
         chosen.value = value
+    }
+
+    /** R100: the steps of the text size, the same as on macOS; the second is the default. */
+    val textScales = listOf(0.9f, 1f, 1.15f, 1.3f, 1.5f)
+
+    /** The step a saved value stands for; a value that is not a step is the default. */
+    internal fun textScaleFrom(saved: Float?): Float = saved?.takeIf { it in textScales } ?: 1f
+
+    /** What the font size of the system is multiplied by in the app. */
+    fun textScale(context: Context): Float =
+        textScaleFrom(prefs(context).takeIf { it.contains("textScale") }?.getFloat("textScale", 1f))
+
+    /** Written at once: the activity that is rebuilt to show the new size reads it back. */
+    fun setTextScale(context: Context, value: Float) {
+        prefs(context).edit().putFloat("textScale", value).commit()
+    }
+
+    /**
+     * What an activity lays over its configuration to show the chosen size:
+     * the font scale of the system times the step. Set on the context and not
+     * in the theme, because a dialog and a sheet are windows of their own and
+     * take the scale from the context.
+     */
+    fun textConfiguration(base: Context) = Configuration().apply {
+        fontScale = base.resources.configuration.fontScale * textScale(base)
     }
 }
 

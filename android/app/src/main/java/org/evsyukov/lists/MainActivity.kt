@@ -1,6 +1,7 @@
 package org.evsyukov.lists
 
 import android.app.Activity
+import android.content.Context
 import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.os.Build
@@ -61,6 +62,11 @@ fun AppTheme(bars: Boolean = false, content: @Composable () -> Unit) {
 class MainActivity : ComponentActivity() {
     private val model: MainViewModel by viewModels()
     private val askNotifications = registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
+
+    override fun attachBaseContext(base: Context) {
+        super.attachBaseContext(base)
+        applyOverrideConfiguration(LookPrefs.textConfiguration(base))
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

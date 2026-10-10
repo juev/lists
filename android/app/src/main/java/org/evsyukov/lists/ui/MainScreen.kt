@@ -182,7 +182,8 @@ fun MainScreen(model: MainViewModel, onReminderSet: () -> Unit) {
     var creatingList by remember { mutableStateOf(false) }
     var editingFilter by remember { mutableStateOf<SavedFilter?>(null) }
     var creatingFilter by remember { mutableStateOf(false) }
-    var settings by remember { mutableStateOf(false) }
+    // Saved: choosing a text size rebuilds the activity, and the settings stay open over it (R100).
+    var settings by rememberSaveable { mutableStateOf(false) }
     var confirmEmptyTrash by remember { mutableStateOf(false) }
     var clearMenu by remember { mutableStateOf(false) }
     var clearCompleted by remember { mutableStateOf<ClearCompleted?>(null) }

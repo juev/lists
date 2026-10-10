@@ -1,6 +1,7 @@
 package org.evsyukov.lists
 
 import android.app.PendingIntent
+import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
 import android.net.Uri
@@ -53,6 +54,11 @@ class QuickAddActivity : ComponentActivity() {
     /** R58: the note a window opened empty takes from the clipboard. */
     private var pasted by mutableStateOf<String?>(null)
     private var readsClipboard = false
+
+    override fun attachBaseContext(base: Context) {
+        super.attachBaseContext(base)
+        applyOverrideConfiguration(LookPrefs.textConfiguration(base))
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
