@@ -75,6 +75,13 @@ final class AppModel {
             applyAppearance()
         }
     }
+    /// What the Dock icon counts (R103): "today", "overdue" or "none"; belongs to this Mac.
+    var dockCount: String = UserDefaults.standard.string(forKey: "dockCount") ?? "today" {
+        didSet {
+            UserDefaults.standard.set(dockCount, forKey: "dockCount")
+            applyDockCount()
+        }
+    }
     var alert: String?
     /// Tasks whose attachments are being saved into a folder (R91); the rows of files still to arrive show it.
     var savingAttachments: Set<String> = []
@@ -247,6 +254,21 @@ final class AppModel {
         }
     }
 
+    /// The number on the Dock icon (R103); none when there is nothing to count.
+    var dockBadge: String? {
+        let count: UInt32 = switch dockCount {
+        case "today": counts.today
+        case "overdue": counts.overdue
+        default: 0
+        }
+        return count > 0 ? String(count) : nil
+    }
+
+    /// The model loads before there is an application: the launch applies the number once more.
+    func applyDockCount() {
+        NSApp?.dockTile.badgeLabel = dockBadge
+    }
+
     var defaultListId: String {
         let id = newTaskList == "last" ? UserDefaults.standard.string(forKey: "lastUsedList") ?? "inbox" : newTaskList
         return lists.contains { $0.id == id && !$0.archived } ? id : "inbox"
@@ -295,6 +317,10 @@ final class AppModel {
             NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.reloadEvents() }
             }
+        }
+        // R103: what is due today and what is overdue change with the day.
+        NotificationCenter.default.addObserver(forName: .NSCalendarDayChanged, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.reload() }
         }
         reloadEvents()
         timer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
@@ -398,6 +424,7 @@ final class AppModel {
             lists = try store.lists()
             tags = try store.tags()
             counts = try store.counts()
+            applyDockCount()
             syncStatus = try store.syncStatus()
             keepDone = try store.keepDone()
             // Kept rows leave by the clock, not by a change: look again when the first one is due.

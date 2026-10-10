@@ -36,7 +36,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         MainActor.assumeIsolated { QuickEntryPanel.shared.watchHiding() }
         NSApp.servicesProvider = self
         AttachmentFiles.clear()
-        MainActor.assumeIsolated { AppModel.shared.applyAppearance() }
+        MainActor.assumeIsolated { AppModel.shared.applyAppearance(); AppModel.shared.applyDockCount() }
         #if DEBUG
         MainActor.assumeIsolated { DebugScript.runIfAsked() }
         #endif
@@ -398,6 +398,15 @@ struct SettingsView: View {
                     }
                     Text(L("A reminder set on a task is always shown. These settings apply to this Mac only."))
                         .font(AppFont.style(.caption)).foregroundStyle(.secondary)
+                }
+                Section(L("Dock icon")) {
+                    @Bindable var model = model
+                    // R103
+                    Picker(L("Count on the icon"), selection: $model.dockCount) {
+                        Text(L("Today")).tag("today")
+                        Text(L("Overdue tasks")).tag("overdue")
+                        Text(L("Do not show")).tag("none")
+                    }
                 }
             }
             .formStyle(.grouped)
