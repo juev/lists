@@ -55,8 +55,6 @@ import androidx.compose.material.icons.outlined.Tag
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.AssistChip
-import androidx.compose.material3.DatePicker
-import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -75,10 +73,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
-import androidx.compose.material3.TimePicker
-import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.rememberModalBottomSheetState
-import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -95,7 +90,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
@@ -137,19 +131,13 @@ import org.evsyukov.lists.Secrets
 import org.evsyukov.lists.dateLabel
 import org.evsyukov.lists.displayName
 import org.evsyukov.lists.every
-import org.evsyukov.lists.hasTime
 import org.evsyukov.lists.isOverdue
 import org.evsyukov.lists.listColors
-import org.evsyukov.lists.momentString
-import org.evsyukov.lists.pickerDay
-import org.evsyukov.lists.pickerMillis
-import org.evsyukov.lists.parseMoment
 import org.evsyukov.lists.plusDays
 import org.evsyukov.lists.presetName
 import org.evsyukov.lists.priorities
 import org.evsyukov.lists.repeatPresets
 import org.evsyukov.lists.summary
-import org.evsyukov.lists.timeOf
 import org.evsyukov.lists.title
 import org.evsyukov.lists.today
 import org.evsyukov.lists.weekdayNames
@@ -172,7 +160,6 @@ import uniffi.lists_core.TaskItem
 import uniffi.lists_core.TaskList
 import uniffi.lists_core.checkSyncConnection
 import java.io.File
-import java.time.LocalDate
 
 /** Copies what a content URI points at into a cache file named like the original. */
 fun copyToCache(context: Context, uri: Uri): File? = runCatching {
@@ -700,90 +687,6 @@ internal fun TagDialog(known: List<String>, onDismiss: () -> Unit, onAdd: (Strin
         confirmButton = { TextButton(enabled = text.isNotBlank(), onClick = { onAdd(text); onDismiss() }) { Text(str(R.string.add)) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text(str(R.string.cancel)) } },
     )
-}
-
-/** Date with optional time. The common choices are one tap; the calendar is one more. */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun MomentDialog(title: String, value: String?, timeRequired: Boolean = false, onPick: (String?) -> Unit, onDismiss: () -> Unit) {
-    var step by rememberSaveable { mutableStateOf("menu") }
-    val current = value?.let(::parseMoment)
-    var date by rememberSaveable { mutableStateOf(current?.toLocalDate() ?: LocalDate.now()) }
-    val timed = current?.takeIf { hasTime(value) }
-    val time = rememberTimePickerState(timed?.hour ?: 9, timed?.minute ?: 0, is24Hour = true)
-
-    fun finish(day: LocalDate, withTime: Boolean) {
-        onPick(momentString(day, if (withTime) time.hour else null, if (withTime) time.minute else null))
-        onDismiss()
-    }
-    /** Keeps the time already set when only the day changes. */
-    fun pickDay(day: LocalDate) {
-        date = day
-        when {
-            timeRequired -> step = "time"
-            else -> finish(day, value != null && hasTime(value))
-        }
-    }
-
-    when (step) {
-        "menu" -> AlertDialog(
-            onDismissRequest = onDismiss,
-            title = { Text(title) },
-            text = {
-                Column {
-                    @Composable
-                    fun option(label: String, action: () -> Unit) =
-                        Text(label, Modifier.fillMaxWidth().clickable(onClick = action).padding(vertical = 12.dp))
-                    option(str(R.string.today)) { pickDay(LocalDate.now()) }
-                    option(str(R.string.tomorrow)) { pickDay(LocalDate.now().plusDays(1)) }
-                    option(str(R.string.in_a_week)) { pickDay(LocalDate.now().plusDays(7)) }
-                    option(str(R.string.pick_date)) { step = "date" }
-                    if (value != null && !timeRequired) option(if (hasTime(value)) str(R.string.change_time) else str(R.string.add_time)) { step = "time" }
-                    if (value != null && hasTime(value) && !timeRequired) option(str(R.string.remove_time)) { finish(date, false) }
-                    if (value != null) {
-                        Text(str(R.string.remove), Modifier.fillMaxWidth().clickable { onPick(null); onDismiss() }.padding(vertical = 12.dp), color = MaterialTheme.colorScheme.error)
-                    }
-                }
-            },
-            confirmButton = {},
-            dismissButton = { TextButton(onClick = onDismiss) { Text(str(R.string.cancel)) } },
-        )
-        "date" -> {
-            val picker = rememberDatePickerState(pickerMillis(date))
-            DatePickerDialog(
-                onDismissRequest = onDismiss,
-                confirmButton = {
-                    TextButton(onClick = { picker.selectedDateMillis?.let { pickDay(pickerDay(it)) } }) { Text(str(R.string.done)) }
-                },
-                dismissButton = { TextButton(onClick = onDismiss) { Text(str(R.string.cancel)) } },
-            ) {
-                // The dialog lays its content out in a box: the column keeps the row under the calendar.
-                Column {
-                    // In a low window the calendar is taller than its share and would draw over the row.
-                    DatePicker(picker, Modifier.weight(1f, fill = false).clipToBounds())
-                    // R74: the time is one tap away from the day, without a second visit to the dialog.
-                    if (!timeRequired) {
-                        Row(
-                            Modifier.fillMaxWidth()
-                                .clickable(role = Role.Button) { picker.selectedDateMillis?.let { date = pickerDay(it); step = "time" } }
-                                .padding(horizontal = 24.dp, vertical = 12.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                        ) {
-                            Text(str(R.string.time))
-                            Text(timeOf(value) ?: str(R.string.time_off), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    }
-                }
-            }
-        }
-        "time" -> AlertDialog(
-            onDismissRequest = onDismiss,
-            title = { Text(str(R.string.time)) },
-            text = { TimePicker(time) },
-            confirmButton = { TextButton(onClick = { finish(date, true) }) { Text(str(R.string.done)) } },
-            dismissButton = { TextButton(onClick = onDismiss) { Text(str(R.string.cancel)) } },
-        )
-    }
 }
 
 /** Presets first; the custom controls appear only when asked for. */

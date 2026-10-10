@@ -194,9 +194,6 @@
     <string name="deleted">Deleted</string>
     <string name="more">More</string>
     <string name="one_word">one word</string>
-    <string name="pick_date">Pick a date…</string>
-    <string name="change_time">Change time…</string>
-    <string name="add_time">Add time…</string>
     <string name="remove_time">Remove time</string>
     <string name="repeats_field">Number of repeats (empty: no end)</string>
     <string name="archived_switch">Archived</string>
@@ -338,4 +335,6 @@
     <string name="batch_deleted">Deleted: %1$s</string>
     <string name="batch_moved">Moved: %1$s</string>
     <string name="batch_changed">Changed: %1$s</string>
+    <string name="previous_month">Previous month</string>
+    <string name="next_month">Next month</string>
 </resources>
