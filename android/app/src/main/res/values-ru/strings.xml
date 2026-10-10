@@ -289,6 +289,15 @@
     <string name="settings_general">Основные</string>
     <string name="settings_tasks">Задачи</string>
     <string name="back">Назад</string>
+    <string name="log">Журнал</string>
+    <string name="log_level">Уровень</string>
+    <string name="log_off">Выключен</string>
+    <string name="log_errors">Ошибки</string>
+    <string name="log_events">События</string>
+    <string name="log_detailed">Подробно</string>
+    <string name="share_log">Поделиться журналом</string>
+    <string name="clear_log">Очистить журнал</string>
+    <string name="log_hint">Журнал — текстовый файл на этом устройстве. В нём то, что делало приложение, и тексты ошибок, но не содержимое задач.</string>
     <string name="text_size">Размер текста</string>
     <string name="text_size_small">Мелкий</string>
     <string name="text_size_default">Обычный</string>

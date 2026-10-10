@@ -9,6 +9,7 @@ use sha2::{Digest, Sha256};
 use crate::db;
 use crate::error::{AppError, Result};
 use crate::store::Store;
+use crate::LogLevel;
 
 const ENDPOINT_KEY: &str = "push_endpoint";
 const SERVER_KEY: &str = "push_server";
@@ -61,7 +62,12 @@ impl Store {
             }
         }
         if passed || denied {
-            self.refusals().1 = denied;
+            let was = std::mem::replace(&mut self.refusals().1, denied);
+            if denied && !was {
+                self.note(LogLevel::Error, "push", || {
+                    "the push server refused access to a nudge".into()
+                });
+            }
         }
     }
 
@@ -193,7 +199,13 @@ impl Store {
         let answer = request.call();
         // S30: only an answer says anything about the token; a server that is away does not.
         if answer.is_ok() || refused(&answer) {
-            self.refusals().0 = answer.is_err();
+            let denied = answer.is_err();
+            let was = std::mem::replace(&mut self.refusals().0, denied);
+            if denied && !was {
+                self.note(LogLevel::Error, "push", || {
+                    "the push server refused access to the subscription".into()
+                });
+            }
         }
         let Ok(response) = answer else {
             pause();

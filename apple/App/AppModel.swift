@@ -297,6 +297,10 @@ final class AppModel {
             if let server = try? store?.pushServer() {
                 store?.setPushToken(token: Keychain.load(account: Keychain.pushAccount(server: server)))
             }
+            // R102: where a log of events begins for this run.
+            let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
+            let system = ProcessInfo.processInfo.operatingSystemVersion
+            store?.log(level: .info, source: "app", message: "started \(version) on macOS \(system.majorVersion).\(system.minorVersion).\(system.patchVersion)")
         } catch {
             store = nil
             startupError = describe(error)

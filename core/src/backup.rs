@@ -19,6 +19,7 @@ use crate::db::{self, is_sha256};
 use crate::error::{AppError, Result};
 use crate::model::SyncConfig;
 use crate::store::{hex, Store};
+use crate::LogLevel;
 
 const FORMAT: u32 = 1;
 const EXT: &str = ".listsbackup";
@@ -105,8 +106,10 @@ impl Store {
         let _ = std::fs::remove_file(&snapshot);
         if let Err(e) = written.and_then(|()| Ok(std::fs::rename(&part, &target)?)) {
             let _ = std::fs::remove_file(&part);
+            self.note(LogLevel::Error, "backup", || format!("not created: {e}"));
             return Err(e);
         }
+        self.note(LogLevel::Info, "backup", || format!("created {name}"));
         Ok(Backup {
             size: std::fs::metadata(&target)?.len(),
             path: target.to_string_lossy().into_owned(),
@@ -261,24 +264,28 @@ impl Store {
     /// restored state over the storage and the other devices (S40); without
     /// it the two are merged.
     pub fn restore_backup(&self, path: String, over_storage: bool) -> Result<()> {
-        let refused = |e: zip::result::ZipError| invalid(format!("not a backup of this app: {e}"));
-        let mut zip = zip::ZipArchive::new(std::fs::File::open(&path)?).map_err(refused)?;
-        let manifest: Manifest = {
-            let entry = zip.by_name(MANIFEST).map_err(refused)?;
-            serde_json::from_reader(entry.take(1 << 20)).map_err(|_| invalid("not a backup of this app"))?
-        };
-        if manifest.format != FORMAT {
-            return Err(invalid(format!(
-                "the backup uses format {}, this version understands format {FORMAT}; update the app",
-                manifest.format
-            )));
-        }
-        let dir = self.backups_dir();
-        std::fs::create_dir_all(&dir)?;
-        let database = dir.join(format!(".{}.sqlite", uuid::Uuid::now_v7().simple()));
-        let restored = self.restore_from(&mut zip, &database, over_storage);
-        let _ = std::fs::remove_file(&database);
-        restored
+        let result = (|| {
+            let refused = |e: zip::result::ZipError| invalid(format!("not a backup of this app: {e}"));
+            let mut zip = zip::ZipArchive::new(std::fs::File::open(&path)?).map_err(refused)?;
+            let manifest: Manifest = {
+                let entry = zip.by_name(MANIFEST).map_err(refused)?;
+                serde_json::from_reader(entry.take(1 << 20)).map_err(|_| invalid("not a backup of this app"))?
+            };
+            if manifest.format != FORMAT {
+                return Err(invalid(format!(
+                    "the backup uses format {}, this version understands format {FORMAT}; update the app",
+                    manifest.format
+                )));
+            }
+            let dir = self.backups_dir();
+            std::fs::create_dir_all(&dir)?;
+            let database = dir.join(format!(".{}.sqlite", uuid::Uuid::now_v7().simple()));
+            let restored = self.restore_from(&mut zip, &database, over_storage);
+            let _ = std::fs::remove_file(&database);
+            restored
+        })();
+        self.note_result("backup", &result, LogLevel::Info, |()| "restored from a backup".into());
+        result
     }
 }
 

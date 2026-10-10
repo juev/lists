@@ -370,3 +370,11 @@
 "The copy is saved." = "Копия сохранена.";
 "General" = "Основные";
 "Tasks" = "Задачи";
+"Log" = "Журнал";
+"Level" = "Уровень";
+"None" = "Выключен";
+"Errors" = "Ошибки";
+"Events" = "События";
+"Detailed" = "Подробно";
+"Show in Finder" = "Показать в Finder";
+"The log is a text file on this Mac. It holds what the app did and the text of errors, not what the tasks say." = "Журнал — текстовый файл на этом Mac. В нём то, что делало приложение, и тексты ошибок, но не содержимое задач.";
