@@ -247,6 +247,14 @@ On a phone the app stays in portrait and does not turn with the device. The quic
 
 The title of the view stands large at the top of the list; the menu, search and the sync icon are in the row above it. A long press on Inbox, a list or a filter in the panel with the lists opens its settings; while one of them is open, so does Configure in the menu behind the "More" button at the end of that row. Swipe right to complete, swipe left to set the due date; a swipe to the right that starts at the left edge of the screen opens the panel with the lists instead. Pull down at the top of a list to sync right away; this works once sync is set up. Long-press for the menu: due date, priority, move to list, add subtask, duplicate, won't do, delete.
 
+## Widgets on Android
+
+The home screen takes two widgets with tasks: a small one, 2×2 cells, and a large one, 4×4; either can be resized. When a widget is placed it asks what to show: Today, Inbox or one of the lists. Each widget keeps its own choice, and where the home screen offers to reconfigure a widget the choice can be changed.
+
+A widget shows the name of its view and the open tasks in the order of that view, as many as fit; "N more" stands for the rest. A tap on the mark before a task completes it, and the task leaves the widget; to take that back, open the app. A tap on the name of the view or on a task opens the app in that view. The "+" opens the quick-entry window; the task goes to the default list of quick entry, whatever the widget shows.
+
+A widget follows the light or dark appearance of the system. It is renewed after every change on the device and after a sync that brought changes.
+
 ## Backups
 
 The apps for macOS and Android keep backups of your data on the device. A backup is one file, `.listsbackup`, with the tasks, lists, tags, projects, filters, the trash, the completed tasks and the attachments that are on the device. It does not hold where the device syncs, passwords, or the settings of the device itself.
