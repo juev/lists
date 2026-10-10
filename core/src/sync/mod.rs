@@ -961,14 +961,21 @@ impl Store {
             Ok(Some(report)) => Ok(report),
             Err(e) => Err(e),
         };
-        // R102: a run that changed nothing is said at the most detailed level only.
-        let quiet = matches!(&result, Ok(report) if report.pulled == 0 && report.pushed == 0);
-        self.note_result(
-            "sync",
-            &result,
-            if quiet { LogLevel::Debug } else { LogLevel::Info },
-            |report| format!("run finished: {} received, {} sent", report.pulled, report.pushed),
-        );
+        // R102: a run that changed nothing is said at the most detailed level only, and so is a
+        // failure that repeats the one before it: a device left without a network fails on every run.
+        let before = db::meta_get(&self.lock().conn, "sync_error")?;
+        match &result {
+            Err(e) if before.as_deref() == Some(e.to_string().as_str()) => {
+                self.note(LogLevel::Debug, "sync", || format!("failed again: {e}"))
+            }
+            _ => {
+                let quiet = matches!(&result, Ok(report) if report.pulled == 0 && report.pushed == 0);
+                let level = if quiet { LogLevel::Debug } else { LogLevel::Info };
+                self.note_result("sync", &result, level, |report| {
+                    format!("run finished: {} received, {} sent", report.pulled, report.pushed)
+                });
+            }
+        }
         let inner = self.lock();
         match &result {
             Ok(_) => {

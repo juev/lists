@@ -290,6 +290,15 @@
     <string name="settings_general">General</string>
     <string name="settings_tasks">Tasks</string>
     <string name="back">Back</string>
+    <string name="log">Log</string>
+    <string name="log_level">Level</string>
+    <string name="log_off">Off</string>
+    <string name="log_errors">Errors</string>
+    <string name="log_events">Events</string>
+    <string name="log_detailed">Detailed</string>
+    <string name="share_log">Share the log</string>
+    <string name="clear_log">Clear the log</string>
+    <string name="log_hint">The log is a text file on this device. It holds what the app did and the text of errors, not what the tasks say.</string>
     <string name="text_size">Text size</string>
     <string name="text_size_small">Small</string>
     <string name="text_size_default">Default</string>
