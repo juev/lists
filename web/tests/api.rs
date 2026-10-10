@@ -647,3 +647,32 @@ fn r69_a_task_is_closed_as_wont_do_and_listed_in_its_view() {
     let back = get(&web, &cookie, "/api/tasks?scope=inbox");
     assert_eq!(back[0]["wont"], false);
 }
+
+#[test]
+fn r69_r11_undo_brings_back_the_subtasks_closed_with_the_task() {
+    let web = web(Some("secret"));
+    let cookie = login(&web, "secret").unwrap();
+    let top = call(
+        &web,
+        &cookie,
+        json!({ "op": "quickAdd", "text": "родитель", "scope": "inbox" }),
+    );
+    call(
+        &web,
+        &cookie,
+        json!({ "op": "addSubtask", "parent": top["id"], "title": "подзадача" }),
+    );
+    let subtask = || {
+        let id = top["id"].as_str().unwrap();
+        get(&web, &cookie, &format!("/api/task?id={id}"))["subtasks"][0].clone()
+    };
+
+    call(&web, &cookie, json!({ "op": "wontDo", "id": top["id"] }));
+    assert_eq!(subtask()["wont"], true);
+
+    call(&web, &cookie, json!({ "op": "undoClose", "id": top["id"] }));
+    assert!(subtask()["done"].is_null());
+    assert_eq!(subtask()["wont"], false);
+    let inbox = get(&web, &cookie, "/api/tasks?scope=inbox");
+    assert!(inbox[0]["done"].is_null());
+}

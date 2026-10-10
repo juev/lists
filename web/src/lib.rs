@@ -382,6 +382,7 @@ impl App {
                 "complete" => task_json(&s.complete_task(id()?)?),
                 "wontDo" => task_json(&s.wont_do_task(id()?)?),
                 "reopen" => s.reopen_task(id()?).map(|_| done)?,
+                "undoClose" => s.undo_close_task(id()?).map(|_| done)?,
                 "delete" => s.delete_task(id()?).map(|_| done)?,
                 "restore" => s.restore_task(id()?).map(|_| done)?,
                 "emptyTrash" => json!({ "removed": s.empty_trash()? }),

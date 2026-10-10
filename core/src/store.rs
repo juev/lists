@@ -1270,6 +1270,36 @@ impl Store {
         })
     }
 
+    /// Takes a completion or a "won't do" back: reopens the task and the subtasks that were
+    /// closed with it. Those carry its closing moment, written in the same millisecond: the
+    /// moment alone is exact to the minute and would take a subtask closed by hand just before.
+    /// Subtasks closed earlier stay closed.
+    pub fn undo_close_task(&self, id: String) -> Result<()> {
+        self.write(|w| {
+            let task = get_task(w.tx, &id)?;
+            if task.is_log {
+                return Err(AppError::invalid("a completed occurrence cannot be reopened"));
+            }
+            if task.done.is_none() {
+                return Ok(());
+            }
+            let together: Vec<String> = {
+                let mut stmt = w.tx.prepare_cached(
+                    "SELECT s.id FROM tasks s, tasks t
+                     WHERE t.id = ?1 AND s.done IS t.done AND substr(s.done_stamp, 1, 12) = substr(t.done_stamp, 1, 12)",
+                )?;
+                let rows = stmt.query_map([&id], |r| r.get(0))?;
+                rows.collect::<rusqlite::Result<_>>()?
+            };
+            for sub in descendants(w.tx, &id)? {
+                if together.contains(&sub) {
+                    reopen_in(w, &sub)?;
+                }
+            }
+            reopen_in(w, &id)
+        })
+    }
+
     pub fn delete_task(&self, id: String) -> Result<()> {
         self.task_field(id, "deleted", json!(true))
     }
