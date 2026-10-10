@@ -49,6 +49,7 @@ import androidx.compose.material.icons.outlined.FilterList
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Inventory2
 import androidx.compose.material.icons.outlined.Menu
+import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Repeat
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
@@ -237,6 +238,14 @@ fun MainScreen(model: MainViewModel, onReminderSet: () -> Unit) {
                             IconButton(onClick = { model.search(null) }) { Icon(Icons.Outlined.Close, str(R.string.close_search)) }
                         }
                         SyncIcon(state, syncing, model::sync)
+                        state.configured?.let { configured ->
+                            ViewMenu {
+                                when (configured) {
+                                    is Configured.OfList -> editingList = configured.list
+                                    is Configured.OfFilter -> editingFilter = configured.filter
+                                }
+                            }
+                        }
                     },
                 )
             },
@@ -432,6 +441,18 @@ private fun SyncIcon(state: UiState, syncing: Boolean, onSync: () -> Unit) {
             state.sync.pending > 0u -> Icon(Icons.Outlined.CloudSync, str(R.string.has_pending))
             state.sync.attachmentsWaiting > 0u -> Icon(Icons.Outlined.CloudSync, str(R.string.attachments_waiting, state.sync.attachmentsWaiting.toString()))
             else -> Icon(Icons.Outlined.CloudDone, str(R.string.synced), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+/** R105: the menu of the open view; Configure opens the settings a long press on its row in the panel opens (R95). */
+@Composable
+private fun ViewMenu(onConfigure: () -> Unit) {
+    var menu by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { menu = true }) { Icon(Icons.Outlined.MoreVert, str(R.string.more)) }
+        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+            DropdownMenuItem(text = { Text(str(R.string.configure)) }, onClick = { menu = false; onConfigure() })
         }
     }
 }

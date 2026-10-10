@@ -91,6 +91,21 @@ data class UiState(
             Scope.Completed, Scope.WontDo, Scope.Trash, is Scope.Search -> true
             else -> false
         }
+
+    /** R105: what Configure in the menu of the bar opens; null where the view has no settings and while the search is open. */
+    val configured: Configured?
+        get() = if (search != null) null else when (val s = scope) {
+            Scope.Inbox -> list("inbox")?.let { Configured.OfList(it) }
+            is Scope.List -> list(s.id)?.let { Configured.OfList(it) }
+            is Scope.Filter -> filters.firstOrNull { it.id == s.id }?.let { Configured.OfFilter(it) }
+            else -> null
+        }
+}
+
+/** The open view as something with settings of its own: a list or a saved filter (R105). */
+sealed interface Configured {
+    data class OfList(val list: TaskList) : Configured
+    data class OfFilter(val filter: SavedFilter) : Configured
 }
 
 fun describe(error: Throwable): String = when (error) {
