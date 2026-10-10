@@ -71,7 +71,8 @@ fun BatchAction.run(store: Store, id: String) {
 
 fun Back.run(store: Store, id: String) {
     when (this) {
-        Back.Reopen -> store.reopenTask(id)
+        // With the subtasks the action closed along with the task.
+        Back.Reopen -> store.undoCloseTask(id)
         Back.Restore -> store.restoreTask(id)
         is Back.Due -> store.setDue(id, value)
         is Back.Start -> store.setStart(id, value)

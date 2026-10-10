@@ -264,8 +264,8 @@ class MainViewModel : ViewModel() {
         val notice = when {
             // A repeating task moves on instead of closing; reopening would not bring the date back.
             task.repeat != null -> Notice(str(R.string.moved_to_next))
-            // The task leaves at once, so the bar is the way back.
-            _state.value.keepDone == KeepDone.Seconds(0u) -> Notice(str(R.string.done_notice)) { it.reopenTask(task.id) }
+            // The task leaves at once, so the bar is the way back: for it and for the subtasks closed with it.
+            _state.value.keepDone == KeepDone.Seconds(0u) -> Notice(str(R.string.done_notice)) { it.undoCloseTask(task.id) }
             // It stays in view, and its mark takes it back (R68).
             else -> null
         }
@@ -277,7 +277,7 @@ class MainViewModel : ViewModel() {
         if (task.done != null) return
         val notice = when {
             task.repeat != null -> Notice(str(R.string.moved_to_next))
-            _state.value.keepDone == KeepDone.Seconds(0u) -> Notice(str(R.string.wont_do_notice)) { it.reopenTask(task.id) }
+            _state.value.keepDone == KeepDone.Seconds(0u) -> Notice(str(R.string.wont_do_notice)) { it.undoCloseTask(task.id) }
             else -> null
         }
         act(notice) { it.wontDoTask(task.id) }

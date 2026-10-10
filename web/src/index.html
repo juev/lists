@@ -298,7 +298,7 @@ function summary(x, origin) {
 function wontDo(x) {
   if (x.repeat) return act("wontDo", { id: x.id }, t("Moved to the next occurrence"));
   if (state.overview.keepDone) return act("wontDo", { id: x.id });
-  act("wontDo", { id: x.id }, t("Won't do"), () => act("reopen", { id: x.id }));
+  act("wontDo", { id: x.id }, t("Won't do"), () => act("undoClose", { id: x.id }));
 }
 
 function taskNode(x, origin) {
@@ -310,7 +310,7 @@ function taskNode(x, origin) {
     // A completed task stays in view and its mark takes it back (R68); the Undo bar is for when it leaves at once.
     if (x.repeat) return act("complete", { id: x.id }, t("Moved to the next occurrence"));
     if (state.overview.keepDone) return act("complete", { id: x.id });
-    act("complete", { id: x.id }, t("Task completed"), () => act("reopen", { id: x.id }));
+    act("complete", { id: x.id }, t("Task completed"), () => act("undoClose", { id: x.id }));
   };
   const row = $("div", { class: "row", onclick: () => { open ? state.open.delete(x.id) : state.open.add(x.id); load(); } },
     $("button", { class: "check" + (x.done ? " done" : ""), "aria-label": x.done ? "reopen" : "complete", onclick: toggle }, x.wont ? "✕" : x.done ? "✓" : ""),

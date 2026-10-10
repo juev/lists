@@ -1374,6 +1374,64 @@ fn r69_open_subtasks_get_the_same_outcome_and_completed_ones_keep_theirs() {
 }
 
 #[test]
+fn r69_r11_undoing_a_close_reopens_the_subtasks_closed_with_it() {
+    for wont in [true, false] {
+        let d = device();
+        let top = add(&d, "родитель");
+        let done = add_sub(&d, &top, "сделана");
+        let open = add_sub(&d, &top, "открыта");
+        let deep = add_sub(&d, &open, "глубже");
+        d.complete_task(done.id.clone()).unwrap();
+        d.set_now_for_tests("2026-10-05T10:00:04");
+
+        if wont {
+            d.wont_do_task(top.id.clone()).unwrap();
+        } else {
+            d.complete_task(top.id.clone()).unwrap();
+        }
+        d.set_now_for_tests("2026-10-05T10:00:06");
+        d.undo_close_task(top.id.clone()).unwrap();
+
+        for id in [&top.id, &open.id, &deep.id] {
+            let back = d.task(id.clone()).unwrap();
+            assert!(
+                back.done.is_none() && !back.wont,
+                "closed by the action, reopened by its undo"
+            );
+        }
+        let kept = d.task(done.id).unwrap();
+        assert!(
+            kept.done.is_some() && !kept.wont,
+            "completed before the action, left as it was"
+        );
+
+        // Nothing to take back on an open task.
+        d.undo_close_task(top.id.clone()).unwrap();
+        assert!(d.task(top.id).unwrap().done.is_none());
+    }
+}
+
+#[test]
+fn r69_undoing_the_close_of_a_subtask_leaves_its_parent_and_neighbours_alone() {
+    let d = device();
+    let top = add(&d, "родитель");
+    let one = add_sub(&d, &top, "первая");
+    let two = add_sub(&d, &top, "вторая");
+
+    d.wont_do_task(one.id.clone()).unwrap();
+    assert!(d.task(top.id.clone()).unwrap().done.is_none(), "the parent stays open");
+    assert!(
+        d.task(two.id.clone()).unwrap().done.is_none(),
+        "the neighbour stays open"
+    );
+
+    d.undo_close_task(one.id.clone()).unwrap();
+    assert!(d.task(one.id).unwrap().done.is_none());
+    assert!(d.task(top.id).unwrap().done.is_none());
+    assert!(d.task(two.id).unwrap().done.is_none());
+}
+
+#[test]
 fn r69_r17_a_repeating_task_skips_the_occurrence() {
     let d = device();
     let t = add(&d, "зарядка");
