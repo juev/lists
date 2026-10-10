@@ -19,6 +19,7 @@ use crate::db::{KIND_ATTACHMENT, KIND_LIST, KIND_TASK};
 use crate::error::{AppError, Result};
 use crate::model::{Freq, Repeat, INBOX_ID};
 use crate::store::{hex, Store};
+use crate::LogLevel;
 use crate::{order, quickadd};
 
 #[derive(Debug, Clone, PartialEq, Default, uniffi::Record)]
@@ -901,36 +902,46 @@ impl Store {
     /// recognised from the content: a 2Do backup (`.2dodb`), a Todoist CSV
     /// template, a Trello board JSON, or Microsoft To Do lists as JSON.
     pub fn import_file(&self, path: String) -> Result<ImportReport> {
-        let path = Path::new(&path);
-        let mut head = [0u8; 4];
-        let read = std::fs::File::open(path)?.read(&mut head)?;
-        let parsed = if read >= 2 && &head[..2] == b"PK" {
-            let work = std::env::temp_dir().join(format!("lists-import-{}", Uuid::now_v7().simple()));
-            std::fs::create_dir_all(&work)?;
-            let parsed = parse_2do(path, &work);
-            let written = parsed.and_then(|p| self.write_import(p));
-            let _ = std::fs::remove_dir_all(&work);
-            return written;
-        } else {
-            let text = String::from_utf8(std::fs::read(path)?).map_err(|_| invalid("the file is not UTF-8 text"))?;
-            let trimmed = text.trim_start_matches('\u{feff}').trim_start();
-            if trimmed.starts_with('{') || trimmed.starts_with('[') {
-                let value: Value =
-                    serde_json::from_str(trimmed).map_err(|e| invalid(format!("not valid JSON: {e}")))?;
-                if value.get("cards").is_some() && value.get("lists").is_some() {
-                    parse_trello(&value)?
-                } else {
-                    parse_mstodo(&value)?
-                }
+        let result = (|| {
+            let path = Path::new(&path);
+            let mut head = [0u8; 4];
+            let read = std::fs::File::open(path)?.read(&mut head)?;
+            let parsed = if read >= 2 && &head[..2] == b"PK" {
+                let work = std::env::temp_dir().join(format!("lists-import-{}", Uuid::now_v7().simple()));
+                std::fs::create_dir_all(&work)?;
+                let parsed = parse_2do(path, &work);
+                let written = parsed.and_then(|p| self.write_import(p));
+                let _ = std::fs::remove_dir_all(&work);
+                return written;
             } else {
-                let name = path
-                    .file_stem()
-                    .map(|s| s.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| "Todoist".into());
-                parse_todoist(&text, &name)?
-            }
-        };
-        self.write_import(parsed)
+                let text =
+                    String::from_utf8(std::fs::read(path)?).map_err(|_| invalid("the file is not UTF-8 text"))?;
+                let trimmed = text.trim_start_matches('\u{feff}').trim_start();
+                if trimmed.starts_with('{') || trimmed.starts_with('[') {
+                    let value: Value =
+                        serde_json::from_str(trimmed).map_err(|e| invalid(format!("not valid JSON: {e}")))?;
+                    if value.get("cards").is_some() && value.get("lists").is_some() {
+                        parse_trello(&value)?
+                    } else {
+                        parse_mstodo(&value)?
+                    }
+                } else {
+                    let name = path
+                        .file_stem()
+                        .map(|s| s.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| "Todoist".into());
+                    parse_todoist(&text, &name)?
+                }
+            };
+            self.write_import(parsed)
+        })();
+        self.note_result("import", &result, LogLevel::Info, |report| {
+            format!(
+                "{}: {} lists, {} tasks, {} attachments",
+                report.source, report.lists, report.tasks, report.attachments
+            )
+        });
+        result
     }
 }
 
