@@ -52,6 +52,8 @@ import UserNotifications
 /// whether a notification gets the standard sound, where the copy for the notification centre is and the sounds on offer; no notification is scheduled,
 /// `appearance:dark`, `appearance:light` and `appearance:system` (choose the look the way Settings does),
 /// `appearance` alone prints the choice and the look each window of the app has, the quick-entry panel among them,
+/// `dockcount:today`, `dockcount:overdue` and `dockcount:none` (choose what the Dock icon counts the way Settings does, R103),
+/// `dockcount` alone prints the choice, the label the Dock tile carries and the counts it is taken from,
 /// `menu:Title` (prints whether the menu bar item with that title is enabled),
 /// `sidebar` (prints how many rows each list of the main window has, the sidebar among them),
 /// `copytext:text`, `copysecret:text` and `copyfile:path` (fill the pasteboard quick entry reads; with `LISTS_DEBUG_PASTEBOARD=name` that is a pasteboard of its own, not the general one),
@@ -293,6 +295,10 @@ enum DebugScript {
                         }
                         print("debug: appearance \(AppModel.shared.appearance), windows \(looks.sorted { $0.key < $1.key }.map { "\($0.key) \($0.value)" })")
                     }
+                case "dockcount":
+                    if step.contains(":") { AppModel.shared.dockCount = argument }
+                    let model = AppModel.shared
+                    print("debug: dock count \(model.dockCount), badge \(NSApp.dockTile.badgeLabel ?? "none"), today \(model.counts.today), overdue \(model.counts.overdue)")
                 case "ghost":
                     ghost = true
                     for window in NSApp.windows where !(window is NSPanel) && window.styleMask.contains(.titled) { hide(window) }

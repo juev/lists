@@ -303,6 +303,10 @@
 "Sound" = "Звук";
 "Standard" = "Стандартный";
 "A reminder set on a task is always shown. These settings apply to this Mac only." = "Напоминание, заданное у задачи, показывается всегда. Эти настройки действуют только на этом Mac.";
+"Dock icon" = "Значок в Dock";
+"Count on the icon" = "Число на значке";
+"Overdue tasks" = "Просроченные";
+"Do not show" = "Не показывать";
 "Default list" = "Список по умолчанию";
 "Last used list" = "Последний использованный";
 "Used by quick entry and by views that show several lists, such as Today." = "Действует в быстром вводе и в представлениях с несколькими списками, например «Сегодня».";
