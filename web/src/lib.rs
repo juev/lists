@@ -150,6 +150,11 @@ fn task_json(t: &TaskItem) -> Value {
     })
 }
 
+/// A subtask under a task found by a search (R22): a mark and a title, which is all it has (R10).
+fn found_json(t: &TaskItem) -> Value {
+    json!({ "id": t.id, "title": t.title, "done": t.done, "wont": t.wont })
+}
+
 /// The ranges of a note to style, hide and replace (R53), in UTF-16 units, which
 /// is how the page indexes the text. The page builds text nodes from them and
 /// never markup.
@@ -596,10 +601,22 @@ impl App {
                         .ok_or_else(|| AppError::Invalid {
                             msg: "bad scope".into(),
                         })?;
-                    json_reply(
-                        200,
-                        json!(self.store.tasks(scope)?.iter().map(task_json).collect::<Vec<_>>()),
-                    )
+                    // R22: a task found by a search carries its subtasks whose title holds the text;
+                    // a subtask is never a row of the results.
+                    let search = match &scope {
+                        Scope::Search { text } => Some(text.clone()),
+                        _ => None,
+                    };
+                    let mut rows = Vec::new();
+                    for task in self.store.tasks(scope)? {
+                        let mut row = task_json(&task);
+                        if let Some(text) = &search {
+                            let found = self.store.found_subtasks(task.id.clone(), text.clone())?;
+                            row["found"] = found.iter().map(found_json).collect();
+                        }
+                        rows.push(row);
+                    }
+                    json_reply(200, Value::Array(rows))
                 }
                 (Method::Get, "/api/task") => {
                     let id = query(&url, "id").unwrap_or_default();
