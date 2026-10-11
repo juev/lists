@@ -303,6 +303,8 @@ fun EditorSheet(editing: Editing, state: UiState, model: MainViewModel, onRemind
     var menu by remember { mutableStateOf(false) }
     // Subtasks are not mentioned until the task has one or the user asks for the field.
     var subtaskField by remember(task.id) { mutableStateOf(false) }
+    // R38: the subtask whose title is edited in its line.
+    var renaming by remember(task.id) { mutableStateOf<String?>(null) }
     // The attachment shown over the screen; it closes by itself when the file is removed elsewhere.
     var viewing by remember(task.id) { mutableStateOf<String?>(null) }
     // Attachments being downloaded on request, and those the last request did not get (R76).
@@ -361,6 +363,7 @@ fun EditorSheet(editing: Editing, state: UiState, model: MainViewModel, onRemind
         dragHandle = { CardHandle(tall, { tall = it }, if (tall) Modifier.statusBarsPadding() else Modifier) },
     ) {
         Column((if (tall) Modifier.fillMaxHeight() else Modifier).verticalScroll(rememberScrollState()).navigationBarsPadding().padding(bottom = 16.dp)) {
+            // A task with a card and a parent is a task of a project (R10): the way back to the project.
             task.parentId?.let { parent ->
                 TextButton(onClick = { model.open(parent) }, modifier = Modifier.padding(start = 8.dp)) {
                     Icon(Icons.AutoMirrored.Outlined.ArrowBack, null, Modifier.size(16.dp))
@@ -511,7 +514,15 @@ fun EditorSheet(editing: Editing, state: UiState, model: MainViewModel, onRemind
             val line = @Composable { HorizontalDivider(Modifier.padding(start = 52.dp, end = 16.dp), color = MaterialTheme.colorScheme.outlineVariant) }
             editing.subtasks.forEachIndexed { index, sub ->
                 if (index > 0) line()
-                TaskRow(sub, state, onToggle = { model.toggleDone(sub) }, onOpen = { model.open(sub.id) }, model = model, showOrigin = false, subtask = true)
+                // The tasks of a project are full tasks with a card; a subtask is a line (R10).
+                if (task.isProject) {
+                    TaskRow(sub, state, onToggle = { model.toggleDone(sub) }, onOpen = { model.open(sub.id) }, model = model, showOrigin = false, subtask = true)
+                } else key(sub.id) {
+                    SubtaskLine(sub, renaming == sub.id, model) { on ->
+                        // The line that gives the edit up may already have lost it to another line.
+                        if (on) renaming = sub.id else if (renaming == sub.id) renaming = null
+                    }
+                }
             }
             if (showSubtasks && !locked) {
                 if (editing.subtasks.isNotEmpty()) line()

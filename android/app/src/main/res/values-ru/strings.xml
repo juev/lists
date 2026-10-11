@@ -23,6 +23,7 @@
     <string name="empty_search">Ничего не найдено</string>
     <string name="empty_list">Задач нет</string>
     <string name="empty_list_hint">Введите название внизу.</string>
+    <string name="rename">Переименовать</string>
     <string name="reopen">Вернуть в работу</string>
     <string name="complete">Выполнить</string>
     <string name="from_date">с %1$s</string>

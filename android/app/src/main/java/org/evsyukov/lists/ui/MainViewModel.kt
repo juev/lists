@@ -51,6 +51,8 @@ data class UiState(
     val scope: Scope = Scope.Today,
     val search: String? = null,
     val sections: List<TaskSection> = emptyList(),
+    /** R22: the subtasks a search found a task by, shown as lines under its row. */
+    val found: Map<String, List<TaskItem>> = emptyMap(),
     val editing: Editing? = null,
     val sync: SyncStatus = SyncStatus(false, 0u, 0u, null, null),
     val notice: Notice? = null,
@@ -152,9 +154,11 @@ class MainViewModel : ViewModel() {
                     else -> shown
                 }
                 val base = current.copy(lists = lists, tags = tags, projects = projects, filters = filters, scope = scope)
+                val tasks = store.tasks(base.effectiveScope)
                 base.copy(
                     counts = store.counts(),
-                    sections = group(base, store.tasks(base.effectiveScope)),
+                    sections = group(base, tasks),
+                    found = found(store, base.effectiveScope, tasks),
                     editing = editingId?.let { id -> load(store, id) },
                     sync = store.syncStatus(),
                     keepDone = store.keepDone(),
@@ -187,6 +191,14 @@ class MainViewModel : ViewModel() {
     private fun load(store: Store, id: String): Editing? = runCatching {
         Editing(store.task(id), store.subtasks(id), store.attachments(id))
     }.getOrNull()
+
+    /** R22: for each task of the results of a search, the subtasks whose title holds the text. */
+    private fun found(store: Store, scope: Scope, tasks: List<TaskItem>): Map<String, List<TaskItem>> {
+        if (scope !is Scope.Search) return emptyMap()
+        return tasks.filter { it.subtasksTotal > 0u }
+            .associate { it.id to store.foundSubtasks(it.id, scope.text) }
+            .filterValues { it.isNotEmpty() }
+    }
 
     private fun group(state: UiState, tasks: List<TaskItem>): List<TaskSection> = when (state.effectiveScope) {
         Scope.Today -> {
