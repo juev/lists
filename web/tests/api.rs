@@ -676,3 +676,136 @@ fn r69_r11_undo_brings_back_the_subtasks_closed_with_the_task() {
     let inbox = get(&web, &cookie, "/api/tasks?scope=inbox");
     assert!(inbox[0]["done"].is_null());
 }
+
+/// A call the server is expected to refuse: the status of the answer.
+fn refused(web: &Web, body: Value) -> u16 {
+    status(
+        ureq::post(&format!("{}/api/call", web.base))
+            .set("X-Lists", "1")
+            .send_json(body),
+    )
+}
+
+#[test]
+fn r10_a_due_date_on_a_subtask_is_refused() {
+    let web = web(None);
+    let top = call(&web, "", json!({ "op": "quickAdd", "text": "а", "scope": "inbox" }));
+    let sub = call(
+        &web,
+        "",
+        json!({ "op": "addSubtask", "parent": top["id"], "title": "б" }),
+    );
+    assert_eq!(
+        refused(&web, json!({ "op": "setDue", "id": sub["id"], "value": "2030-01-01" })),
+        400
+    );
+    let id = top["id"].as_str().unwrap();
+    let kept = get(&web, "", &format!("/api/task?id={id}"))["subtasks"][0].clone();
+    assert_eq!(kept["title"], "б");
+    assert!(kept["due"].is_null());
+
+    // What a subtask does have: a title that changes and a mark.
+    call(&web, "", json!({ "op": "setTitle", "id": sub["id"], "value": "в" }));
+    call(&web, "", json!({ "op": "complete", "id": sub["id"] }));
+    let kept = get(&web, "", &format!("/api/task?id={id}"))["subtasks"][0].clone();
+    assert_eq!(kept["title"], "в");
+    assert!(kept["done"].is_string());
+}
+
+#[test]
+fn r10_a_subtask_under_a_subtask_is_refused() {
+    let web = web(None);
+    let top = call(&web, "", json!({ "op": "quickAdd", "text": "а", "scope": "inbox" }));
+    let sub = call(
+        &web,
+        "",
+        json!({ "op": "addSubtask", "parent": top["id"], "title": "б" }),
+    );
+    assert_eq!(
+        refused(&web, json!({ "op": "addSubtask", "parent": sub["id"], "title": "в" })),
+        400
+    );
+    let under = |id: &Value| {
+        let id = id.as_str().unwrap();
+        get(&web, "", &format!("/api/task?id={id}"))["subtasks"]
+            .as_array()
+            .unwrap()
+            .len()
+    };
+    assert_eq!(under(&sub["id"]), 0);
+    assert_eq!(under(&top["id"]), 1);
+}
+
+#[test]
+fn r10_a_task_of_a_project_keeps_its_due_date() {
+    let web = web(None);
+    let project = call(&web, "", json!({ "op": "quickAdd", "text": "п", "scope": "inbox" }));
+    let id = project["id"].as_str().unwrap().to_string();
+    call(&web, "", json!({ "op": "setProject", "id": id, "value": true }));
+    let task = call(&web, "", json!({ "op": "addSubtask", "parent": id, "title": "т" }));
+    call(
+        &web,
+        "",
+        json!({ "op": "setDue", "id": task["id"], "value": "2030-01-01" }),
+    );
+    let inside = get(&web, "", &format!("/api/tasks?scope=project%3A{id}"));
+    assert_eq!(inside[0]["title"], "т");
+    assert_eq!(inside[0]["due"], "2030-01-01");
+
+    // A subtask of that task is a subtask like any other.
+    let sub = call(
+        &web,
+        "",
+        json!({ "op": "addSubtask", "parent": task["id"], "title": "у" }),
+    );
+    assert_eq!(
+        refused(&web, json!({ "op": "setDue", "id": sub["id"], "value": "2030-01-01" })),
+        400
+    );
+    // R32: a project that has tasks is not turned back into a task.
+    assert_eq!(
+        refused(&web, json!({ "op": "setProject", "id": id, "value": false })),
+        400
+    );
+    assert_eq!(get(&web, "", "/api/overview")["projects"][0]["title"], "п");
+}
+
+#[test]
+fn r22_a_search_shows_the_task_with_the_subtasks_it_was_found_by() {
+    let web = web(None);
+    let top = call(
+        &web,
+        "",
+        json!({ "op": "quickAdd", "text": "купить", "scope": "inbox" }),
+    );
+    for title in ["молоко", "хлеб"] {
+        call(
+            &web,
+            "",
+            json!({ "op": "addSubtask", "parent": top["id"], "title": title }),
+        );
+    }
+    // "молоко", percent-encoded as the page sends it.
+    let found = get(
+        &web,
+        "",
+        "/api/tasks?scope=search%3A%D0%BC%D0%BE%D0%BB%D0%BE%D0%BA%D0%BE",
+    );
+    let rows = found.as_array().unwrap();
+    assert_eq!(rows.len(), 1, "the subtask is not a row of its own");
+    assert_eq!(rows[0]["title"], "купить");
+    let lines = rows[0]["found"].as_array().unwrap();
+    assert_eq!(lines.len(), 1);
+    assert_eq!(lines[0]["title"], "молоко");
+    assert!(lines[0]["done"].is_null());
+    assert_eq!(lines[0]["wont"], false);
+
+    // Found by its own title, the task lists no subtasks; outside a search there is no such field.
+    let own = get(
+        &web,
+        "",
+        "/api/tasks?scope=search%3A%D0%BA%D1%83%D0%BF%D0%B8%D1%82%D1%8C",
+    );
+    assert_eq!(own[0]["found"], json!([]));
+    assert!(get(&web, "", "/api/tasks?scope=inbox")[0].get("found").is_none());
+}

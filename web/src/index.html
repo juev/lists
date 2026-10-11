@@ -83,6 +83,8 @@ header input { border: 1px solid var(--line); border-radius: 8px; padding: 6px 1
 .link { color: var(--accent); font-size: 14px; }
 .link.danger { color: var(--danger); }
 .sub { margin-left: 30px; }
+.line { cursor: default; align-items: center; }
+.line input.done { text-decoration: line-through; color: var(--muted); }
 .empty { color: var(--muted); text-align: center; padding: 22vh 20px 0; }
 #login { max-width: 320px; margin: 22vh auto 0; padding: 0 20px; display: grid; gap: 10px; }
 #login input, #login button { padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); }
@@ -290,6 +292,7 @@ function summary(x, origin) {
   if (x.subtasks) out.push($("span", {}, `☑ ${x.subtasksDone}/${x.subtasks}`));
   if (x.attachments) out.push($("span", {}, `📎 ${x.attachments}`));
   for (const tag of x.tags) out.push($("span", {}, "#" + tag));
+  // Only a task of a project has a parent among the rows, so the title after the list is the project's.
   if (origin) out.push($("span", {}, x.parentTitle ? `${listName(x.list)} › ${x.parentTitle}` : listName(x.list)));
   return out.length ? $("div", { class: "meta" }, out) : null;
 }
@@ -299,6 +302,19 @@ function wontDo(x) {
   if (x.repeat) return act("wontDo", { id: x.id }, t("Moved to the next occurrence"));
   if (state.overview.keepDone) return act("wontDo", { id: x.id });
   act("wontDo", { id: x.id }, t("Won't do"), () => act("undoClose", { id: x.id }));
+}
+
+// A subtask is a line with a mark and a title (R10): it is renamed in place, completed, closed as
+// "won't do" and deleted, and it has no editor. Under a task found by a search (R22) the line is
+// the mark and the title alone.
+function subLine(s, plain) {
+  const id = s.id;
+  return $("div", { class: "row line" },
+    $("button", { class: "check" + (s.done ? " done" : ""), "aria-label": s.done ? "reopen" : "complete", onclick: () => act(s.done ? "reopen" : "complete", { id }) }, s.wont ? "✕" : s.done ? "✓" : ""),
+    plain ? $("div", { class: "title" }, $("div", { class: "t" + (s.done ? " done" : "") }, s.title))
+      : commit($("input", { type: "text", class: s.done ? "done" : "", value: s.title, "aria-label": t("Title") }), "setTitle", id, s.title),
+    plain || s.done ? null : $("button", { class: "link", onclick: () => act("wontDo", { id }) }, t("Won't do")),
+    plain ? null : $("button", { class: "link danger", "aria-label": t("Delete"), title: t("Delete"), onclick: () => act("delete", { id }, t("Deleted"), () => act("restore", { id })) }, "×"));
 }
 
 function taskNode(x, origin) {
@@ -319,7 +335,9 @@ function taskNode(x, origin) {
       open && !locked ? $("div", { class: "meta" }, x.priority ? $("span", { class: "prio" }, marks(x.priority)) : "", listName(x.list)) :
         $("div", { class: "t" + (x.done ? " done" : "") }, x.project ? "▸ " : "", x.priority ? $("span", { class: "prio" }, marks(x.priority) + " ") : "", x.title),
       open ? null : summary(x, origin)));
-  return $("div", { class: "task" + (open ? " open" : "") }, row, open && state.details[x.id] ? editor(state.details[x.id]) : null);
+  // The subtasks a search found the task by (R22); an open task shows all of its subtasks instead.
+  const found = !open && x.found && x.found.length ? $("div", { class: "sub" }, x.found.map(s => subLine(s, true))) : null;
+  return $("div", { class: "task" + (open ? " open" : "") }, row, found, open && state.details[x.id] ? editor(state.details[x.id]) : null);
 }
 
 function commit(el, op, id, current) {
@@ -449,9 +467,11 @@ function editor(d) {
         $("button", { class: "link", onclick: () => file.click() }, t("Attach file")), file, $("span", { class: "chip" }, move),
         $("button", { class: "link", onclick: () => act("duplicate", { id }) }, t("Duplicate")),
         x.done ? null : $("button", { class: "link", onclick: () => wontDo(x) }, t("Won't do")),
-        x.parent ? null : $("button", { class: "link", onclick: () => act("setProject", { id, value: !x.project }) }, t(x.project ? "Turn back into a task" : "Make it a project")),
+        // A project that has tasks stays a project (R32): as subtasks they would lose their fields.
+        x.parent || (x.project && d.subtasks.length) ? null : $("button", { class: "link", onclick: () => act("setProject", { id, value: !x.project }) }, t(x.project ? "Turn back into a task" : "Make it a project")),
         $("button", { class: "link danger", onclick: () => { state.open.delete(id); act("delete", { id }, t("Deleted"), () => act("restore", { id })); } }, t("Delete")))),
-    $("div", { class: "sub" }, d.subtasks.map(s => taskNode(s, false)), $("div", { class: "row" }, $("span", { class: "check", style: "border-style:dashed" }), sub)));
+    // The tasks of a project are full tasks with an editor of their own; anything else under a task is a line (R10).
+    $("div", { class: "sub" }, d.subtasks.map(s => x.project && !x.parent ? taskNode(s, false) : subLine(s)), $("div", { class: "row" }, $("span", { class: "check", style: "border-style:dashed" }), sub)));
 }
 
 function nav(scope, label, count, opts = {}) {
