@@ -817,7 +817,7 @@ fun TaskRow(
                 modifier = Modifier.weight(1f, fill = false),
             )
             // Only a task of a project is a row with a parent: a subtask is never a row of a view (R12).
-            Marks(task, origin = if (showOrigin) rowOrigin(task, state.lists) else null)
+            Marks(task, origin = if (showOrigin) rowOrigin(task, state.lists, str(R.string.inbox)) else null)
         }
         val scope = state.effectiveScope
         val dayInHeading = scope == Scope.Upcoming || (scope == Scope.Today && task.due?.let(::dayOf) == today())
@@ -922,23 +922,24 @@ fun TaskItem.markState(): MarkState = when {
 }
 
 /**
- * R72: what a row says about where its task lives in a view that mixes lists: the list, unless it is
- * the Inbox, and the project of a task of a project (R31). Nothing for a task of the Inbox outside a project.
+ * R72: what a row says about where its task lives in a view that mixes lists: the list, the Inbox
+ * among them, and the project of a task of a project (R31).
  */
 data class RowOrigin(val list: String?, val color: String?, val project: String?) {
     val label: String get() = listOfNotNull(list, project).joinToString(" – ")
 }
 
-fun rowOrigin(task: TaskItem, lists: List<TaskList>): RowOrigin? {
+fun rowOrigin(task: TaskItem, lists: List<TaskList>, inbox: String): RowOrigin? {
     val list = lists.firstOrNull { it.id == task.listId }
-    return rowOrigin(task.listId, list?.name, list?.color, task.parentTitle)
+    // The Inbox has no name of its own in the data: the app names it.
+    return rowOrigin(if (task.listId == "inbox") inbox else list?.name, list?.color, task.parentTitle)
 }
 
-/** The same from its parts: the name and the colour are those of the list with that id, when it is known. */
-fun rowOrigin(listId: String, listName: String?, listColor: String?, project: String?): RowOrigin? {
-    val named = listName.takeIf { listId != "inbox" }
+/** The same from its parts: the name and the colour of the list, when it is known, and the project. */
+fun rowOrigin(listName: String?, listColor: String?, project: String?): RowOrigin? {
+    val named = listName?.takeIf { it.isNotEmpty() }
     if (named == null && project == null) return null
-    return RowOrigin(named, listColor.takeIf { named != null }, project)
+    return RowOrigin(named, listColor?.takeIf { named != null && it.isNotEmpty() }, project)
 }
 
 /** Marks after the title, only for what is set, without text or numbers (R72); then the list of the task in its colour and the project. */

@@ -438,12 +438,12 @@ final class AppModel {
         }
     }
 
-    /// R72: what a row says about where its task lives in a view that mixes lists: the list, unless it
-    /// is the Inbox, and the project of a task of a project. Nothing for a task of the Inbox outside a project.
+    /// R72: what a row says about where its task lives in a view that mixes lists: the list, the Inbox
+    /// among them, and the project of a task of a project.
     func origin(of task: TaskItem) -> RowOrigin? {
-        let list = task.listId == "inbox" ? nil : list(task.listId)
+        let list = list(task.listId)
         guard list != nil || task.parentTitle != nil else { return nil }
-        return RowOrigin(list: list?.name, color: list?.color, project: task.parentTitle)
+        return RowOrigin(list: list.map(listName), color: list?.color, project: task.parentTitle)
     }
 
     func listName(_ list: TaskList) -> String { list.id == "inbox" ? L("Inbox") : list.name }
@@ -696,6 +696,12 @@ final class AppModel {
             attach(draft.files, to: task.id)
             noteUsedList(task.listId)
             if allTasks.contains(where: { $0.id == task.id }) { selection = task.id }
+            // R37: Esc keeps the task of the card, so ⌘Z is the way to take a new task back: it goes to the trash.
+            undoManager?.registerUndo(withTarget: self) { model in
+                model.perform { try $0.deleteTask(id: task.id) }
+                if model.selection == task.id { model.selection = nil }
+            }
+            undoManager?.setActionName(L("New Task"))
         }
         return task
     }

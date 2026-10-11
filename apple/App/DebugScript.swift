@@ -7,7 +7,7 @@ import UserNotifications
 /// Drives the app from inside for checks that need key presses: macOS lets no
 /// outside process send them without the Accessibility permission. Debug
 /// builds only. `LISTS_DEBUG_SCRIPT` holds steps separated by `;`:
-/// `type:text`, `key:return`, `key:n+cmd`, `sleep:0.5`, `click:x,y`, `quick`, `settings`,
+/// `type:text`, `key:return`, `key:n+cmd`, `sleep:0.5`, `click:x,y` (`click:x,y,2` for a double click), `quick`, `settings`,
 /// `state` (prints who has the keyboard, the text being typed into and the size of its field), `copyfiles:path,path` and `copyimage`
 /// (fill the pasteboard), `draft` (prints the files and the dates of the open new-task card),
 /// `code:17` (presses the key with that key code, whatever the layout, in the date editor: the open popover, or the one `dateeditor` made;
@@ -127,15 +127,18 @@ enum DebugScript {
                     press(key.1, code: key.0, flags: flags)
                 case "click":
                     // Points from the top left corner of the window the script types into.
+                    // `click:x,y,2` is a double click: a press and a release, and the same again as the second of a pair.
                     let xy = argument.split(separator: ",").compactMap { Double($0) }
-                    if xy.count == 2, let window = target {
+                    if xy.count >= 2, let window = target {
                         let point = NSPoint(x: xy[0], y: Double(window.frame.height) - xy[1])
-                        for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
-                            if let event = NSEvent.mouseEvent(
-                                with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
-                                windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1) {
-                                // Queued, not sent: a view that tracks the mouse waits for the release in the queue.
-                                NSApp.postEvent(event, atStart: false)
+                        for count in 1...max(1, xy.count > 2 ? Int(xy[2]) : 1) {
+                            for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                                if let event = NSEvent.mouseEvent(
+                                    with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                    windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: count, pressure: 1) {
+                                    // Queued, not sent: a view that tracks the mouse waits for the release in the queue.
+                                    NSApp.postEvent(event, atStart: false)
+                                }
                             }
                         }
                     }
