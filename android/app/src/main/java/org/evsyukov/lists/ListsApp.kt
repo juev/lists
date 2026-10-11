@@ -211,8 +211,33 @@ object NotifyPrefs {
      */
     fun leads(context: Context): List<Int> {
         val prefs = prefs(context)
-        prefs.getString("leads", null)?.let { saved -> return saved.split(',').mapNotNull { it.toIntOrNull() }.sorted() }
-        return listOf(prefs.getInt("lead", 15)).filter { it >= 0 }
+        val saved = prefs.getString("leads", null)
+        val moved = prefs.getBoolean(MOVED, false)
+        val leads = storedLeads(saved, if (prefs.contains("lead")) prefs.getInt("lead", 15) else null, moved)
+        if (!moved) {
+            // Once: the choice is written only where the update changed it, so a device that never chose keeps following the default.
+            val edit = prefs.edit().putBoolean(MOVED, true)
+            if (saved != null || prefs.contains("lead")) edit.putString("leads", leads.joinToString(","))
+            edit.apply()
+        }
+        return leads
+    }
+
+    private const val MOVED = "leadsAtTime"
+
+    /**
+     * R36: without a choice the reminder comes at the time the task is due.
+     * The default used to be 15 minutes before, and every save of these
+     * settings wrote it down, so a stored 15 alone does not tell a choice from
+     * the old default: the update turns it into "at the time" once (`moved`
+     * is false until then). `legacy` is the single value kept before several
+     * were allowed, -1 for off.
+     */
+    fun storedLeads(saved: String?, legacy: Int?, moved: Boolean): List<Int> {
+        val stored = saved?.split(',')?.mapNotNull { it.toIntOrNull() }?.sorted()
+            ?: legacy?.let { listOf(it).filter { lead -> lead >= 0 } }
+            ?: return listOf(0)
+        return if (!moved && stored == listOf(15)) listOf(0) else stored
     }
     /** `HH:MM`, empty for off. */
     fun allDay(context: Context) = prefs(context).getString("allDay", "09:00").orEmpty()

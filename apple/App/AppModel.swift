@@ -148,9 +148,25 @@ final class AppModel {
     /// Before several lead times were allowed there was one, kept under `notifyLead`.
     private static func storedLeads() -> Set<Int> {
         let defaults = UserDefaults.standard
-        if let leads = defaults.array(forKey: "notifyLeads") as? [Int] { return Set(leads) }
-        if let lead = defaults.object(forKey: "notifyLead") as? Int { return lead < 0 ? [] : [lead] }
-        return [15]
+        let stored = defaults.array(forKey: "notifyLeads") as? [Int]
+        let legacy = defaults.object(forKey: "notifyLead") as? Int
+        let moved = defaults.bool(forKey: "notifyLeadsAtTime")
+        let leads = leads(stored: stored, legacy: legacy, moved: moved)
+        if !moved {
+            // Once: the choice is written only where the update changed it, so a Mac that never chose keeps following the default.
+            defaults.set(true, forKey: "notifyLeadsAtTime")
+            if stored != nil || legacy != nil { defaults.set(leads.sorted(), forKey: "notifyLeads") }
+        }
+        return leads
+    }
+
+    /// R36: without a choice the reminder comes at the time the task is due. The default used to be
+    /// 15 minutes before, and every save of these settings wrote it down, so a stored 15 alone does not
+    /// tell a choice from the old default: the update turns it into "at the time" once (`moved` is false until then).
+    /// `legacy` is the single value kept before several were allowed, negative for off.
+    static func leads(stored: [Int]?, legacy: Int?, moved: Bool) -> Set<Int> {
+        guard let leads = stored.map(Set.init) ?? legacy.map({ $0 < 0 ? [] : [$0] }) else { return [0] }
+        return !moved && leads == [15] ? [0] : leads
     }
 
     // Editing habits of this Mac; not synced.
