@@ -196,15 +196,16 @@ struct DraftEditor: View {
         onClose()
     }
 
-    /// Esc: the card goes and its task is kept, like Return in the title (R37). There is no way out of the
-    /// card that throws a titled task away: a task made by mistake is deleted, or taken back with ⌘Z.
+    /// Esc. In the list the card goes and its task is kept, like Return in the title (R37): there is no way
+    /// out of that card that throws a titled task away. The quick-entry panel is another kind of window with
+    /// rules of its own (R114): there Esc throws away what was typed.
     private func cancel() {
         // Esc with a popover open is for the popover: it reaches the card as well.
         if popover != nil { return popover = nil }
-        close()
+        if footer { discard() } else { close() }
     }
 
-    /// "Cancel" of the quick-entry panel: the one button that closes a card without making its task.
+    /// Esc and "Cancel" of the quick-entry panel: the card goes and nothing is created (R114).
     private func discard() {
         draft.files.forEach(IncomingFiles.discard)
         onClose()

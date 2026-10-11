@@ -228,6 +228,8 @@ If access was refused, the settings say so in a line that opens the system setti
 | Space or Return on a chip | what a click on it does: its date, repeat or tag popover, its menu, or the removal of a tag |
 | Esc | close the open popover of a chip; without one, close the open card and go back to the list |
 | Esc in the card of a new task | close the card and keep the task, if it has a title |
+| Esc in the quick-entry window | close the window and drop what was typed |
+| ⌘Return in the quick-entry window | save the task and close the window |
 | ⌘Return in the card of a new task | create the task from any field |
 | Space or ⌘Enter | complete |
 | ⌘T | due today |
