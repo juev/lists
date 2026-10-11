@@ -349,21 +349,26 @@ fun MainScreen(model: MainViewModel, onReminderSet: () -> Unit) {
                                 }
                             }
                             items(section.tasks, key = { rowKey(section.key, it.id) }) { task ->
-                                if (selection != null) {
-                                    Surface {
-                                        TaskRow(
-                                            task, state, onToggle = {}, onOpen = {}, model = model, showOrigin = state.showsOrigin(),
-                                            selected = task.id in selection, onSelect = { model.toggleSelected(task.id) },
-                                        )
-                                    }
-                                } else SwipeRow(
-                                    task = task,
-                                    state = state,
-                                    onToggle = { model.toggleDone(task) },
-                                    onOpen = { model.open(task.id) },
-                                    onPickDue = { duePickerFor = task },
-                                    model = model,
-                                )
+                                // One item for the row and its lines: the drag over the circles reads the task from the item (R109).
+                                Column {
+                                    if (selection != null) {
+                                        Surface {
+                                            TaskRow(
+                                                task, state, onToggle = {}, onOpen = {}, model = model, showOrigin = state.showsOrigin(),
+                                                selected = task.id in selection, onSelect = { model.toggleSelected(task.id) },
+                                            )
+                                        }
+                                    } else SwipeRow(
+                                        task = task,
+                                        state = state,
+                                        onToggle = { model.toggleDone(task) },
+                                        onOpen = { model.open(task.id) },
+                                        onPickDue = { duePickerFor = task },
+                                        model = model,
+                                    )
+                                    // R22: the subtasks the search found the task by.
+                                    state.found[task.id]?.forEach { FoundSubtask(it) }
+                                }
                             }
                         }
                     }
@@ -808,7 +813,8 @@ fun TaskRow(
                 },
                 modifier = Modifier.weight(1f, fill = false),
             )
-            Marks(task, parent = task.parentTitle.takeIf { showOrigin })
+            // Only a task of a project is a row with a parent: a subtask is never a row of a view (R12).
+            Marks(task, project = task.parentTitle.takeIf { showOrigin })
         }
         val scope = state.effectiveScope
         val dayInHeading = scope == Scope.Upcoming || (scope == Scope.Today && task.due?.let(::dayOf) == today())
@@ -912,9 +918,9 @@ fun TaskItem.markState(): MarkState = when {
     else -> MarkState.Open
 }
 
-/** Marks after the title, only for what is set, without text or numbers (R72); then the parent of a subtask shown on its own (R12). */
+/** Marks after the title, only for what is set, without text or numbers (R72); then the project of a task shown outside it (R31). */
 @Composable
-private fun Marks(task: TaskItem, parent: String?) {
+private fun Marks(task: TaskItem, project: String?) {
     val muted = MaterialTheme.colorScheme.outline
     val marks = buildList {
         if (task.repeat != null) add(Icons.Outlined.Repeat to str(R.string.repeat))
@@ -923,8 +929,8 @@ private fun Marks(task: TaskItem, parent: String?) {
         if (task.subtasksTotal > 0u) add(Icons.Outlined.Checklist to str(R.string.subtasks))
     }
     for ((icon, name) in marks) Icon(icon, name, Modifier.padding(start = 6.dp).size(16.dp), tint = muted)
-    if (parent != null) {
-        Text(parent, Modifier.padding(start = 8.dp).widthIn(max = 120.dp), style = MaterialTheme.typography.bodySmall, color = muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    if (project != null) {
+        Text(project, Modifier.padding(start = 8.dp).widthIn(max = 120.dp), style = MaterialTheme.typography.bodySmall, color = muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -965,7 +971,7 @@ private fun TaskMenu(task: TaskItem, state: UiState, model: MainViewModel, onOpe
             DropdownMenuItem(text = { Text(str(R.string.priority)) }, onClick = { sub = "priority" })
             DropdownMenuItem(text = { Text(str(R.string.move_to_list)) }, onClick = { sub = "list" })
             DropdownMenuItem(text = { Text(str(R.string.add_subtask)) }, onClick = { run(onOpen) })
-            if (task.parentId == null) {
+            if (task.offersProjectSwitch()) {
                 DropdownMenuItem(
                     text = { Text(str(if (task.isProject) R.string.project_off else R.string.project_on)) },
                     onClick = { run { model.act { it.setProject(task.id, !task.isProject) } } },

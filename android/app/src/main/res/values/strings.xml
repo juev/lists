@@ -24,6 +24,7 @@
     <string name="empty_search">Nothing found</string>
     <string name="empty_list">No tasks</string>
     <string name="empty_list_hint">Type a title below.</string>
+    <string name="rename">Rename</string>
     <string name="reopen">Reopen</string>
     <string name="complete">Complete</string>
     <string name="from_date">from %1$s</string>
