@@ -1,10 +1,7 @@
 package org.evsyukov.lists
 
-import android.app.AlarmManager
 import android.app.NotificationManager
-import android.app.PendingIntent
 import android.content.Context
-import android.content.Intent
 import kotlinx.coroutines.launch
 
 /**
@@ -14,10 +11,9 @@ import kotlinx.coroutines.launch
  * count alone. A setting of this device; not synced.
  */
 object IconCount {
-    /** The channel, the notification and the alarm of the builds that had a notification for the count alone. */
+    /** The channel and the notification of the builds that had a notification for the count alone. */
     private const val OLD_CHANNEL = "icon_count"
     private const val OLD_ID = 106
-    private const val OLD_MIDNIGHT = "org.evsyukov.lists.ICON_COUNT.MIDNIGHT"
 
     /** What can be counted, in the order the settings offer it. */
     val choices = listOf("today", "overdue", "none")
@@ -55,13 +51,9 @@ object IconCount {
         if (merged) return
         prefs.edit().putBoolean("merged", true).apply()
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
+        // The alarm of the change of the day that went with it is left to run out: its receiver is gone
+        // from the app, and the system drops an alarm for a receiver that is not there.
         manager.cancel(OLD_ID)
         manager.deleteNotificationChannel(OLD_CHANNEL)
-        context.getSystemService(AlarmManager::class.java)?.cancel(
-            PendingIntent.getBroadcast(
-                context, 0, Intent(context, TodayNoticeReceiver::class.java).setAction(OLD_MIDNIGHT),
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-            )
-        )
     }
 }
