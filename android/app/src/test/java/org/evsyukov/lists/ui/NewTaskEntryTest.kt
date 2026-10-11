@@ -75,12 +75,60 @@ class NewTaskEntryTest {
     }
 
     @Test
+    fun r113_the_card_saves_the_typed_lines_and_then_what_is_left_in_the_field() {
+        assertEquals(listOf("tickets", "hotel"), typedSubtasks(listOf("tickets"), "hotel"))
+        assertEquals(listOf("tickets", "hotel"), typedSubtasks(listOf(" tickets ", "", "  ", "hotel"), " \n"))
+        assertEquals(emptyList<String>(), typedSubtasks(emptyList(), ""))
+        // The title is taken as typed: nothing of quick entry is read in it.
+        assertEquals(listOf("tickets tomorrow !! #trip"), typedSubtasks(emptyList(), "tickets tomorrow !! #trip"))
+    }
+
+    @Test
+    fun r113_done_in_the_field_adds_a_line_with_a_title_and_empties_the_field() {
+        val entry = NewTaskEntry(title = "trip")
+        entry.subtask = "  tickets "
+        entry.addSubtask()
+        assertEquals(listOf("tickets"), entry.subtasks)
+        assertEquals("", entry.subtask)
+        entry.subtask = "   "
+        entry.addSubtask()
+        assertEquals(listOf("tickets"), entry.subtasks)
+        entry.subtask = "hotel"
+        entry.addSubtask()
+        assertEquals(listOf("tickets", "hotel"), entry.subtasks)
+    }
+
+    @Test
+    fun r113_the_typed_subtasks_come_back_from_the_saved_state() {
+        val entry = NewTaskEntry("trip").apply {
+            subtasks = listOf("tickets", "hotel")
+            subtask = "visa"
+            subtasksShown = true
+        }
+        val back = NewTaskEntry.fromSaved(entry.toSaved())
+        assertEquals(listOf("tickets", "hotel"), back.subtasks)
+        assertEquals("visa", back.subtask)
+        assertTrue(back.subtasksShown)
+    }
+
+    @Test
+    fun r113_a_typed_subtask_is_content_of_the_card() {
+        assertTrue(NewTaskEntry().apply { subtasks = listOf("tickets") }.hasContent)
+        assertTrue(NewTaskEntry().apply { subtask = "tickets" }.hasContent)
+        // The field on show with nothing in it is not an entry, and neither is a line that was emptied.
+        assertFalse(NewTaskEntry().apply { subtasksShown = true; subtasks = listOf(" ") }.hasContent)
+    }
+
+    @Test
     fun r63_an_empty_card_comes_back_empty() {
         val back = NewTaskEntry.fromSaved(NewTaskEntry().toSaved())
         assertEquals("", back.text)
         assertNull(back.repeat)
         assertNull(back.priority)
         assertNull(back.listId)
+        assertEquals(emptyList<String>(), back.subtasks)
+        assertEquals("", back.subtask)
+        assertFalse(back.subtasksShown)
         assertFalse(back.hasContent)
     }
 }

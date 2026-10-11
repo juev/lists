@@ -7,6 +7,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import android.content.res.Configuration
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -26,7 +27,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.List
 import androidx.compose.material.icons.automirrored.outlined.Send
+import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.AttachFile
+import androidx.compose.material.icons.outlined.Checklist
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Event
 import androidx.compose.material.icons.outlined.Flag
@@ -98,7 +101,16 @@ data class TaskDraft(
     /** Whether dates, priority, tags and a list are picked out of the title. */
     val parse: Boolean,
     val files: List<Uri>,
+    /** The subtasks typed in the card (R113), in their order; the titles are taken as typed. */
+    val subtasks: List<String> = emptyList(),
 )
+
+/**
+ * R113: the subtasks a new-task card saves: the typed lines, then what was left in the field of the next one.
+ * A line emptied in the card is not a subtask.
+ */
+internal fun typedSubtasks(lines: List<String>, field: String): List<String> =
+    (lines + field).map(String::trim).filter(String::isNotEmpty)
 
 /**
  * Creates the task a draft describes, as a subtask when a parent is given.
@@ -127,6 +139,8 @@ fun Store.createFrom(context: Context, draft: TaskDraft, parentId: String? = nul
     val priority = finalPriority(draft.priority, task.priority, typedPriority)
     if (priority != task.priority) setPriority(task.id, priority)
     attach(context, this, task.id, draft.files)
+    // R113: created after the task, in the typed order; quick entry is not read in their titles.
+    if (draft.subtasks.isNotEmpty()) addSubtasks(task.id, draft.subtasks)
     return task(task.id)
 }
 
@@ -186,13 +200,28 @@ class NewTaskEntry(title: String = "", notes: String = "", listId: String? = nul
     var picked by mutableStateOf(emptyList<Uri>())
     /** The size chosen in portrait (R64). */
     var expanded by mutableStateOf(false)
+    /** The subtasks typed for the task (R113): lines that can still be corrected and removed. */
+    var subtasks by mutableStateOf(emptyList<String>())
+    /** What is in the field of the next subtask and has not been added. */
+    var subtask by mutableStateOf("")
+    /** The icon of subtasks was pressed: the field of the next subtask is on show. */
+    var subtasksShown by mutableStateOf(false)
 
     /** Whether closing the card would lose something (R97). The list and the size alone are not an entry. */
-    val hasContent: Boolean get() = hasContent(text, note, start, due, repeat != null, priority, picked.size)
+    val hasContent: Boolean
+        get() = hasContent(text, note, start, due, repeat != null, priority, picked.size, typedSubtasks(subtasks, subtask).size)
+
+    /** "Done" in the field of the next subtask: what is typed there becomes a line, an empty field adds none (R113). */
+    fun addSubtask() {
+        val title = subtask.trim()
+        if (title.isEmpty()) return
+        subtasks = subtasks + title
+        subtask = ""
+    }
 
     internal fun toSaved(): ArrayList<Any?> = arrayListOf(
         text, note, taken, start, due, dueRemoved, repeat?.toSaved(), priority?.name, listId,
-        ArrayList(picked.map(Uri::toString)), expanded,
+        ArrayList(picked.map(Uri::toString)), expanded, ArrayList(subtasks), subtask, subtasksShown,
     )
 
     companion object {
@@ -206,6 +235,9 @@ class NewTaskEntry(title: String = "", notes: String = "", listId: String? = nul
             priority = (saved[7] as String?)?.let(Priority::valueOf)
             picked = (saved[9] as List<String>).map(Uri::parse)
             expanded = saved[10] as Boolean
+            subtasks = saved[11] as List<String>
+            subtask = saved[12] as String
+            subtasksShown = saved[13] as Boolean
         }
 
         /** Saved, not just remembered: the card keeps what was entered when the screen is turned (R63). */
@@ -213,9 +245,11 @@ class NewTaskEntry(title: String = "", notes: String = "", listId: String? = nul
     }
 }
 
-/** Whether a new-task card holds something the person entered (R97). A priority chosen as "none" is a choice too. */
-internal fun hasContent(text: String, note: String, start: String?, due: String?, repeats: Boolean, priority: Priority?, files: Int): Boolean =
-    text.isNotBlank() || note.isNotBlank() || start != null || due != null || repeats || priority != null || files > 0
+/** Whether a new-task card holds something the person entered (R97). A priority chosen as "none" is a choice too, and a typed subtask is an entry (R113). */
+internal fun hasContent(
+    text: String, note: String, start: String?, due: String?, repeats: Boolean, priority: Priority?, files: Int, subtasks: Int = 0,
+): Boolean =
+    text.isNotBlank() || note.isNotBlank() || start != null || due != null || repeats || priority != null || files > 0 || subtasks > 0
 
 /**
  * The new-task card: title, note, dates, repeat, priority, files and the list.
@@ -273,6 +307,14 @@ fun NewTaskCard(
     val full = expanded || landscape
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { focus.requestFocus() }
+    // R113: the field for the first subtask comes with the cursor in it. Not saved: a card brought back or turned starts in its title.
+    val subtaskFocus = remember { FocusRequester() }
+    var subtaskAsked by remember { mutableStateOf(false) }
+    LaunchedEffect(subtaskAsked) { if (subtaskAsked) subtaskFocus.requestFocus() }
+    val showSubtasks = {
+        entry.subtasksShown = true
+        subtaskAsked = true
+    }
 
     // What the task gets from its list unless the person chooses; shown like a chosen value, so that it can be changed or removed (R75).
     val chosen = lists.firstOrNull { it.id == chosenList }
@@ -286,7 +328,12 @@ fun NewTaskCard(
 
     fun submit() {
         if (text.isBlank()) return
-        onSubmit(TaskDraft(text, note, start, due ?: preset, due == null && preset != null, dueRemoved, repeat, priority, chosenList, parse, attached))
+        onSubmit(
+            TaskDraft(
+                text, note, start, due ?: preset, due == null && preset != null, dueRemoved, repeat, priority, chosenList, parse, attached,
+                typedSubtasks(entry.subtasks, entry.subtask),
+            ),
+        )
         if (!keepOpen) return
         text = ""
         note = ""
@@ -296,6 +343,10 @@ fun NewTaskCard(
         repeat = null
         priority = null
         picked = emptyList()
+        entry.subtasks = emptyList()
+        entry.subtask = ""
+        entry.subtasksShown = false
+        subtaskAsked = false
         focus.requestFocus()
     }
 
@@ -349,6 +400,7 @@ fun NewTaskCard(
                 FieldRow(Icons.Outlined.Event, str(R.string.due), dueText) { dialog = "due" }
                 FieldRow(Icons.Outlined.Repeat, str(R.string.repeat), repeat?.summary()) { dialog = "repeat" }
                 FieldRow(Icons.Outlined.Flag, str(R.string.priority), shownPriority.takeIf { it != Priority.NONE }?.title()) { dialog = "priority" }
+                if (!entry.subtasksShown) FieldRow(Icons.Outlined.Checklist, str(R.string.subtask), null, showSubtasks)
                 FieldRow(Icons.Outlined.AttachFile, str(R.string.file_or_image), filesText) { pickFiles.launch("*/*") }
                 // Under a project there is nothing to choose: the parent decides the list.
                 if (listName != null) FieldRow(Icons.AutoMirrored.Outlined.List, str(R.string.list), listName) { dialog = "list" }
@@ -372,10 +424,12 @@ fun NewTaskCard(
                         if (dueText == null) LightIcon(Icons.Outlined.Event, str(R.string.due)) { dialog = "due" }
                         if (repeat == null) LightIcon(Icons.Outlined.Repeat, str(R.string.repeat)) { dialog = "repeat" }
                         if (shownPriority == Priority.NONE) LightIcon(Icons.Outlined.Flag, str(R.string.priority)) { dialog = "priority" }
+                        if (!entry.subtasksShown) LightIcon(Icons.Outlined.Checklist, str(R.string.subtask), showSubtasks)
                         LightIcon(Icons.Outlined.AttachFile, str(R.string.file_or_image)) { pickFiles.launch("*/*") }
                     },
                 )
             }
+            if (entry.subtasksShown) DraftSubtasks(entry, full, subtaskFocus)
         }
         if (!full) {
             HorizontalDivider(Modifier.padding(top = 6.dp), color = MaterialTheme.colorScheme.outlineVariant)
@@ -413,6 +467,57 @@ fun NewTaskCard(
         "repeat" -> RepeatDialog(repeat, onPick = { repeat = it }) { dialog = null }
         "priority" -> ChoiceDialog(str(R.string.priority), priorities.map { it.title() }, priorities.indexOf(shownPriority), { dialog = null }) { priority = priorities[it] }
         "list" -> ChoiceDialog(str(R.string.list), lists.map { it.displayName() }, lists.indexOfFirst { it.id == chosenList }, { dialog = null }) { chosenList = lists[it].id }
+    }
+}
+
+/** The most the typed subtasks of the compact card take before they scroll inside it: the title stays above the keyboard (R64). */
+private val COMPACT_SUBTASKS_HEIGHT = 144.dp
+
+/**
+ * R113: the subtasks typed for a task that does not exist yet. Each is a line with a title that can be
+ * corrected and removed; under them is the field of the next one, where "Done" adds the line and leaves the cursor.
+ */
+@Composable
+private fun DraftSubtasks(entry: NewTaskEntry, full: Boolean, focus: FocusRequester) {
+    val scroll = rememberScrollState()
+    // The line just added is the one in view.
+    LaunchedEffect(entry.subtasks.size) { scroll.scrollTo(scroll.maxValue) }
+    // Compact, the lines begin where the note does.
+    Column(Modifier.padding(start = if (full) 4.dp else 34.dp)) {
+        Column(if (full) Modifier else Modifier.heightIn(max = COMPACT_SUBTASKS_HEIGHT).verticalScroll(scroll)) {
+            entry.subtasks.forEachIndexed { index, title ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) { Mark(MarkState.Open, null, round = true) }
+                    TextField(
+                        value = title,
+                        onValueChange = { typed -> entry.subtasks = entry.subtasks.toMutableList().also { it[index] = typed } },
+                        placeholder = { Text(str(R.string.subtask)) },
+                        singleLine = true,
+                        colors = transparentField(),
+                        keyboardOptions = SentenceKeyboard.copy(imeAction = ImeAction.Done),
+                        keyboardActions = KeyboardActions(onDone = { focus.requestFocus() }),
+                        modifier = Modifier.weight(1f),
+                    )
+                    IconButton(onClick = { entry.subtasks = entry.subtasks.filterIndexed { at, _ -> at != index } }) {
+                        Icon(Icons.Outlined.Close, str(R.string.remove))
+                    }
+                }
+            }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = { entry.addSubtask() }, enabled = entry.subtask.isNotBlank()) { Icon(Icons.Outlined.Add, str(R.string.add_subtask)) }
+            TextField(
+                value = entry.subtask,
+                onValueChange = { entry.subtask = it },
+                placeholder = { Text(str(R.string.subtask)) },
+                singleLine = true,
+                colors = transparentField(),
+                keyboardOptions = SentenceKeyboard.copy(imeAction = ImeAction.Done),
+                // The keyboard stays: the next subtask is typed at once.
+                keyboardActions = KeyboardActions(onDone = { entry.addSubtask() }),
+                modifier = Modifier.weight(1f).focusRequester(focus),
+            )
+        }
     }
 }
 

@@ -23,8 +23,27 @@ struct TaskDraft: Equatable {
     var parentId: String?
     /// Attached once the task exists.
     var files: [URL] = []
+    /// The subtasks typed in the card (R113): they are created with the task, in this order.
+    var subtasks: [String] = []
+    /// What is in the field of the next subtask and has not been added.
+    var subtaskText = ""
+    /// The icon of subtasks was pressed: the field of the next subtask is on show.
+    var subtasksShown = false
 
     var isBlank: Bool { title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+    /// Return in the field of the next subtask: what is typed there becomes a line, an empty field adds none (R113).
+    mutating func addSubtask() {
+        let title = subtaskText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { return }
+        subtasks.append(title)
+        subtaskText = ""
+    }
+
+    /// The subtasks the saved task gets: the lines, then what was left in the field. A line emptied in the card is not one.
+    var typedSubtasks: [String] {
+        (subtasks + [subtaskText]).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+    }
 }
 
 /// A button of the strip of the quick-entry panel: a capsule with bold white text (R82).
@@ -71,6 +90,7 @@ struct DraftEditor: View {
     @State private var menus = MenuAnchors()
     @FocusState private var titleFocused: Bool
     @FocusState private var chip: CardChip?
+    @FocusState private var subtaskFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -88,6 +108,7 @@ struct DraftEditor: View {
                 Group {
                     notes
                     fields
+                    if draft.subtasksShown { subtasks }
                     if !draft.files.isEmpty { files }
                 }
                 .padding(.leading, 26)
@@ -131,9 +152,17 @@ struct DraftEditor: View {
         .onChange(of: pasteShown) { _, _ in onResize() }
         // A chip that is gone, a tag just removed for one, hands the keyboard to the chip that took its place.
         .onChange(of: stops) { before, now in
-            guard let chip, !now.contains(chip), let index = before.firstIndex(of: chip) else { return }
+            // The icon of subtasks goes because its field came: the keyboard is for the field.
+            guard let chip, chip != .subtask, !now.contains(chip), let index = before.firstIndex(of: chip) else { return }
             self.chip = now[min(index, now.count - 1)]
         }
+        // R113: the field for the first subtask comes with the cursor in it.
+        .onChange(of: draft.subtasksShown) { _, shown in
+            // On the next turn: the icon that had the keyboard is taken away first, and the keyboard goes on to its neighbour.
+            if shown { DispatchQueue.main.async { subtaskFocused = true } }
+            onResize()
+        }
+        .onChange(of: draft.subtasks.count) { _, _ in onResize() }
         .reportsCard("draft", chip: chip, popover: popover.map { "\($0)" })
         .onChange(of: draft.notes) { _, _ in onResize() }
         .onChange(of: draft.tags) { _, _ in onResize() }
@@ -264,6 +293,39 @@ struct DraftEditor: View {
         }
     }
 
+    /// The subtasks typed for the task that does not exist yet (R113): each a line that can be corrected and removed,
+    /// and under them the field of the next one. The titles are taken as typed; quick entry is not read in them.
+    private var subtasks: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(draft.subtasks.indices, id: \.self) { index in
+                HStack(spacing: 6) {
+                    Image(systemName: "square").fontWeight(.light).foregroundStyle(.tertiary)
+                    TextField(L("Subtask"), text: Binding(
+                        get: { draft.subtasks.indices.contains(index) ? draft.subtasks[index] : "" },
+                        set: { if draft.subtasks.indices.contains(index) { draft.subtasks[index] = $0 } }))
+                        .textFieldStyle(.plain)
+                        .onSubmit { subtaskFocused = true }
+                    Button { draft.subtasks.remove(at: index) } label: {
+                        Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary)
+                    }
+                    .buttonStyle(.plain)
+                    .help(L("Remove"))
+                }
+            }
+            HStack(spacing: 6) {
+                Image(systemName: "plus.circle").foregroundStyle(.tertiary)
+                TextField(L("Subtask"), text: $draft.subtaskText)
+                    .textFieldStyle(.plain)
+                    .focused($subtaskFocused)
+                    .onSubmit {
+                        draft.addSubtask()
+                        subtaskFocused = true
+                    }
+            }
+        }
+        .font(AppFont.style(.callout))
+    }
+
     /// The chips of the two sides of the row: what is set stands at the left with its value, the rest at the right as icons (R82).
     private struct Sides: Equatable {
         var left: [CardChip]
@@ -277,7 +339,7 @@ struct DraftEditor: View {
         ]
         return Sides(
             left: dated.filter(\.1).map(\.0) + draft.tags.map(CardChip.tag) + (draft.parentId == nil && !footer ? [.list] : []),
-            right: dated.filter { !$0.1 }.map(\.0) + [.newTag, .file])
+            right: dated.filter { !$0.1 }.map(\.0) + [.newTag] + (draft.subtasksShown ? [] : [.subtask]) + [.file])
     }
 
     /// The chips in the order they are drawn, which is the order Tab walks them in (R62).
@@ -389,6 +451,11 @@ struct DraftEditor: View {
                 .chipStop(.newTag, focus: $chip, keys: keys) { popover = .tag }
         case .list:
             listMenu(strong: false)
+        case .subtask:
+            Button { draft.subtasksShown = true } label: { Chip(symbol: "checklist", text: "", plain: true) }
+                .buttonStyle(.plain)
+                .help(L("Subtask"))
+                .chipStop(.subtask, focus: $chip, keys: keys) { draft.subtasksShown = true }
         case .file:
             Button { add(IncomingFiles.pick()) } label: { Chip(symbol: "paperclip", text: "", plain: true) }
                 .buttonStyle(.plain)

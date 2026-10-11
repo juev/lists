@@ -30,10 +30,12 @@ import UserNotifications
 /// `submenu:title` (prints the items of the menu of that subtask, the ones a right click on it builds its menu from; `submenu:title=Item` also chooses the item),
 /// `find:text` (searches the way typing in the search field does, `find:` ends the search),
 /// `newtask` (opens the card of a new task), `title:text` (fills its title), `finish` (closes it the way Return does: a card with a title becomes a task),
+/// `draftsub:title` (adds a subtask to the new-task card the way its icon of subtasks, typing and Return in the field do, R113), `draftsubfield:text` (leaves the text in
+/// that field without adding it), `draftsubedit:0=title` (corrects the typed line with that number) and `draftsubdrop:0` (removes it the way its button does); `draft` also prints the typed subtasks and the field,
 /// `due:2026-10-05` and `repeat:2` (give the new-task card a due date and the preset with that index, the way its popovers do),
 /// `due` alone (takes the due date away the way ⌫ in its popover does), `priority:3` (chooses the priority with that index in the card, 0 for none),
 /// `mklist:Name` (creates a list whose defaults for new tasks are the high priority and "due today"), `draftlist:Name` (chooses that list in the card, `draftlist:inbox` the Inbox), `start:2026-10-05` (gives the card a start date); `draft` also prints the due date, the priority, the tags and the list the card shows,
-/// `task` (prints the due date, the priority, the tags and the repeat of the selected task), `done` (completes it),
+/// `task` (prints the due date, the priority, the tags and the repeat of the selected task), `done` (completes it), `project` (makes it a project, or a task again, the way its menu does),
 /// `cards` (prints the open cards and the selected row), `rows` (prints the rows in the order they are drawn), `panel` (prints whether quick entry is on screen and what runs modally),
 /// `windows` (prints the windows of the app),
 /// `notes` (prints the note of the open card as it is drawn: what is hidden, what is replaced and which fonts differ),
@@ -48,7 +50,7 @@ import UserNotifications
 /// `chips` (prints which chip of the card has the keyboard and which of its popovers is open; `key:backtab+shift` is ⇧Tab),
 /// `ghost` (puts the windows of a hidden app on screen transparent, deaf to the mouse and without the keyboard, popovers that open later among them:
 /// a hidden app shows no popovers; key presses then go to the open popover first, as they do when it has the keyboard),
-/// `wont` (closes the selected task as "won't do"; `task` prints the state of the selected task), `go:completed`, `go:wontdo`, `go:today`, `go:#tag` and `go:List name` (switch to those views),
+/// `wont` (closes the selected task as "won't do"; `task` prints the state of the selected task), `go:completed`, `go:wontdo`, `go:today`, `go:#tag`, `go:List name` and `go:Project title` (switch to those views),
 /// `completedview:on` and `completedview:off` (show the Completed and Won't do views always or never), `sidebarshow:wontDo=filled` (sets when a built-in view has a row in the sidebar: `always`, `filled` or `never`; `sidebarshow` alone prints the built-in rows there are), `scope` (prints the current view), `quit` (quits the app the way ⌘Q does), `search` (prints whether search is open as a field and its text),
 /// `calendarevents` (prints the setting of R78, the access the system gave, and how many calendars are listed and hidden; nothing is asked of the system),
 /// `events:14:30=Bank,-=Birthday,09:00=Standup,y=Trip` (puts those events through the order of the block in place of the calendars of the system:
@@ -73,7 +75,7 @@ import UserNotifications
 /// `clipnotes:on` and `clipnotes:off` (flip the setting of R58), `quicknote` (shows quick entry transparent and without the keyboard, and prints the note it starts with; `quicknote:/path.png` also draws the card into a file),
 /// `veil` (makes the windows of the app transparent and deaf to the mouse and leaves the app hidden) and
 /// `hideapp` (hides the app the way Hide Lists does), `unhideapp` (shows it again without making it active),
-/// `quickopen` and `quickclose` (show quick entry transparent and without the keyboard, and close it),
+/// `quickopen` and `quickclose` (show quick entry transparent and without the keyboard, and close it; while it is open that way, `type` and `key` go to its card),
 /// `apphidden` (prints whether the app is hidden, whether it is active and how many of its main windows are ordered in),
 /// `quicktrace` (shows quick entry transparent and without the keyboard, and prints its geometry frame by frame:
 /// a line that differs from the next one is a card that moved after it was shown).
@@ -153,6 +155,7 @@ enum DebugScript {
                     if let draft {
                         let model = AppModel.shared
                         print("debug: draft shows due \(model.shownDue(draft) ?? "none"), priority \(model.shownPriority(draft).title), tags \(draft.tags), list \(model.list(draft.listId).map(model.listName) ?? "none")")
+                        print("debug: draft subtasks \(draft.subtasks), field \"\(draft.subtaskText)\", \(draft.subtasksShown ? "shown" : "not shown"), saves \(draft.typedSubtasks)")
                     }
                 case "code":
                     // A press on the keyboard comes with the window a popover hangs on, not with the popover.
@@ -261,6 +264,20 @@ enum DebugScript {
                 case "newtask": AppModel.shared.startDraft()
                 case "title": AppModel.shared.draft?.title = argument
                 case "finish": AppModel.shared.finishDraft()
+                case "draftsub", "draftsubfield":
+                    // The same calls as a click on the icon of subtasks, typing, and Return in the field (R113).
+                    AppModel.shared.draft?.subtasksShown = true
+                    AppModel.shared.draft?.subtaskText = argument
+                    if name == "draftsub" { AppModel.shared.draft?.addSubtask() }
+                case "draftsubedit":
+                    let parts = argument.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
+                    if let index = Int(parts[0]), AppModel.shared.draft?.subtasks.indices.contains(index) == true {
+                        AppModel.shared.draft?.subtasks[index] = parts.count > 1 ? parts[1] : ""
+                    }
+                case "draftsubdrop":
+                    if let index = Int(argument), AppModel.shared.draft?.subtasks.indices.contains(index) == true {
+                        AppModel.shared.draft?.subtasks.remove(at: index)
+                    }
                 case "due":
                     AppModel.shared.draft?.due = argument.isEmpty ? nil : argument
                     AppModel.shared.draft?.dueRemoved = argument.isEmpty
@@ -279,6 +296,9 @@ enum DebugScript {
                 case "start": AppModel.shared.draft?.start = argument.isEmpty ? nil : argument
                 case "repeat":
                     if let index = Int(argument), Repeat.presets.indices.contains(index) { AppModel.shared.draft?.repeat = Repeat.presets[index].1 }
+                case "project":
+                    // What "Make project" of the menu of the selected task does.
+                    if let task = AppModel.shared.selectedTask { AppModel.shared.perform { try $0.setProject(id: task.id, project: !task.isProject) } }
                 case "done": AppModel.shared.selectedTask.map(AppModel.shared.toggleDone)
                 case "wont": AppModel.shared.selectedTask.map(AppModel.shared.wontDo)
                 case "task":
@@ -292,7 +312,9 @@ enum DebugScript {
                     case "completed": model.scope = .completed
                     case "today": model.scope = .today
                     case _ where argument.hasPrefix("#"): model.scope = .tag(name: String(argument.dropFirst()))
-                    default: model.scope = model.lists.first { $0.name == argument }.map { .list(id: $0.id) } ?? .inbox
+                    default:
+                        model.scope = model.lists.first { $0.name == argument }.map { .list(id: $0.id) }
+                            ?? model.projects.first { $0.title == argument }.map { .project(id: $0.id) } ?? .inbox
                     }
                 case "completedview":
                     for scope in [Scope.completed, .wontDo] { AppModel.shared.setSidebarShow(scope, argument != "off" ? .always : .never) }
@@ -651,7 +673,12 @@ enum DebugScript {
 
     /// The window the script types into: the key window, or the main window of
     /// an app that was left in the background.
-    static var target: NSWindow? { NSApp.keyWindow ?? (ghost ? popoverWindow : nil) ?? backgroundWindow }
+    static var target: NSWindow? { NSApp.keyWindow ?? (ghost ? popoverWindow : nil) ?? silentQuickEntry ?? backgroundWindow }
+
+    /// Quick entry while `quickopen` has it on show without the keyboard: the key presses of the script are for its card.
+    private static var silentQuickEntry: NSWindow? {
+        QuickEntryPanel.debugSilent && QuickEntryPanel.shared.isVisible ? QuickEntryPanel.shared : nil
+    }
 
     /// True after `ghost`: the windows are on screen, unseen.
     private static var ghost = false
