@@ -380,3 +380,9 @@
 "Detailed" = "Подробно";
 "Show in Finder" = "Показать в Finder";
 "The log is a text file on this Mac. It holds what the app did and the text of errors, not what the tasks say." = "Журнал — текстовый файл на этом Mac. В нём то, что делало приложение, и тексты ошибок, но не содержимое задач.";
+"Start" = "Запуск";
+"Open Lists at login" = "Открывать Lists при входе в систему";
+"Quick entry without opening Lists" = "Быстрый ввод без запуска Lists";
+"A helper starts at login and answers the shortcut while Lists is not running. A task written this way is synced when Lists is opened." = "При входе в систему запускается помощник: он отвечает на сочетание клавиш, пока Lists не запущен. Записанная так задача синхронизируется, когда Lists открыт.";
+"The system refused: %@" = "Система отказала: %@";
+"Allow it in System Settings → General → Login Items." = "Разрешите в Системных настройках → Основные → Объекты входа.";

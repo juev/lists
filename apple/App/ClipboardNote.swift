@@ -20,7 +20,7 @@ enum ClipboardNote {
     }
 
     /// The text to start the note with, or nil when there is none or it was offered before.
-    static func take(from pasteboard: NSPasteboard = ClipboardNote.pasteboard, defaults: UserDefaults = .standard) -> String? {
+    static func take(from pasteboard: NSPasteboard = ClipboardNote.pasteboard, defaults: UserDefaults = Storage.defaults) -> String? {
         guard let types = pasteboard.types, !types.contains(.fileURL),
               !types.contains(where: { concealed.contains($0.rawValue) }) else { return nil }
         let copied = pasteboard.string(forType: .string) ?? pasteboard.string(forType: .URL)

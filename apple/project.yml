@@ -43,6 +43,30 @@ targets:
       - package: KeyboardShortcuts
       - target: ListsShare
         embed: true
+      # R115: the system starts a login item from this place in the bundle.
+      - target: ListsHelper
+        embed: true
+        copy:
+          destination: wrapper
+          subpath: Contents/Library/LoginItems
+  ListsHelper:
+    type: application
+    platform: macOS
+    sources:
+      - App
+      - Helper
+      - Shared
+      - path: Generated/lists_core.swift
+        group: Generated
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.evsyukov.lists.helper
+        INFOPLIST_FILE: Helper/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Helper/ListsHelper.entitlements
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) LISTS_HELPER
+        SKIP_INSTALL: YES
+    dependencies:
+      - package: KeyboardShortcuts
   ListsShare:
     type: app-extension
     platform: macOS
