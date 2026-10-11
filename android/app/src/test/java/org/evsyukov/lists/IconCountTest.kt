@@ -24,4 +24,18 @@ class IconCountTest {
         assertEquals(0, IconCount.number("today", today = 0u, overdue = 0u))
         assertEquals(0, IconCount.number("overdue", today = 3u, overdue = 0u))
     }
+
+    @Test
+    fun r106_the_update_turns_the_list_on_for_a_person_who_had_only_the_count() {
+        assertEquals(true, IconCount.turnsListOn("today", listOn = false, merged = false))
+        assertEquals(true, IconCount.turnsListOn("overdue", listOn = false, merged = false))
+    }
+
+    @Test
+    fun r106_the_update_leaves_the_list_alone_otherwise() {
+        assertEquals(false, IconCount.turnsListOn("none", listOn = false, merged = false))
+        assertEquals(false, IconCount.turnsListOn("today", listOn = true, merged = false))
+        // Once: a person who turns the list off after the update keeps it off.
+        assertEquals(false, IconCount.turnsListOn("today", listOn = false, merged = true))
+    }
 }

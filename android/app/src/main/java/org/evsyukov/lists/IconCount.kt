@@ -1,28 +1,23 @@
 package org.evsyukov.lists
 
 import android.app.AlarmManager
-import android.app.Notification
-import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
-import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
-import android.os.Build
 import kotlinx.coroutines.launch
-import java.time.LocalDate
-import java.time.ZoneId
 
 /**
  * R106: the count on the launcher icon. A launcher takes the badge of an app
- * from its notifications only, so the count is carried by a silent
- * notification of its own. A setting of this device; not synced.
+ * from its notifications only, and the count is carried by the notification
+ * with the tasks of Today (R104): there is no notification that shows the
+ * count alone. A setting of this device; not synced.
  */
 object IconCount {
-    private const val CHANNEL = "icon_count"
-    private const val ID = 106
-    private const val MIDNIGHT = "org.evsyukov.lists.ICON_COUNT.MIDNIGHT"
+    /** The channel, the notification and the alarm of the builds that had a notification for the count alone. */
+    private const val OLD_CHANNEL = "icon_count"
+    private const val OLD_ID = 106
+    private const val OLD_MIDNIGHT = "org.evsyukov.lists.ICON_COUNT.MIDNIGHT"
 
     /** What can be counted, in the order the settings offer it. */
     val choices = listOf("today", "overdue", "none")
@@ -32,7 +27,7 @@ object IconCount {
 
     fun setChoice(context: Context, value: String) {
         prefs(context).edit().putString("choice", value).apply()
-        Repo.scope.launch { refresh(context.applicationContext) }
+        Repo.scope.launch { TodayNotice.refresh(context.applicationContext) }
     }
 
     /** The number the icon carries; zero when there is nothing to show. */
@@ -43,71 +38,30 @@ object IconCount {
     }
 
     /**
-     * Shows the notification with the count as it is now, or takes it away
-     * when there is nothing to count. Reads the store: call it off the main thread.
+     * Whether the update from a build with two notifications turns the notification with the tasks on:
+     * once, for a person who had the count and not the list, so that the number does not go away.
      */
-    @Synchronized
-    fun refresh(context: Context) {
-        val manager = context.getSystemService(NotificationManager::class.java) ?: return
-        val alarms = context.getSystemService(AlarmManager::class.java)
-        val midnight = PendingIntent.getBroadcast(
-            context, 0, Intent(context, IconCountReceiver::class.java).setAction(MIDNIGHT),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
-        val choice = choice(context)
-        if (choice == "none") {
-            manager.cancel(ID)
-            alarms?.cancel(midnight)
-            return
-        }
-        // What is due today and what is overdue change with the day, not with a change of the data.
-        val nextDay = LocalDate.now().plusDays(1).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
-        alarms?.let { Reminders.atDayChange(context, it, nextDay + 1000, midnight) }
-        if (Build.VERSION.SDK_INT >= 33 &&
-            context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-        ) return
-        val counts = runCatching { Repo.store.counts() }.getOrElse { return }
-        val number = number(choice, counts.today, counts.overdue)
-        if (number == 0) {
-            manager.cancel(ID)
-            return
-        }
-        manager.createNotificationChannel(
-            NotificationChannel(CHANNEL, context.getString(R.string.icon_count), NotificationManager.IMPORTANCE_LOW)
-        )
-        val app = PendingIntent.getActivity(
-            context, 0, Intent(context, MainActivity::class.java).setAction("today"),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
-        // Since Android 14 an ongoing notification can be swiped away: it is put back at once.
-        val swiped = PendingIntent.getBroadcast(
-            context, 0, Intent(context, IconCountReceiver::class.java),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
-        val title = if (choice == "overdue") R.string.icon_count_overdue else R.string.today_notice_title
-        manager.notify(
-            ID,
-            Notification.Builder(context, CHANNEL)
-                .setSmallIcon(R.drawable.ic_check)
-                .setContentTitle(context.getString(title, number.toString()))
-                .setNumber(number)
-                .setOngoing(true)
-                .setOnlyAlertOnce(true)
-                .setShowWhen(false)
-                .setContentIntent(app)
-                .setDeleteIntent(swiped)
-                .build(),
-        )
-    }
-}
+    internal fun turnsListOn(choice: String, listOn: Boolean, merged: Boolean): Boolean =
+        !merged && choice != "none" && !listOn
 
-/** Puts the notification back after a swipe and renews it when the day changes (R106). */
-class IconCountReceiver : BroadcastReceiver() {
-    override fun onReceive(context: Context, intent: Intent) {
-        val result = goAsync()
-        Repo.scope.launch {
-            IconCount.refresh(context.applicationContext)
-            result.finish()
-        }
+    /**
+     * Takes away what the builds with a notification for the count alone left, and carries the choice
+     * of a person who had only the count over to the one notification. Run before that one is shown.
+     */
+    fun merge(context: Context) {
+        val prefs = prefs(context)
+        val merged = prefs.getBoolean("merged", false)
+        if (turnsListOn(choice(context), TodayNotice.enabled(context), merged)) TodayNotice.turnOn(context)
+        if (merged) return
+        prefs.edit().putBoolean("merged", true).apply()
+        val manager = context.getSystemService(NotificationManager::class.java) ?: return
+        manager.cancel(OLD_ID)
+        manager.deleteNotificationChannel(OLD_CHANNEL)
+        context.getSystemService(AlarmManager::class.java)?.cancel(
+            PendingIntent.getBroadcast(
+                context, 0, Intent(context, TodayNoticeReceiver::class.java).setAction(OLD_MIDNIGHT),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+        )
     }
 }

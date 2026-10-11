@@ -17,13 +17,21 @@ import java.time.ZoneId
 
 /**
  * R104: an ongoing notification that lists the tasks of Today and has a
- * button for quick entry. A setting of this device; not synced.
+ * button for quick entry. It is the only ongoing notification of the app and
+ * carries the count on the launcher icon as well (R106). A setting of this
+ * device; not synced.
  */
 object TodayNotice {
-    private const val CHANNEL = "today_notice"
+    /**
+     * Whether a channel badges the icon is fixed when the channel is made, and a notification in a
+     * channel with a badge marks the icon whatever its number. So there are two: the notification
+     * stands in the first while there is a number for the icon and in the second otherwise.
+     */
+    private const val COUNTED = "today_counted"
+    private const val PLAIN = "today_plain"
 
-    /** The channel of the builds before R106. It badged the icon, and an app cannot take that back from a channel that exists. */
-    private const val OLD_CHANNEL = "quick_add"
+    /** The channels of earlier builds: one badged the icon always and one never. */
+    private val OLD_CHANNELS = listOf("quick_add", "today_notice")
     private const val ID = 104
     private const val MIDNIGHT = "org.evsyukov.lists.TODAY_NOTICE.MIDNIGHT"
 
@@ -38,6 +46,19 @@ object TodayNotice {
         Repo.scope.launch { refresh(context.applicationContext) }
     }
 
+    /** The switch alone, for the update that carries the count over (R106); the caller shows the notification. */
+    internal fun turnOn(context: Context) = prefs(context).edit().putBoolean("enabled", true).apply()
+
+    /** What the heading says: nothing for today, the overdue tasks when they are what the icon counts, or the tasks of Today. */
+    internal enum class Heading { EMPTY, OVERDUE, TODAY }
+
+    /** R104, R106: the heading and the number on the icon agree. With "overdue" chosen both say how many are overdue. */
+    internal fun heading(choice: String, open: Int, overdue: Int): Heading = when {
+        open == 0 -> Heading.EMPTY
+        choice == "overdue" && overdue > 0 -> Heading.OVERDUE
+        else -> Heading.TODAY
+    }
+
     /** The titles that are listed and how many are left out. */
     internal fun listed(titles: List<String>, limit: Int = LIMIT): Pair<List<String>, Int> =
         titles.take(limit) to (titles.size - limit).coerceAtLeast(0)
@@ -49,7 +70,8 @@ object TodayNotice {
     @Synchronized
     fun refresh(context: Context) {
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
-        manager.deleteNotificationChannel(OLD_CHANNEL)
+        OLD_CHANNELS.forEach(manager::deleteNotificationChannel)
+        IconCount.merge(context)
         val alarms = context.getSystemService(AlarmManager::class.java)
         val midnight = PendingIntent.getBroadcast(
             context, 0, Intent(context, TodayNoticeReceiver::class.java).setAction(MIDNIGHT),
@@ -70,9 +92,15 @@ object TodayNotice {
         val open = runCatching { Repo.store.tasks(Scope.Today) }.getOrElse { return }.filter { it.done == null }
         val (overdue, rest) = open.partition { dueDayPassed(it.due) }
         val (titles, more) = listed((overdue + rest).map { it.title })
-        // R106: the count on the icon has a notification of its own; this one is not counted.
+        // R106: the number of the icon, and the channel that goes with having one.
+        val choice = IconCount.choice(context)
+        val number = IconCount.number(choice, open.size.toUInt(), overdue.size.toUInt())
         manager.createNotificationChannel(
-            NotificationChannel(CHANNEL, context.getString(R.string.quick_add_channel), NotificationManager.IMPORTANCE_LOW)
+            NotificationChannel(COUNTED, context.getString(R.string.quick_add_counted_channel), NotificationManager.IMPORTANCE_LOW)
+                .apply { setShowBadge(true) }
+        )
+        manager.createNotificationChannel(
+            NotificationChannel(PLAIN, context.getString(R.string.quick_add_channel), NotificationManager.IMPORTANCE_LOW)
                 .apply { setShowBadge(false) }
         )
         val app = PendingIntent.getActivity(
@@ -89,12 +117,16 @@ object TodayNotice {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         val lines = if (more > 0) titles + context.getString(R.string.today_notice_more, more.toString()) else titles
-        val builder = Notification.Builder(context, CHANNEL)
+        val builder = Notification.Builder(context, if (number > 0) COUNTED else PLAIN)
             .setSmallIcon(R.drawable.ic_check)
             .setContentTitle(
-                if (open.isEmpty()) context.getString(R.string.today_notice_empty)
-                else context.getString(R.string.today_notice_title, open.size.toString())
+                when (heading(choice, open.size, overdue.size)) {
+                    Heading.EMPTY -> context.getString(R.string.today_notice_empty)
+                    Heading.OVERDUE -> context.getString(R.string.icon_count_overdue, overdue.size.toString())
+                    Heading.TODAY -> context.getString(R.string.today_notice_title, open.size.toString())
+                }
             )
+            .setNumber(number)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setShowWhen(false)

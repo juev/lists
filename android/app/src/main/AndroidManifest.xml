@@ -112,7 +112,6 @@
 
         <receiver android:name=".ReminderReceiver" android:exported="false" />
         <receiver android:name=".TodayNoticeReceiver" android:exported="false" />
-        <receiver android:name=".IconCountReceiver" android:exported="false" />
 
         <!-- R107: the widgets with tasks; two sizes of the same widget. -->
         <receiver

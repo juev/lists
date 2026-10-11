@@ -1187,9 +1187,9 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
                                 if (it) onNotifications()
                             }
                             Text(str(R.string.today_notice_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            // R106: like R104, not under the switch of the reminders.
+                            // R106: like R104, not under the switch of the reminders. The number is carried by the notification above.
                             SettingRow(str(R.string.icon_count), iconCountLabels[IconCount.choices.indexOf(iconCount)]) { choosing = "iconCount" }
-                            Text(str(R.string.icon_count_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(str(if (todayNotice || iconCount == "none") R.string.icon_count_hint else R.string.icon_count_needs_notice), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         "sync" -> {
                             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
