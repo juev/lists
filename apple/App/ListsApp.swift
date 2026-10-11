@@ -84,6 +84,8 @@ struct AppCommands: Commands {
     @Environment(\.openWindow) private var openWindow
 
     private var selected: TaskItem? { model.selectedTask }
+    /// The selected task when it can carry a date; a subtask cannot (R10).
+    private var dated: TaskItem? { selected.flatMap { model.isSubtask($0) ? nil : $0 } }
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
@@ -113,19 +115,12 @@ struct AppCommands: Commands {
                 .keyboardShortcut(.return)
                 .disabled(selected == nil)
             Divider()
-            Button(L("Due today")) { selected.map { model.setDue($0, Moment.today()) } }
+            Button(L("Due today")) { dated.map { model.setDue($0, Moment.today()) } }
                 .keyboardShortcut("t")
-                .disabled(selected == nil)
-            Button(L("Due tomorrow")) { selected.map { model.setDue($0, shiftDate(date: Moment.today(), days: 1)) } }
+                .disabled(dated == nil)
+            Button(L("Due tomorrow")) { dated.map { model.setDue($0, shiftDate(date: Moment.today(), days: 1)) } }
                 .keyboardShortcut("t", modifiers: [.command, .shift])
-                .disabled(selected == nil)
-            Divider()
-            Button(L("Make subtask of the one above")) { selected.map(model.indent) }
-                .keyboardShortcut("]")
-                .disabled(selected == nil)
-            Button(L("Move up a level")) { selected.map(model.outdent) }
-                .keyboardShortcut("[")
-                .disabled(selected?.parentId == nil)
+                .disabled(dated == nil)
         }
         CommandMenu(L("Go")) {
             scope(L("Inbox"), .inbox, "1")

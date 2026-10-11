@@ -318,7 +318,10 @@ struct Sidebar: View {
                         .font(AppFont.style(.body))
                         .tag(Scope.project(id: project.id))
                         .contextMenu {
-                            Button(L("Turn back into a task")) { model.perform { try $0.setProject(id: project.id, project: false) } }
+                            // R32: only an empty project; its tasks would become subtasks and lose their fields.
+                            if project.subtasksTotal == 0 {
+                                Button(L("Turn back into a task")) { model.perform { try $0.setProject(id: project.id, project: false) } }
+                            }
                         }
                     }
                 }
