@@ -114,7 +114,10 @@ enum HelperAgent {
         guard loaded else { return }
         launchctl("bootout", service)
         // The agent leaves a moment after the answer; it cannot be handed over again before that.
-        for _ in 0..<40 where loaded { usleep(50_000) }
+        for _ in 0..<40 {
+            if !loaded { break }
+            usleep(50_000)
+        }
     }
 
     static func set(on: Bool) throws {

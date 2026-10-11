@@ -102,6 +102,8 @@ final class AppModel {
     /// reads again what Lists holds, since the settings may have changed while it was running.
     func reloadSettings() {
         let defaults = Storage.defaults
+        // What is assigned below is written back: it must be what Lists wrote last, not what this program remembers.
+        defaults.synchronize()
         textScale = defaults.object(forKey: AppFont.scaleKey).flatMap { ($0 as? Double) ?? ($0 as? String).flatMap(Double.init) } ?? 1.0
         fontDesign = defaults.string(forKey: AppFont.designKey) ?? "default"
         appearance = defaults.string(forKey: "appearance") ?? "system"
