@@ -35,8 +35,13 @@ version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/
 dmg="$root/dist/Lists-$version-macos-arm64.dmg"
 
 codesign --verify --deep --strict "$app"
+# The helper of quick entry is a login item: the system looks for it in this place only.
+if [ ! -d "$app/Contents/Library/LoginItems/ListsHelper.app" ]; then
+    echo "macos: the helper of quick entry is not in the app" >&2
+    exit 1
+fi
 if [ "$LISTS_SIGN_IDENTITY" != "-" ]; then
-    for bundle in "$app" "$app/Contents/PlugIns/ListsShare.appex"; do
+    for bundle in "$app" "$app/Contents/PlugIns/ListsShare.appex" "$app/Contents/Library/LoginItems/ListsHelper.app"; do
         signature="$(codesign --display --verbose=2 "$bundle" 2>&1)"
         if [[ "$signature" != *"(runtime)"* ]]; then
             echo "macos: $bundle is signed without the hardened runtime" >&2

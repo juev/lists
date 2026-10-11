@@ -2,7 +2,10 @@ import AppKit
 import KeyboardShortcuts
 import SwiftUI
 
+// The helper of quick entry is built from the same sources and has an entry point of its own (R115).
+#if !LISTS_HELPER
 @main
+#endif
 struct ListsApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @State private var model = AppModel.shared
@@ -34,6 +37,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         KeyboardShortcuts.onKeyUp(for: .quickEntry) { QuickEntryPanel.shared.toggle() }
         MainActor.assumeIsolated { QuickEntryPanel.shared.watchHiding() }
+        LoginItems.takeKeyBackFromHelper()
         NSApp.servicesProvider = self
         AttachmentFiles.clear()
         MainActor.assumeIsolated { AppModel.shared.applyAppearance(); AppModel.shared.applyDockCount() }
@@ -253,6 +257,20 @@ struct SettingsView: View {
     @State private var joining: SyncConfig?
     @State private var replacing: Replacement?
 
+    /// R115: why a login item is not on although it was asked for, and the way to the place where the system keeps them.
+    @ViewBuilder
+    private func loginItemNote(_ item: LoginItems.Item, state: LoginItems.State) -> some View {
+        let refusal = model.loginItemRefusal[item]
+        if state == .needsApproval || refusal != nil {
+            HStack(alignment: .firstTextBaseline) {
+                Text(refusal.map { L("The system refused: %@", $0) } ?? L("Allow it in System Settings → General → Login Items."))
+                    .font(AppFont.style(.caption)).foregroundStyle(.orange)
+                Spacer()
+                Button(L("Open System Settings…")) { LoginItems.openSystemSettings() }
+            }
+        }
+    }
+
     var body: some View {
         // R101: five tabs. The state of every tab lives in this view, so what is typed under Sync stays while the window is open.
         TabView(selection: $tab) {
@@ -290,9 +308,14 @@ struct SettingsView: View {
                         }
                     }
                 }
+                Section(L("Start")) {
+                    Toggle(L("Open Lists at login"), isOn: Binding(get: { model.opensAtLogin == .on }, set: { model.setLoginItem(.app, on: $0) }))
+                    loginItemNote(.app, state: model.opensAtLogin)
+                }
                 LogSection()
             }
             .formStyle(.grouped)
+            .onAppear { model.reloadLoginItems() }
             .tabItem { Label(L("General"), systemImage: "gearshape") }
             .tag("general")
             Form {
@@ -323,6 +346,10 @@ struct SettingsView: View {
                 }
                 Section(L("Quick Entry")) {
                     KeyboardShortcuts.Recorder(L("Shortcut:"), name: .quickEntry)
+                    Toggle(L("Quick entry without opening Lists"), isOn: Binding(get: { model.helperAtLogin == .on }, set: { model.setLoginItem(.helper, on: $0) }))
+                    Text(L("A helper starts at login and answers the shortcut while Lists is not running. A task written this way is synced when Lists is opened."))
+                        .font(AppFont.style(.caption)).foregroundStyle(.secondary)
+                    loginItemNote(.helper, state: model.helperAtLogin)
                 }
                 Section(L("Calendar events")) {
                     @Bindable var model = model

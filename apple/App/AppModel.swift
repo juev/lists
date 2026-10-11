@@ -77,27 +77,61 @@ final class AppModel {
     var syncing = false
     /// Text size factor and font design chosen in Settings.
     /// A launch argument (`-textScale 1.5`) arrives as a string.
-    var textScale: Double = UserDefaults.standard.object(forKey: AppFont.scaleKey)
+    var textScale: Double = Storage.defaults.object(forKey: AppFont.scaleKey)
         .flatMap({ ($0 as? Double) ?? ($0 as? String).flatMap(Double.init) }) ?? 1.0 {
-        didSet { UserDefaults.standard.set(textScale, forKey: AppFont.scaleKey) }
+        didSet { Storage.defaults.set(textScale, forKey: AppFont.scaleKey) }
     }
-    var fontDesign: String = UserDefaults.standard.string(forKey: AppFont.designKey) ?? "default" {
-        didSet { UserDefaults.standard.set(fontDesign, forKey: AppFont.designKey) }
+    var fontDesign: String = Storage.defaults.string(forKey: AppFont.designKey) ?? "default" {
+        didSet { Storage.defaults.set(fontDesign, forKey: AppFont.designKey) }
     }
     /// "system", "light" or "dark" (R61); belongs to this Mac.
-    var appearance: String = UserDefaults.standard.string(forKey: "appearance") ?? "system" {
+    var appearance: String = Storage.defaults.string(forKey: "appearance") ?? "system" {
         didSet {
-            UserDefaults.standard.set(appearance, forKey: "appearance")
+            Storage.defaults.set(appearance, forKey: "appearance")
             applyAppearance()
         }
     }
     /// What the Dock icon counts (R103): "today", "overdue" or "none"; belongs to this Mac.
-    var dockCount: String = UserDefaults.standard.string(forKey: "dockCount") ?? "today" {
+    var dockCount: String = Storage.defaults.string(forKey: "dockCount") ?? "today" {
         didSet {
-            UserDefaults.standard.set(dockCount, forKey: "dockCount")
+            Storage.defaults.set(dockCount, forKey: "dockCount")
             applyDockCount()
         }
     }
+    /// The helper of quick entry (R115) keeps no settings of its own: before it shows the window it
+    /// reads again what Lists holds, since the settings may have changed while it was running.
+    func reloadSettings() {
+        let defaults = Storage.defaults
+        textScale = defaults.object(forKey: AppFont.scaleKey).flatMap { ($0 as? Double) ?? ($0 as? String).flatMap(Double.init) } ?? 1.0
+        fontDesign = defaults.string(forKey: AppFont.designKey) ?? "default"
+        appearance = defaults.string(forKey: "appearance") ?? "system"
+        newTaskList = defaults.string(forKey: "newTaskList") ?? "inbox"
+        returnAddsLine = defaults.object(forKey: "returnAddsLine") == nil || defaults.bool(forKey: "returnAddsLine")
+        parseQuickText = defaults.object(forKey: "parseQuickText") == nil || defaults.bool(forKey: "parseQuickText")
+        clipboardNotes = defaults.object(forKey: "clipboardNotes") == nil || defaults.bool(forKey: "clipboardNotes")
+    }
+
+    /// What the system says about the two login items (R115), and the text of a refusal to change one.
+    private(set) var opensAtLogin = LoginItems.State.off
+    private(set) var helperAtLogin = LoginItems.State.off
+    var loginItemRefusal: [LoginItems.Item: String] = [:]
+
+    func reloadLoginItems() {
+        opensAtLogin = LoginItems.state(.app)
+        helperAtLogin = LoginItems.state(.helper)
+    }
+
+    func setLoginItem(_ item: LoginItems.Item, on: Bool) {
+        do {
+            try LoginItems.set(item, on: on)
+            loginItemRefusal[item] = nil
+        } catch {
+            loginItemRefusal[item] = error.localizedDescription
+            store?.log(level: .error, source: "login", message: "\(item == .app ? "Lists" : "the helper") at login \(on ? "on" : "off") refused: \(error.localizedDescription)")
+        }
+        reloadLoginItems()
+    }
+
     var alert: String?
     /// Tasks whose attachments are being saved into a folder (R91); the rows of files still to arrive show it.
     var savingAttachments: Set<String> = []
@@ -105,15 +139,15 @@ final class AppModel {
     var alertIsError = true
 
     // Notification settings of this Mac; not synced.
-    var notifyEnabled: Bool = UserDefaults.standard.object(forKey: "notifyEnabled") as? Bool ?? true { didSet { saveNotify() } }
+    var notifyEnabled: Bool = Storage.defaults.object(forKey: "notifyEnabled") as? Bool ?? true { didSet { saveNotify() } }
     /// Minutes before a timed due date, one notification for each; empty turns these reminders off.
     var notifyLeads: Set<Int> = AppModel.storedLeads() { didSet { saveNotify() } }
     /// `HH:MM`, empty for off.
-    var notifyAllDay: String = UserDefaults.standard.string(forKey: "notifyAllDay") ?? "09:00" { didSet { saveNotify() } }
-    var notifySummary: String = UserDefaults.standard.string(forKey: "notifySummary") ?? "" { didSet { saveNotify() } }
-    var notifySound: Bool = UserDefaults.standard.object(forKey: "notifySound") as? Bool ?? true { didSet { saveNotify() } }
+    var notifyAllDay: String = Storage.defaults.string(forKey: "notifyAllDay") ?? "09:00" { didSet { saveNotify() } }
+    var notifySummary: String = Storage.defaults.string(forKey: "notifySummary") ?? "" { didSet { saveNotify() } }
+    var notifySound: Bool = Storage.defaults.object(forKey: "notifySound") as? Bool ?? true { didSet { saveNotify() } }
     /// A system alert sound by its name, empty for the standard sound of notifications (R36).
-    var notifySoundName: String = UserDefaults.standard.string(forKey: "notifySoundName") ?? "" { didSet { saveNotify() } }
+    var notifySoundName: String = Storage.defaults.string(forKey: "notifySoundName") ?? "" { didSet { saveNotify() } }
     /// What a notification plays: nil for silence.
     var notifySoundChoice: String? { notifySound ? notifySoundName : nil }
 
@@ -130,6 +164,8 @@ final class AppModel {
 
     /// Reads what the system holds. `refusal` is the error of a request that was just refused.
     func reloadNotificationAccess(refusal: String? = nil) {
+        // The notifications belong to Lists; the helper asks the system nothing (R115).
+        if LoginItems.isHelper { return }
         Task { noteNotificationAccess(await Reminders.shared.access(), refusal: refusal) }
     }
 
@@ -151,7 +187,7 @@ final class AppModel {
     }
 
     private func saveNotify() {
-        let defaults = UserDefaults.standard
+        let defaults = Storage.defaults
         defaults.set(notifyEnabled, forKey: "notifyEnabled")
         defaults.set(notifyLeads.sorted(), forKey: "notifyLeads")
         defaults.set(notifyAllDay, forKey: "notifyAllDay")
@@ -163,7 +199,7 @@ final class AppModel {
 
     /// Before several lead times were allowed there was one, kept under `notifyLead`.
     private static func storedLeads() -> Set<Int> {
-        let defaults = UserDefaults.standard
+        let defaults = Storage.defaults
         let stored = defaults.array(forKey: "notifyLeads") as? [Int]
         let legacy = defaults.object(forKey: "notifyLead") as? Int
         let moved = defaults.bool(forKey: "notifyLeadsAtTime")
@@ -187,24 +223,24 @@ final class AppModel {
 
     // Editing habits of this Mac; not synced.
     /// Where a new task goes when the view does not say: `inbox`, `last` or a list id.
-    var newTaskList: String = UserDefaults.standard.string(forKey: "newTaskList") ?? "inbox" {
-        didSet { UserDefaults.standard.set(newTaskList, forKey: "newTaskList") }
+    var newTaskList: String = Storage.defaults.string(forKey: "newTaskList") ?? "inbox" {
+        didSet { Storage.defaults.set(newTaskList, forKey: "newTaskList") }
     }
     /// Return in the notes starts a new line (Esc finishes); otherwise it finishes editing and ⌥Return starts a line.
-    var returnAddsLine: Bool = UserDefaults.standard.object(forKey: "returnAddsLine") == nil || UserDefaults.standard.bool(forKey: "returnAddsLine") {
-        didSet { UserDefaults.standard.set(returnAddsLine, forKey: "returnAddsLine") }
+    var returnAddsLine: Bool = Storage.defaults.object(forKey: "returnAddsLine") == nil || Storage.defaults.bool(forKey: "returnAddsLine") {
+        didSet { Storage.defaults.set(returnAddsLine, forKey: "returnAddsLine") }
     }
 
     /// When each built-in view has a row in the sidebar of this Mac (R93); not synced.
     var sidebarShow: [String: SidebarShow] = AppModel.storedSidebarShow() {
         didSet {
-            UserDefaults.standard.set(sidebarShow.mapValues(\.rawValue), forKey: "sidebarShow")
+            Storage.defaults.set(sidebarShow.mapValues(\.rawValue), forKey: "sidebarShow")
             leaveHiddenView()
         }
     }
 
     private static func storedSidebarShow() -> [String: SidebarShow] {
-        let defaults = UserDefaults.standard
+        let defaults = Storage.defaults
         // The setting this one replaced (R47): a Mac that had Completed switched off keeps it off,
         // until the two views are given a choice of their own. Only the views that were chosen are stored.
         let old = defaults.object(forKey: "showCompletedView") != nil && !defaults.bool(forKey: "showCompletedView")
@@ -257,10 +293,10 @@ final class AppModel {
 
     // Calendar events in Today (R78); settings of this Mac, not synced.
     /// Off until asked for: the system is asked for the calendars when this is turned on, not before.
-    var showCalendarEvents: Bool = UserDefaults.standard.bool(forKey: "calendarEvents") {
+    var showCalendarEvents: Bool = Storage.defaults.bool(forKey: "calendarEvents") {
         didSet {
             guard showCalendarEvents != oldValue else { return }
-            UserDefaults.standard.set(showCalendarEvents, forKey: "calendarEvents")
+            Storage.defaults.set(showCalendarEvents, forKey: "calendarEvents")
             if showCalendarEvents, SystemCalendars.shared.access == .unasked {
                 SystemCalendars.shared.ask { [weak self] in self?.reloadEvents() }
             }
@@ -268,9 +304,9 @@ final class AppModel {
         }
     }
     /// The calendars whose mark was taken off; a calendar that appears later is shown.
-    var hiddenCalendars: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "calendarEventsHidden") ?? []) {
+    var hiddenCalendars: Set<String> = Set(Storage.defaults.stringArray(forKey: "calendarEventsHidden") ?? []) {
         didSet {
-            UserDefaults.standard.set(hiddenCalendars.sorted(), forKey: "calendarEventsHidden")
+            Storage.defaults.set(hiddenCalendars.sorted(), forKey: "calendarEventsHidden")
             reloadEvents()
         }
     }
@@ -293,12 +329,12 @@ final class AppModel {
     }
 
     /// Whether dates, priority, tags and a list are picked out of the typed title.
-    var parseQuickText: Bool = UserDefaults.standard.object(forKey: "parseQuickText") == nil || UserDefaults.standard.bool(forKey: "parseQuickText") {
-        didSet { UserDefaults.standard.set(parseQuickText, forKey: "parseQuickText") }
+    var parseQuickText: Bool = Storage.defaults.object(forKey: "parseQuickText") == nil || Storage.defaults.bool(forKey: "parseQuickText") {
+        didSet { Storage.defaults.set(parseQuickText, forKey: "parseQuickText") }
     }
     /// Whether quick entry starts the note with what is on the clipboard (R58).
-    var clipboardNotes: Bool = UserDefaults.standard.object(forKey: "clipboardNotes") == nil || UserDefaults.standard.bool(forKey: "clipboardNotes") {
-        didSet { UserDefaults.standard.set(clipboardNotes, forKey: "clipboardNotes") }
+    var clipboardNotes: Bool = Storage.defaults.object(forKey: "clipboardNotes") == nil || Storage.defaults.bool(forKey: "clipboardNotes") {
+        didSet { Storage.defaults.set(clipboardNotes, forKey: "clipboardNotes") }
     }
 
     /// The list for a task entered where no list is implied: quick entry, Today, a tag.
@@ -327,12 +363,12 @@ final class AppModel {
     }
 
     var defaultListId: String {
-        let id = newTaskList == "last" ? UserDefaults.standard.string(forKey: "lastUsedList") ?? "inbox" : newTaskList
+        let id = newTaskList == "last" ? Storage.defaults.string(forKey: "lastUsedList") ?? "inbox" : newTaskList
         return lists.contains { $0.id == id && !$0.archived } ? id : "inbox"
     }
 
     func noteUsedList(_ id: String) {
-        UserDefaults.standard.set(id, forKey: "lastUsedList")
+        Storage.defaults.set(id, forKey: "lastUsedList")
     }
 
     @ObservationIgnored private var syncDebounce: DispatchWorkItem?
@@ -346,24 +382,28 @@ final class AppModel {
     private init() {
         do {
             store = try Storage.openStore()
-            switch try? store?.syncConfig() {
+            // The helper does not sync (R115): the passwords stay with Lists.
+            switch LoginItems.isHelper ? nil : try? store?.syncConfig() {
             case .webDav(let url, let user)?, .calDav(let url, let user)?:
                 store?.setSyncPassword(password: Keychain.load(account: Keychain.account(url: url, user: user)))
             default: break
             }
-            if let server = try? store?.pushServer() {
+            if !LoginItems.isHelper, let server = try? store?.pushServer() {
                 store?.setPushToken(token: Keychain.load(account: Keychain.pushAccount(server: server)))
             }
             // R102: where a log of events begins for this run.
             let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
             let system = ProcessInfo.processInfo.operatingSystemVersion
-            store?.log(level: .info, source: "app", message: "started \(version) on macOS \(system.majorVersion).\(system.minorVersion).\(system.patchVersion)")
+            store?.log(level: .info, source: LoginItems.isHelper ? "helper" : "app", message: "started \(version) on macOS \(system.majorVersion).\(system.minorVersion).\(system.patchVersion)")
         } catch {
             store = nil
             startupError = describe(error)
         }
         reload()
+        // The helper only writes tasks: it does not sync, back up, notify or read the calendar (R115).
+        if LoginItems.isHelper { return }
         reloadNotificationAccess()
+        reloadLoginItems()
         DistributedNotificationCenter.default().addObserver(
             forName: Storage.changedNotification, object: nil, queue: .main
         ) { [weak self] _ in
@@ -372,7 +412,7 @@ final class AppModel {
         NotificationCenter.default.addObserver(
             forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.reload(); self?.reloadEvents(); self?.reloadNotificationAccess(); self?.syncNow() }
+            MainActor.assumeIsolated { self?.reload(); self?.reloadEvents(); self?.reloadNotificationAccess(); self?.reloadLoginItems(); self?.syncNow() }
         }
         // R78: the block follows the calendars of the system and the change of the day.
         for name in [Notification.Name.EKEventStoreChanged, .NSCalendarDayChanged] {
@@ -526,7 +566,7 @@ final class AppModel {
                 }
             }
             found = lines
-            Reminders.shared.refresh(store, settings: notifySettings, sound: notifySoundChoice)
+            if !LoginItems.isHelper { Reminders.shared.refresh(store, settings: notifySettings, sound: notifySoundChoice) }
         } catch {
             alert = describe(error)
         }
@@ -956,6 +996,8 @@ final class AppModel {
     // MARK: Sync
 
     func scheduleSync() {
+        // The helper leaves the sync to Lists and tells it, if it is running, that there is something new (R115).
+        if LoginItems.isHelper { return Storage.announceChange() }
         syncDebounce?.cancel()
         let work = DispatchWorkItem { [weak self] in self?.syncNow() }
         syncDebounce = work
@@ -983,7 +1025,7 @@ final class AppModel {
     }
 
     func syncNow() {
-        guard let store, syncStatus.configured, !syncing else { return }
+        guard let store, syncStatus.configured, !syncing, !LoginItems.isHelper else { return }
         syncing = true
         _Concurrency.Task.detached(priority: .utility) {
             let result = Result { try store.syncNow() }

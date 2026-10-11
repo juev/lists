@@ -540,6 +540,26 @@ enum DebugScript {
                     panel.alphaValue = 1
                     QuickEntryPanel.debugSilent = false
                     try? await _Concurrency.Task.sleep(for: .milliseconds(300))
+                case "loginitems":
+                    // R115: what the system holds; `loginitems:helper=on` and the like change it first.
+                    let parts = argument.split(separator: "=").map(String.init)
+                    if parts.count == 2 { AppModel.shared.setLoginItem(parts[0] == "helper" ? .helper : .app, on: parts[1] == "on") }
+                    AppModel.shared.reloadLoginItems()
+                    let helpers = NSRunningApplication.runningApplications(withBundleIdentifier: LoginItems.helperIdentifier).filter { !$0.isTerminated }
+                    print("debug: login items app \(AppModel.shared.opensAtLogin) helper \(AppModel.shared.helperAtLogin) refusal \(AppModel.shared.loginItemRefusal.values.sorted()) helper running \(helpers.map { $0.bundleURL?.path ?? "?" })")
+                case "editmenu":
+                    print("debug: main menu \(NSApp.mainMenu?.items.map(\.title) ?? []), paste \(NSApp.mainMenu?.items.contains { $0.submenu?.items.contains { $0.action == #selector(NSText.paste(_:)) } == true } == true)")
+                case "helperkey":
+                    // What the key of quick entry does in this program.
+                    #if LISTS_HELPER
+                    // Transparent and without the keyboard, as `quickopen` shows it.
+                    QuickEntryPanel.debugSilent = true
+                    QuickEntryPanel.shared.alphaValue = 0
+                    HelperDelegate.present()
+                    try? await _Concurrency.Task.sleep(for: .milliseconds(300))
+                    #else
+                    QuickEntryPanel.shared.toggle()
+                    #endif
                 case "settings": NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
                 case "windows":
                     for window in NSApp.windows {
@@ -585,7 +605,7 @@ enum DebugScript {
                         try? image.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: argument))
                         print("debug: window drawn, \(image.pixelsWide)x\(image.pixelsHigh) pixels")
                     }
-                case "settingstab": UserDefaults.standard.set(argument, forKey: "settingsTab")
+                case "settingstab": Storage.defaults.set(argument, forKey: "settingsTab")
                 case "settingsshot":
                     // The settings drawn into a file from a window that is never shown: a hidden app opens no settings window.
                     let window = settingsWindow ?? {
@@ -602,7 +622,7 @@ enum DebugScript {
                         if let image = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
                             view.cacheDisplay(in: view.bounds, to: image)
                             try? image.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: argument))
-                            print("debug: settings drawn, \(image.pixelsWide)x\(image.pixelsHigh) pixels, tab \(UserDefaults.standard.string(forKey: "settingsTab") ?? "general")")
+                            print("debug: settings drawn, \(image.pixelsWide)x\(image.pixelsHigh) pixels, tab \(Storage.defaults.string(forKey: "settingsTab") ?? "general")")
                         }
                     }
                 case "shot":

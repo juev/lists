@@ -9,6 +9,16 @@ import Foundation
 enum Storage {
     static let changedNotification = Notification.Name("org.evsyukov.lists.changed")
 
+    /// Where the settings are kept. The helper of quick entry (R115) has none of its own: it reads and
+    /// writes those of Lists.
+    static let defaults: UserDefaults = {
+        #if LISTS_HELPER
+        return UserDefaults(suiteName: "org.evsyukov.lists") ?? .standard
+        #else
+        return .standard
+        #endif
+    }()
+
     static var groupIdentifier: String? {
         guard let id = Bundle.main.object(forInfoDictionaryKey: "AppGroupIdentifier") as? String,
               !id.hasPrefix("."), !id.isEmpty
