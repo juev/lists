@@ -213,6 +213,20 @@ struct Chip: View {
     }
 }
 
+extension RowOrigin {
+    /// The list in its colour; the project keeps the colour of the marks around it.
+    var text: Text {
+        let name = list.map { Text($0).foregroundStyle(color.flatMap { Color(hex: $0) } ?? .accentColor) }
+        let rest = project.map { Text(list == nil ? $0 : " – \($0)") }
+        switch (name, rest) {
+        case (let name?, let rest?): return name + rest
+        case (let name?, nil): return name
+        case (nil, let rest?): return rest
+        default: return Text("")
+        }
+    }
+}
+
 struct TaskRow: View {
     @Environment(AppModel.self) private var model
     let task: TaskItem
@@ -355,8 +369,11 @@ struct TaskRow: View {
             if !task.notes.isEmpty { Image(systemName: "text.alignleft").accessibilityLabel(L("Notes")) }
             if task.attachments > 0 { Image(systemName: "paperclip").accessibilityLabel(L("Attachments")) }
             if task.subtasksTotal > 0 { Image(systemName: "checklist").accessibilityLabel(L("Subtasks")) }
-            // A task of a project says whose it is where lists are mixed (R31).
-            if showsOrigin, let project = task.parentTitle { Text(project).lineLimit(1) }
+            // R72: where lists are mixed a row says which list the task is in, in the colour of the list,
+            // and a task of a project says whose it is (R31). Cut first when the row is tight.
+            if showsOrigin, let origin = model.origin(of: task) {
+                origin.text.lineLimit(1).truncationMode(.tail).layoutPriority(-1)
+            }
         }
         .font(AppFont.style(.caption))
         .foregroundStyle(.tertiary)
@@ -372,13 +389,7 @@ struct TaskRow: View {
     }
 
     /// In views that mix lists, say where the task lives.
-    private var showsOrigin: Bool {
-        if depth > 0 { return false }
-        switch model.effectiveScope {
-        case .today, .upcoming, .tag, .search, .completed, .wontDo, .trash, .filter: return true
-        default: return false
-        }
-    }
+    private var showsOrigin: Bool { depth == 0 && model.mixesLists }
 
     /// The menu of the task. One description for both ways it is drawn: by SwiftUI for a row of
     /// the list and by AppKit for a subtask inside the row of its parent (`SubtaskMenuArea`).

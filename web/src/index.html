@@ -292,8 +292,13 @@ function summary(x, origin) {
   if (x.subtasks) out.push($("span", {}, `☑ ${x.subtasksDone}/${x.subtasks}`));
   if (x.attachments) out.push($("span", {}, `📎 ${x.attachments}`));
   for (const tag of x.tags) out.push($("span", {}, "#" + tag));
+  // R72: the list in its colour, unless it is the Inbox, then the project of a task of a project.
   // Only a task of a project has a parent among the rows, so the title after the list is the project's.
-  if (origin) out.push($("span", {}, x.parentTitle ? `${listName(x.list)} › ${x.parentTitle}` : listName(x.list)));
+  if (origin) {
+    const l = x.list === "inbox" ? null : state.overview.lists.find(l => l.id === x.list);
+    const name = l ? $("span", { style: /^#[0-9a-f]{6}$/i.test(l.color) ? `color:${l.color}` : "" }, l.name) : null;
+    if (name || x.parentTitle) out.push($("span", {}, name, x.parentTitle ? (name ? " – " : "") + x.parentTitle : null));
+  }
   return out.length ? $("div", { class: "meta" }, out) : null;
 }
 
@@ -527,7 +532,7 @@ function filterForm(f) {
 
 function render() {
   if (state.typing) return; // never rebuild the page under the user's cursor
-  const o = state.overview, c = o.counts, secs = sections(), origin = state.search || ["today", "upcoming", "completed", "wontdo", "trash"].includes(state.scope) || state.scope.startsWith("tag:") || state.scope.startsWith("filter:");
+  const o = state.overview, c = o.counts, secs = sections(), origin = state.search || ["today", "upcoming", "all", "completed", "wontdo", "trash"].includes(state.scope) || state.scope.startsWith("tag:") || state.scope.startsWith("filter:");
   const empty = secs.every(s => !s.tasks.length);
   const current = state.scope.startsWith("list:") ? o.lists.find(l => "list:" + l.id === state.scope) : state.scope === "inbox" ? o.lists.find(l => l.id === "inbox") : null;
   const syncText = !o.sync.configured ? "" : o.sync.lastError ? t("Sync failed") : o.sync.pending ? `${o.sync.pending} ${t("waiting")}` : o.sync.attachmentsWaiting ? `${t("Attachments waiting to sync")}: ${o.sync.attachmentsWaiting}` : t("Synced");

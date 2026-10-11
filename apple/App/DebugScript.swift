@@ -59,6 +59,7 @@ import UserNotifications
 /// `sound:Glass` (chooses the sound of notifications without playing it, `sound:` the standard one; `sound` alone leaves the choice as it is) prints the choice,
 /// whether a notification gets the standard sound, where the copy for the notification centre is and the sounds on offer; no notification is scheduled,
 /// `leads` (prints what each stored choice of "task due at a time" means, R36, and the choice of this Mac),
+/// `origins` (prints what each row of the view says about the list and the project of its task and the colour of the list, R72),
 /// `notifications` (prints whether the system allows notifications for the app, the requests it holds and whether Settings show the line about a refusal, R111; nothing is asked and nothing is scheduled;
 /// `notifications:ask` also repeats the request for the permission and prints the answer, unless the app was never asked: that would open the dialog;
 /// `notifications:denied` and `notifications:allowed` give the model that answer without asking the system and print whether Settings show the line),
@@ -311,6 +312,7 @@ enum DebugScript {
                     case "wontdo": model.scope = .wontDo
                     case "completed": model.scope = .completed
                     case "today": model.scope = .today
+                    case "all": model.scope = .all
                     case _ where argument.hasPrefix("#"): model.scope = .tag(name: String(argument.dropFirst()))
                     default:
                         model.scope = model.lists.first { $0.name == argument }.map { .list(id: $0.id) }
@@ -459,6 +461,13 @@ enum DebugScript {
                     let open = model.expanded.map(taskTitle).sorted()
                     print("debug: open \(open), selected \(model.selection.map(taskTitle) ?? "none"), draft \(model.draft != nil)")
                 case "rows": print("debug: rows \(AppModel.shared.visibleIds.map(taskTitle))")
+                case "origins":
+                    // R72: what each row of the view says about its list and its project, and in which colour.
+                    let model = AppModel.shared
+                    let rows = model.sections.flatMap(\.tasks).map { task in
+                        "\(task.title): \((model.mixesLists ? model.origin(of: task) : nil).map { "\($0.label) [\($0.color ?? "no colour")]" } ?? "nothing")"
+                    }
+                    print("debug: origins \(rows)")
                 case "panel":
                     print("debug: quick entry \(QuickEntryPanel.shared.isVisible ? "shown" : "hidden"), modal \(NSApp.modalWindow.map { String(describing: type(of: $0)) } ?? "none")")
                 case "quick": QuickEntryPanel.shared.present()
