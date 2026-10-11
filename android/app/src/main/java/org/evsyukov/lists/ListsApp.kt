@@ -373,8 +373,8 @@ object Reminders {
         val alarms = context.getSystemService(AlarmManager::class.java) ?: return
         val exact = exact(context)
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        for (id in prefs.getStringSet(KEY, emptySet()).orEmpty()) {
-            alarms.cancel(pending(context, id, "", ""))
+        for (key in prefs.getStringSet(KEY, emptySet()).orEmpty()) {
+            alarms.cancel(pending(context, key, "", "", ""))
         }
         val plan = runCatching { Repo.store.plannedNotifications(NotifyPrefs.settings(context)) }.getOrDefault(emptyList())
         val scheduled = mutableSetOf<String>()
@@ -384,18 +384,21 @@ object Reminders {
                 NotificationKind.SUMMARY -> context.getString(R.string.app_name) to str(R.string.summary_body, item.count.toString())
                 else -> item.title to item.due?.let { str(R.string.due_at, dateLabel(it).lowercase()) }.orEmpty()
             }
-            val alarm = pending(context, item.taskId ?: item.key, title, body)
+            // R36: one alarm for each planned moment. A task with several reminders has several, and an alarm
+            // named after the task alone would replace the one before it.
+            val alarm = pending(context, item.key, item.taskId ?: item.key, title, body)
             // Without the permission the system may deliver the alarm late, within a window of up to an hour.
             if (exact) alarms.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, alarm)
             else alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, alarm)
-            scheduled += item.taskId ?: item.key
+            scheduled += item.key
         }
         prefs.edit().putStringSet(KEY, scheduled).apply()
     }
 
-    private fun pending(context: Context, id: String, title: String, body: String): PendingIntent {
+    /** `key` tells the alarms apart; `id` is the task the notification opens, and a later notification of the same task replaces the earlier one. */
+    private fun pending(context: Context, key: String, id: String, title: String, body: String): PendingIntent {
         val intent = Intent(context, ReminderReceiver::class.java)
-            .setAction("org.evsyukov.lists.REMIND.$id")
+            .setAction("org.evsyukov.lists.REMIND.$key")
             .putExtra("id", id).putExtra("title", title).putExtra("body", body)
         return PendingIntent.getBroadcast(context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
     }
