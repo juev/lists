@@ -276,6 +276,15 @@ struct SettingsView: View {
         // R101: five tabs. The state of every tab lives in this view, so what is typed under Sync stays while the window is open.
         TabView(selection: $tab) {
             Form {
+                // R115: first on the tab, where they are seen without scrolling.
+                Section(L("At login")) {
+                    Toggle(L("Open Lists at login"), isOn: Binding(get: { model.opensAtLogin == .on }, set: { model.setLoginItem(.app, on: $0) }))
+                    loginItemNote(.app, state: model.opensAtLogin)
+                    Toggle(L("Quick entry without opening Lists"), isOn: Binding(get: { model.helperAtLogin == .on }, set: { model.setLoginItem(.helper, on: $0) }))
+                    Text(L("A helper starts at login and answers the shortcut while Lists is not running. A task written this way is synced when Lists is opened."))
+                        .font(AppFont.style(.caption)).foregroundStyle(.secondary)
+                    loginItemNote(.helper, state: model.helperAtLogin)
+                }
                 Section(L("Appearance")) {
                     @Bindable var model = model
                     Picker(L("Appearance"), selection: $model.appearance) {
@@ -308,10 +317,6 @@ struct SettingsView: View {
                             Text(Self.keepTitle(keep)).tag(keep)
                         }
                     }
-                }
-                Section(L("Start")) {
-                    Toggle(L("Open Lists at login"), isOn: Binding(get: { model.opensAtLogin == .on }, set: { model.setLoginItem(.app, on: $0) }))
-                    loginItemNote(.app, state: model.opensAtLogin)
                 }
                 LogSection()
             }
@@ -347,10 +352,6 @@ struct SettingsView: View {
                 }
                 Section(L("Quick Entry")) {
                     KeyboardShortcuts.Recorder(L("Shortcut:"), name: .quickEntry)
-                    Toggle(L("Quick entry without opening Lists"), isOn: Binding(get: { model.helperAtLogin == .on }, set: { model.setLoginItem(.helper, on: $0) }))
-                    Text(L("A helper starts at login and answers the shortcut while Lists is not running. A task written this way is synced when Lists is opened."))
-                        .font(AppFont.style(.caption)).foregroundStyle(.secondary)
-                    loginItemNote(.helper, state: model.helperAtLogin)
                 }
                 Section(L("Calendar events")) {
                     @Bindable var model = model
