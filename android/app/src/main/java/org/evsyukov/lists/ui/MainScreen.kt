@@ -126,6 +126,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -749,7 +752,7 @@ private fun SwipeRow(task: TaskItem, state: UiState, onToggle: () -> Unit, onOpe
 }
 
 private fun UiState.showsOrigin(): Boolean = when (effectiveScope) {
-    Scope.Today, Scope.Upcoming, Scope.Completed, Scope.WontDo, Scope.Trash, is Scope.Tag, is Scope.Search, is Scope.Filter -> true
+    Scope.Today, Scope.Upcoming, Scope.All, Scope.Completed, Scope.WontDo, Scope.Trash, is Scope.Tag, is Scope.Search, is Scope.Filter -> true
     else -> false
 }
 
@@ -814,7 +817,7 @@ fun TaskRow(
                 modifier = Modifier.weight(1f, fill = false),
             )
             // Only a task of a project is a row with a parent: a subtask is never a row of a view (R12).
-            Marks(task, project = task.parentTitle.takeIf { showOrigin })
+            Marks(task, origin = if (showOrigin) rowOrigin(task, state.lists) else null)
         }
         val scope = state.effectiveScope
         val dayInHeading = scope == Scope.Upcoming || (scope == Scope.Today && task.due?.let(::dayOf) == today())
@@ -918,9 +921,29 @@ fun TaskItem.markState(): MarkState = when {
     else -> MarkState.Open
 }
 
-/** Marks after the title, only for what is set, without text or numbers (R72); then the project of a task shown outside it (R31). */
+/**
+ * R72: what a row says about where its task lives in a view that mixes lists: the list, unless it is
+ * the Inbox, and the project of a task of a project (R31). Nothing for a task of the Inbox outside a project.
+ */
+data class RowOrigin(val list: String?, val color: String?, val project: String?) {
+    val label: String get() = listOfNotNull(list, project).joinToString(" – ")
+}
+
+fun rowOrigin(task: TaskItem, lists: List<TaskList>): RowOrigin? {
+    val list = lists.firstOrNull { it.id == task.listId }
+    return rowOrigin(task.listId, list?.name, list?.color, task.parentTitle)
+}
+
+/** The same from its parts: the name and the colour are those of the list with that id, when it is known. */
+fun rowOrigin(listId: String, listName: String?, listColor: String?, project: String?): RowOrigin? {
+    val named = listName.takeIf { listId != "inbox" }
+    if (named == null && project == null) return null
+    return RowOrigin(named, listColor.takeIf { named != null }, project)
+}
+
+/** Marks after the title, only for what is set, without text or numbers (R72); then the list of the task in its colour and the project. */
 @Composable
-private fun Marks(task: TaskItem, project: String?) {
+private fun Marks(task: TaskItem, origin: RowOrigin?) {
     val muted = MaterialTheme.colorScheme.outline
     val marks = buildList {
         if (task.repeat != null) add(Icons.Outlined.Repeat to str(R.string.repeat))
@@ -929,8 +952,15 @@ private fun Marks(task: TaskItem, project: String?) {
         if (task.subtasksTotal > 0u) add(Icons.Outlined.Checklist to str(R.string.subtasks))
     }
     for ((icon, name) in marks) Icon(icon, name, Modifier.padding(start = 6.dp).size(16.dp), tint = muted)
-    if (project != null) {
-        Text(project, Modifier.padding(start = 8.dp).widthIn(max = 120.dp), style = MaterialTheme.typography.bodySmall, color = muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    if (origin != null) {
+        val text = buildAnnotatedString {
+            origin.list?.let { name ->
+                withStyle(SpanStyle(color = origin.color?.let(::parseColor) ?: MaterialTheme.colorScheme.primary)) { append(name) }
+            }
+            origin.project?.let { append(if (origin.list == null) it else " – $it") }
+        }
+        // Cut before the title is: the title has the room that is left (R72).
+        Text(text, Modifier.padding(start = 8.dp).widthIn(max = 140.dp), style = MaterialTheme.typography.bodySmall, color = muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 

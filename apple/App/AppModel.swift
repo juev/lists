@@ -3,6 +3,15 @@ import EventKit
 import Foundation
 import Observation
 
+/// R72: the name of the list in the colour of the list, then the project: "List – Project".
+struct RowOrigin: Equatable {
+    let list: String?
+    let color: String?
+    let project: String?
+
+    var label: String { [list, project].compactMap { $0 }.joined(separator: " – ") }
+}
+
 struct TaskSection: Identifiable {
     let id: String
     let title: String?
@@ -420,6 +429,22 @@ final class AppModel {
     }
 
     func list(_ id: String) -> TaskList? { lists.first { $0.id == id } }
+
+    /// R72: whether the view holds tasks of several lists, so that a row has to say where its task lives.
+    var mixesLists: Bool {
+        switch effectiveScope {
+        case .today, .upcoming, .all, .tag, .search, .completed, .wontDo, .trash, .filter: return true
+        default: return false
+        }
+    }
+
+    /// R72: what a row says about where its task lives in a view that mixes lists: the list, unless it
+    /// is the Inbox, and the project of a task of a project. Nothing for a task of the Inbox outside a project.
+    func origin(of task: TaskItem) -> RowOrigin? {
+        let list = task.listId == "inbox" ? nil : list(task.listId)
+        guard list != nil || task.parentTitle != nil else { return nil }
+        return RowOrigin(list: list?.name, color: list?.color, project: task.parentTitle)
+    }
 
     func listName(_ list: TaskList) -> String { list.id == "inbox" ? L("Inbox") : list.name }
 
