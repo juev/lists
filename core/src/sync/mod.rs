@@ -142,6 +142,7 @@ impl Store {
     fn merge(&self, batch: &Batch, cursors: &BTreeMap<String, u64>) -> Result<u32> {
         let mut inner = self.lock();
         let inner = &mut *inner;
+        let now_ms = inner.now_ms();
         let tx = inner
             .conn
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -154,6 +155,8 @@ impl Store {
             }
         }
         db::settle(&tx, &touched)?;
+        // S42: what arrived is brought to the rule of subtasks with writes of this device.
+        crate::subtasks::tidy(&tx, &mut || inner.clock.tick(now_ms))?;
         for (device, seq) in cursors {
             tx.execute(
                 "INSERT INTO peers (device, seq) VALUES (?1, ?2)
@@ -729,6 +732,8 @@ impl Store {
             let _ = inner.conn.execute("DETACH DATABASE restored", []);
         }
         done?;
+        // R112: a copy made before the rule of subtasks holds what does not fit it.
+        inner.write(|_| Ok(()))?;
         *self.storage_seen.lock().unwrap_or_else(|p| p.into_inner()) = None;
         *self.folder_seen.lock().unwrap_or_else(|p| p.into_inner()) = None;
         Ok(())

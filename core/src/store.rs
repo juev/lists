@@ -18,7 +18,7 @@ use crate::error::{AppError, Result};
 use crate::hlc::{Clock, DEVICE_ID_LEN};
 use crate::model::*;
 use crate::recur::DATE_FMT;
-use crate::{order, quickadd, recur};
+use crate::{order, quickadd, recur, subtasks};
 
 const MOMENT_FMT: &str = "%Y-%m-%dT%H:%M";
 
@@ -94,6 +94,11 @@ impl Writer<'_> {
         let touched = std::mem::take(&mut self.touched);
         db::settle(self.tx, &touched)
     }
+    /// R112: whatever the transaction left that does not fit R10 is brought to it before the commit.
+    fn tidy(&mut self) -> Result<()> {
+        let (clock, now_ms) = (&mut *self.clock, self.now_ms);
+        subtasks::tidy(self.tx, &mut || clock.tick(now_ms))
+    }
     fn today(&self) -> NaiveDate {
         self.now.date()
     }
@@ -149,6 +154,7 @@ impl Inner {
             };
             let out = f(&mut w)?;
             w.flush()?;
+            w.tidy()?;
             out
         };
         tx.commit()?;
@@ -389,6 +395,13 @@ pub(crate) fn append_pos_in_list(conn: &Connection, list: &str) -> Result<String
     Ok(order::between(last.as_deref(), None))
 }
 
+/// The tasks of the top level that are projects: their children are full tasks (R30).
+fn project_ids(conn: &Connection) -> Result<std::collections::HashSet<String>> {
+    let mut stmt = conn.prepare_cached("SELECT id FROM tasks WHERE project = 1 AND eff_parent IS NULL")?;
+    let rows = stmt.query_map([], |r| r.get(0))?;
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
+}
+
 fn append_pos_in_parent(conn: &Connection, parent: &str) -> Result<String> {
     let last = last_pos(conn, "SELECT max(pos) FROM tasks WHERE eff_parent = ?1", &[parent])?;
     Ok(order::between(last.as_deref(), None))
@@ -607,6 +620,8 @@ impl Store {
             }
             db::migrate(&store.lock().conn)?;
         }
+        // R112: data written before the rule of R10, by this device or by an earlier version.
+        store.write(|_| Ok(()))?;
         Ok(store)
     }
 
@@ -829,9 +844,22 @@ impl Store {
                     &format!("WHERE {LIVE} ORDER BY t.done IS NOT NULL, coalesce(t.due, t.start) IS NULL, coalesce(t.due, t.start), t.title"),
                     &[],
                 )?;
+                // R22: a subtask found by its title is shown inside its task, so the task stands for it.
+                let projects = project_ids(conn)?;
+                let subtask = |t: &TaskItem| t.parent_id.as_ref().is_some_and(|p| !projects.contains(p));
+                let holders: std::collections::HashSet<String> = all
+                    .iter()
+                    .filter(|t| subtask(t) && t.title.to_lowercase().contains(&needle))
+                    .filter_map(|t| t.parent_id.clone())
+                    .collect();
                 Ok(all
                     .into_iter()
-                    .filter(|t| t.title.to_lowercase().contains(&needle) || t.notes.to_lowercase().contains(&needle))
+                    .filter(|t| !subtask(t))
+                    .filter(|t| {
+                        t.title.to_lowercase().contains(&needle)
+                            || t.notes.to_lowercase().contains(&needle)
+                            || holders.contains(&t.id)
+                    })
                     .take(200)
                     .collect())
             }
@@ -844,6 +872,25 @@ impl Store {
             "WHERE t.eff_parent = ?1 AND t.deleted = 0 AND t.purged = 0 ORDER BY t.pos, t.id",
             &[&parent_id],
         )
+    }
+
+    /// R22: the subtasks of the task whose title holds the text of a search, for the lines shown under
+    /// the task in the results. Nothing for a project: its tasks are found as rows of their own.
+    pub fn found_subtasks(&self, parent_id: String, text: String) -> Result<Vec<TaskItem>> {
+        let needle = text.trim().to_lowercase();
+        let inner = self.lock();
+        if needle.is_empty() || subtasks::is_project(&inner.conn, &parent_id)? {
+            return Ok(vec![]);
+        }
+        let all = query_tasks(
+            &inner.conn,
+            "WHERE t.eff_parent = ?1 AND t.deleted = 0 AND t.purged = 0 AND t.log_of IS NULL ORDER BY t.pos, t.id",
+            &[&parent_id],
+        )?;
+        Ok(all
+            .into_iter()
+            .filter(|t| t.title.to_lowercase().contains(&needle))
+            .collect())
     }
 
     pub fn task(&self, id: String) -> Result<TaskItem> {
@@ -1029,6 +1076,10 @@ impl Store {
             if project && task.parent_id.is_some() {
                 return Err(AppError::invalid("only a top-level task can be a project"));
             }
+            // R32: the tasks of the project would become subtasks and lose their fields.
+            if !project && task.is_project && task.subtasks_total > 0 {
+                return Err(AppError::invalid("a project with tasks is not turned back into a task"));
+            }
             w.task(&id, "project", json!(project))
         })
     }
@@ -1036,6 +1087,17 @@ impl Store {
     /// Creates a task inside a project (or under any task) from one line of text.
     pub fn quick_add_under(&self, text: String, parent_id: String) -> Result<TaskItem> {
         self.write(|w| {
+            // R10: under anything but a project the line is the title of a subtask, as it is typed.
+            if !subtasks::is_project(w.tx, &parent_id)? {
+                return create_task(
+                    w,
+                    NewTask {
+                        title: text,
+                        parent_id: Some(parent_id),
+                        ..NewTask::default()
+                    },
+                );
+            }
             let parsed = quickadd::parse(&text, w.today());
             // A list named in the line makes no sense here: the parent decides the list.
             let title = match parsed.list_name {
@@ -1225,6 +1287,9 @@ impl Store {
     pub fn set_repeat(&self, id: String, repeat: Option<Repeat>) -> Result<()> {
         self.write(|w| {
             let task = get_task(w.tx, &id)?;
+            if repeat.is_some() && subtasks::is_subtask(w.tx, &id)? {
+                return Err(AppError::invalid("a subtask has a title only"));
+            }
             let value = match repeat {
                 Some(rule) => {
                     serde_json::to_value(recur::normalized(rule, task.due.as_deref().or(task.start.as_deref())))?
@@ -1353,6 +1418,9 @@ impl Store {
         self.write(|w| {
             get_task(w.tx, &id)?;
             get_list(w.tx, &list_id)?;
+            if subtasks::is_subtask(w.tx, &id)? {
+                return Err(AppError::invalid("a subtask stays with its task"));
+            }
             heal_tree(w)?;
             let pos = append_pos_in_list(w.tx, &list_id)?;
             w.task(&id, "parent", Value::Null)?;
@@ -1361,9 +1429,11 @@ impl Store {
         })
     }
 
-    /// Re-parents and reorders. With a parent the task becomes its subtask;
-    /// without one it becomes a top-level task of `list_id` (its current list
-    /// when omitted). It is placed right after `after`, or first.
+    /// Reorders, and moves a task into a project or out of one. With a parent the
+    /// task is placed among its children; without one it becomes a top-level
+    /// task of `list_id` (its current list when omitted). It is placed right
+    /// after `after`, or first. R10: a subtask keeps its parent, and a task
+    /// goes under another one only when that one is a project.
     pub fn move_task(
         &self,
         id: String,
@@ -1374,6 +1444,17 @@ impl Store {
         self.write(|w| {
             heal_tree(w)?;
             let task = get_task(w.tx, &id)?;
+            if task.parent_id != parent_id {
+                if subtasks::is_subtask(w.tx, &id)? {
+                    return Err(AppError::invalid("a subtask stays with its task"));
+                }
+                if let Some(parent) = &parent_id {
+                    get_task(w.tx, parent)?;
+                    if !subtasks::is_project(w.tx, parent)? {
+                        return Err(AppError::invalid("a task does not become a subtask"));
+                    }
+                }
+            }
             let siblings: Vec<(String, String)> = match &parent_id {
                 Some(parent) => {
                     if *parent == id || descendants(w.tx, &id)?.contains(parent) {
@@ -1451,6 +1532,9 @@ impl Store {
             .unwrap_or_else(|| "file".into());
         let id = self.write(|w| {
             get_task(w.tx, &task_id)?;
+            if subtasks::is_subtask(w.tx, &task_id)? {
+                return Err(AppError::invalid("a subtask has a title only"));
+            }
             let id = new_id();
             w.set(KIND_ATTACHMENT, &id, "task", json!(task_id))?;
             w.set(KIND_ATTACHMENT, &id, "name", json!(name))?;
@@ -1551,6 +1635,10 @@ impl Store {
     fn task_field(&self, id: String, field: &str, value: Value) -> Result<()> {
         self.write(|w| {
             get_task(w.tx, &id)?;
+            // R10: a subtask is renamed, closed, reordered and deleted, and nothing else.
+            if !matches!(field, "title" | "deleted") && subtasks::is_subtask(w.tx, &id)? {
+                return Err(AppError::invalid("a subtask has a title only"));
+            }
             w.task(&id, field, value)
         })
     }
@@ -1778,6 +1866,20 @@ fn create_task(w: &mut Writer, new: NewTask) -> Result<TaskItem> {
     match &new.parent_id {
         Some(parent) => {
             let parent_task = get_task(w.tx, parent)?;
+            // R10: under anything but a project the new task is a subtask.
+            if !subtasks::is_project(w.tx, parent)? {
+                if subtasks::is_subtask(w.tx, parent)? {
+                    return Err(AppError::invalid("a subtask has no subtasks"));
+                }
+                let fields = !new.notes.is_empty()
+                    || new.start.as_deref().is_some_and(|s| !s.is_empty())
+                    || due.is_some()
+                    || priority.is_some_and(|p| p != Priority::None)
+                    || !new.tags.is_empty();
+                if fields {
+                    return Err(AppError::invalid("a subtask has a title only"));
+                }
+            }
             w.task(&id, "parent", json!(parent))?;
             w.task(&id, "list", json!(parent_task.list_id))?;
             w.task(&id, "pos", json!(append_pos_in_parent(w.tx, parent)?))?;

@@ -239,8 +239,11 @@ fn s4_concurrent_inserts_end_up_in_the_same_order() {
 fn s5_concurrent_moves_into_each_other_do_not_leave_a_cycle() {
     let storage = tempfile::tempdir().unwrap();
     let (a, b) = (device(), device());
+    // R10: a task goes under another one only when that one is a project.
     let x = add(&a, "X");
     let y = add(&a, "Y");
+    a.set_project(x.id.clone(), true).unwrap();
+    a.set_project(y.id.clone(), true).unwrap();
     settle(&a, &b, &storage);
 
     a.move_task(x.id.clone(), None, Some(y.id.clone()), None).unwrap();
@@ -258,6 +261,45 @@ fn s5_concurrent_moves_into_each_other_do_not_leave_a_cycle() {
     a.move_task(x.id.clone(), None, None, None).unwrap();
     settle(&a, &b, &storage);
     assert_eq!(view(&b, Scope::Inbox), ["X", "Y"]);
+}
+
+#[test]
+fn s42_what_an_earlier_version_sends_is_brought_to_the_rule_of_subtasks() {
+    let storage = tempfile::tempdir().unwrap();
+    let (a, b) = (device(), device());
+    let top = add(&a, "а");
+    let sub = add_sub(&a, &top, "б");
+    settle(&a, &b, &storage);
+
+    // A device of an earlier version: a due date and a tag on the subtask, and a subtask under it.
+    let later = 0x7fff_ffff_0000_u64;
+    let line = |n: u32, id: &str, field: &str, value: serde_json::Value| {
+        serde_json::json!({"k": "task", "i": id, "f": field, "v": value, "t": format!("{later:012x}-{n:04x}-cccccccccccc")})
+            .to_string()
+    };
+    let lines = [
+        serde_json::json!({"v": 1, "device": "cccccccccccc", "seq": 1, "count": 6}).to_string(),
+        line(0, &sub.id, "due", "2026-10-05".into()),
+        line(1, &sub.id, "tag:дом", true.into()),
+        line(2, "deep", "title", "в".into()),
+        line(3, "deep", "list", INBOX_ID.into()),
+        line(4, "deep", "parent", sub.id.clone().into()),
+        line(5, "deep", "pos", "m".into()),
+    ];
+    std::fs::write(
+        storage.path().join("lists/v1/log/cccccccccccc-0000000001.jsonl"),
+        lines.join("\n") + "\n",
+    )
+    .unwrap();
+
+    settle(&a, &b, &storage);
+    for d in [&a, &b] {
+        assert_eq!(titles(&d.subtasks(top.id.clone()).unwrap()), ["б", "в"]);
+        let got = d.task(sub.id.clone()).unwrap();
+        assert_eq!((got.due, got.tags.len()), (None, 0));
+        assert!(view(d, Scope::Today).is_empty());
+    }
+    assert_eq!(dump(&a), dump(&b));
 }
 
 #[test]

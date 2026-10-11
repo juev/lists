@@ -508,15 +508,15 @@ fn open(dir: &TempDir) -> Result<std::sync::Arc<Store>> {
 #[test]
 fn r92_a_database_of_an_earlier_schema_is_backed_up_before_it_is_migrated() {
     let (dir, titles) = furnished_folder();
-    assert_eq!(schema_version(dir.path()).as_deref(), Some("1"));
-    set_schema_version(dir.path(), Some("0"));
+    assert_eq!(schema_version(dir.path()).as_deref(), Some("2"));
+    set_schema_version(dir.path(), Some("1"));
 
     let store = open(&dir).unwrap();
 
     let backups = store.backups().unwrap();
     assert_eq!(backups.len(), 1);
     assert!(std::path::Path::new(&backups[0].path).starts_with(dir.path().join("backups")));
-    assert_eq!(schema_version(dir.path()).as_deref(), Some("1"));
+    assert_eq!(schema_version(dir.path()).as_deref(), Some("2"));
     assert_eq!(sorted(view(&store, Scope::All)), titles);
     // The copy holds what the database held: a clean install restored from it shows the same.
     let fresh = device();
@@ -566,24 +566,27 @@ fn r92_a_database_of_the_present_schema_gets_no_backup() {
     let dir = tempfile::tempdir().unwrap();
     assert!(open(&dir).unwrap().backups().unwrap().is_empty());
 
-    // A database from before the number was kept is of the first schema, the present one.
-    let (dir, _) = furnished_folder();
-    set_schema_version(dir.path(), None);
-    assert!(open(&dir).unwrap().backups().unwrap().is_empty());
-    assert_eq!(schema_version(dir.path()).as_deref(), Some("1"));
-
     // A database without data has nothing to keep.
     let dir = tempfile::tempdir().unwrap();
     drop(open(&dir).unwrap());
     set_schema_version(dir.path(), Some("0"));
     assert!(open(&dir).unwrap().backups().unwrap().is_empty());
-    assert_eq!(schema_version(dir.path()).as_deref(), Some("1"));
+    assert_eq!(schema_version(dir.path()).as_deref(), Some("2"));
 
     // A database left by a later version keeps its number and gets no copy.
     let (dir, _) = furnished_folder();
     set_schema_version(dir.path(), Some("7"));
     assert!(open(&dir).unwrap().backups().unwrap().is_empty());
     assert_eq!(schema_version(dir.path()).as_deref(), Some("7"));
+}
+
+#[test]
+fn r92_a_database_from_before_the_number_was_kept_is_of_the_first_schema() {
+    // The second schema is the one where the fields of subtasks are removed (R112): the copy keeps them.
+    let (dir, _) = furnished_folder();
+    set_schema_version(dir.path(), None);
+    assert_eq!(open(&dir).unwrap().backups().unwrap().len(), 1);
+    assert_eq!(schema_version(dir.path()).as_deref(), Some("2"));
 }
 
 #[test]
