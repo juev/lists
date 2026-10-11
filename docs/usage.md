@@ -170,7 +170,7 @@ Edits are saved locally at once. Two devices that change different fields of one
 Each device has its own notification settings, and they do not sync:
 
 - whether to show notifications at all;
-- how long before a timed due date to remind: at the time, from 5 minutes to a day before. Several can be on at once, for example a day before and again 15 minutes before;
+- how long before a timed due date to remind: at the time, from 5 minutes to a day before. Several can be on at once, for example a day before and again 15 minutes before. Until you choose, the reminder comes at the time the task is due;
 - at what time to remind about tasks due on a day;
 - an optional summary of the day and its time;
 - the sound. On macOS turn it on or off and choose the standard notification sound or one of the system alert sounds; a system sound plays when you choose it. On Android tap "Sound" to open the system settings of the "Reminders" channel and choose the sound there.

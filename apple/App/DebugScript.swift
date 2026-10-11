@@ -50,6 +50,7 @@ import UserNotifications
 /// `keepdone:5` (sets for how many seconds a completed task stays in view), `keepdone:day` (until the end of the day) and `keepdone` alone (prints it),
 /// `sound:Glass` (chooses the sound of notifications without playing it, `sound:` the standard one; `sound` alone leaves the choice as it is) prints the choice,
 /// whether a notification gets the standard sound, where the copy for the notification centre is and the sounds on offer; no notification is scheduled,
+/// `leads` (prints what each stored choice of "task due at a time" means, R36, and the choice of this Mac),
 /// `notifications` (prints whether the system allows notifications for the app, the requests it holds and whether Settings show the line about a refusal, R111; nothing is asked and nothing is scheduled;
 /// `notifications:ask` also repeats the request for the permission and prints the answer, unless the app was never asked: that would open the dialog;
 /// `notifications:denied` and `notifications:allowed` give the model that answer without asking the system and print whether Settings show the line),
@@ -292,6 +293,14 @@ enum DebugScript {
                     let sound = NotifySound.notification(chosen)
                     let copy = NotifySound.copy(of: chosen).map { FileManager.default.fileExists(atPath: $0.path) ? $0.path : "none" } ?? "no group"
                     print("debug: sound \(chosen.isEmpty ? "standard" : chosen), on \(AppModel.shared.notifySound), plays \(AppModel.shared.notifySoundChoice ?? "nothing"), standard \(sound == .default), copy \(copy), offered \(NotifySound.names)")
+                case "leads":
+                    // R36: what the stored choice of "task due at a time" means, case by case, and the choice of this Mac.
+                    let cases: [(String, [Int]?, Int?, Bool)] = [
+                        ("nothing stored", nil, nil, false), ("15 before the update", [15], nil, false), ("single 15 before the update", nil, 15, false),
+                        ("15 after the update", [15], nil, true), ("15 and 60", [15, 60], nil, false), ("off", [], nil, false), ("single off", nil, -1, false),
+                    ]
+                    let lines = cases.map { "\($0.0) \(AppModel.leads(stored: $0.1, legacy: $0.2, moved: $0.3).sorted())" }
+                    print("debug: leads \(lines.joined(separator: "; ")); this Mac \(AppModel.shared.notifyLeads.sorted())")
                 case "notifications" where argument == "denied" || argument == "allowed":
                     // R111: gives the model the answer of the system without asking the system, and prints what Settings show for it.
                     AppModel.shared.noteNotificationAccess(argument == "denied" ? .denied : .granted, refusal: argument == "denied" ? "debug" : nil)
