@@ -884,6 +884,8 @@ impl Store {
             }
             Ok(())
         })?;
+        // I9: what the file says about subtasks is brought to the rule of R10.
+        self.tidy_if_whole()?;
         for (path, sha256) in blobs {
             let target = self.blob_path(&sha256);
             if !target.exists() {
