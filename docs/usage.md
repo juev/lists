@@ -70,6 +70,8 @@ Deleting can be undone: ⌘Z on macOS, the Undo bar on Android. Completing is un
 
 On macOS subtasks stay folded behind a "Subtasks 1/3" line in the open card, and a task without subtasks does not mention them: add the first one from the "+" button or the context menu.
 
+The card of a new task takes subtasks as well, in the main window and in quick entry: click the subtask icon in the row of fields and type them one by one, Return (Done on Android) after each. They are created with the task when the card is saved; what is still in the field becomes the last one.
+
 A subtask is a line with a mark and a title, and nothing else: it has no note, dates, repeat, reminder, priority, tags, attachments or subtasks of its own. Type its title under the task to add it. Rename it in its line: on macOS press Return on the selected subtask or double-click it, on Android tap its title. Its menu (a right click on macOS, a long press on Android) holds rename, complete, won't do and delete. A subtask stays with its task: it is not moved to another task or list and does not become a task. It never stands in Today, Upcoming or another view on its own; search finds a task by the title of its subtask and shows the subtask under it. Completing a task completes its open subtasks; reopening it leaves them as they are.
 
 Subtasks made by an earlier version, by an import or by a CalDAV client may carry dates, notes, tags, files or subtasks of their own. Lists removes those fields and raises a subtask of a subtask one level, right after its former parent. Before it does so for the first time it makes a backup of the data (see Backups).

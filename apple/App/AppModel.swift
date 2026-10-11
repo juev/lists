@@ -662,6 +662,9 @@ final class AppModel {
             let priority = !draft.priorityChosen ? created.priority : draft.priority == .none ? named?.priority ?? Priority.none : draft.priority
             if priority != created.priority { try store.setPriority(id: created.id, priority: priority) }
             for tag in draft.tags where !created.tags.contains(tag) { try store.addTag(id: created.id, tag: tag) }
+            // R113: the subtasks typed in the card, in their order and with their titles as typed.
+            let subtasks = draft.typedSubtasks
+            if !subtasks.isEmpty { _ = try store.addSubtasks(parentId: created.id, titles: subtasks) }
             return try store.task(id: created.id)
         }
         if let task {
