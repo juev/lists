@@ -43,7 +43,7 @@ targets:
       - package: KeyboardShortcuts
       - target: ListsShare
         embed: true
-      # R115: the system starts a login item from this place in the bundle.
+      # R115: the helper of quick entry; its launch agent names this place.
       - target: ListsHelper
         embed: true
         copy:

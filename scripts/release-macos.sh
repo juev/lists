@@ -35,7 +35,7 @@ version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/
 dmg="$root/dist/Lists-$version-macos-arm64.dmg"
 
 codesign --verify --deep --strict "$app"
-# The helper of quick entry is a login item: the system looks for it in this place only.
+# The helper of quick entry: its launch agent names this place.
 if [ ! -d "$app/Contents/Library/LoginItems/ListsHelper.app" ]; then
     echo "macos: the helper of quick entry is not in the app" >&2
     exit 1

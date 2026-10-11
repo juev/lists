@@ -546,7 +546,7 @@ enum DebugScript {
                     if parts.count == 2 { AppModel.shared.setLoginItem(parts[0] == "helper" ? .helper : .app, on: parts[1] == "on") }
                     AppModel.shared.reloadLoginItems()
                     let helpers = NSRunningApplication.runningApplications(withBundleIdentifier: LoginItems.helperIdentifier).filter { !$0.isTerminated }
-                    print("debug: login items app \(AppModel.shared.opensAtLogin) helper \(AppModel.shared.helperAtLogin) refusal \(AppModel.shared.loginItemRefusal.values.sorted()) helper running \(helpers.map { $0.bundleURL?.path ?? "?" })")
+                    print("debug: login items app \(AppModel.shared.opensAtLogin) helper \(AppModel.shared.helperAtLogin) refusal \(AppModel.shared.loginItemRefusal.values.sorted()) helper running \(helpers.map { "\($0.processIdentifier) \($0.bundleURL?.path ?? "?")" })")
                 case "editmenu":
                     print("debug: main menu \(NSApp.mainMenu?.items.map(\.title) ?? []), paste \(NSApp.mainMenu?.items.contains { $0.submenu?.items.contains { $0.action == #selector(NSText.paste(_:)) } == true } == true)")
                 case "helperkey":
