@@ -207,6 +207,41 @@ fn todoist_csv_template() {
 }
 
 #[test]
+fn i9_a_subtask_keeps_its_title_and_one_level() {
+    let d = device();
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("Home.csv");
+    std::fs::write(
+        &file,
+        "TYPE,CONTENT,DESCRIPTION,PRIORITY,INDENT,AUTHOR,RESPONSIBLE,DATE,DATE_LANG,TIMEZONE\n\
+         task,Repair,,4,1,me (1),,,en,UTC\n\
+         task,Kitchen @room,About the kitchen,1,2,me (1),,2026-10-09,en,UTC\n\
+         task,Tiles,,1,3,me (1),,2026-10-10,en,UTC\n\
+         task,Hall,,4,2,me (1),,,en,UTC\n",
+    )
+    .unwrap();
+    d.import_file(file.to_string_lossy().into_owned()).unwrap();
+
+    let list = d.lists().unwrap().into_iter().find(|l| l.name == "Home").unwrap();
+    let tasks = d.tasks(Scope::List { id: list.id }).unwrap();
+    assert_eq!(titles(&tasks), ["Repair"]);
+    let lines = d.subtasks(tasks[0].id.clone()).unwrap();
+    assert_eq!(
+        titles(&lines),
+        ["Kitchen", "Tiles", "Hall"],
+        "the deeper one stands after its former parent"
+    );
+    for line in &lines {
+        assert_eq!(
+            (line.due.as_deref(), line.priority, line.notes.as_str()),
+            (None, Priority::None, "")
+        );
+        assert!(line.tags.is_empty());
+    }
+    assert!(d.tasks(Scope::Upcoming).unwrap().is_empty());
+}
+
+#[test]
 fn trello_board_json() {
     let d = device();
     let dir = tempfile::tempdir().unwrap();
