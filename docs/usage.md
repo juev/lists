@@ -177,6 +177,8 @@ Each device has its own notification settings, and they do not sync:
 
 A reminder set on a task itself replaces the one derived from its due date. The web interface does not notify.
 
+On macOS the system decides whether Lists may show notifications. When it does not allow them, Settings → Notifications shows "macOS does not allow notifications for Lists. Open System Settings…": click it and allow the notifications of Lists there. Until then no notification is shown, whatever the other settings say.
+
 On macOS the icon in the Dock carries a count of tasks. Settings → Notifications → "Count on the icon" chooses what is counted: "Today" (the open tasks of the Today view, the overdue ones among them; the default), "Overdue tasks" or "Do not show". With nothing to count the icon has no number. The choice belongs to the Mac and does not sync.
 
 On Android, Settings → Notifications → "Today's tasks in the notification shade" keeps a permanent notification with the open tasks of Today: their count, the first five titles and a "New task" button that opens quick entry. It is off by default and does not depend on "Show notifications". It is silent and has a channel of its own, "Quick add", which the system settings can hide apart from the reminders. It comes back when it is swiped away, after a restart of the device and after an update of the app; only the switch removes it.

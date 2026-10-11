@@ -260,6 +260,31 @@ final class Reminders {
     static let shared = Reminders()
     private var scheduled: [String] = []
 
+    /// What the system says about notifications of the app (R111).
+    enum Access { case unasked, denied, granted }
+
+    static func access(_ status: UNAuthorizationStatus) -> Access {
+        switch status {
+        case .notDetermined: .unasked
+        case .denied: .denied
+        default: .granted
+        }
+    }
+
+    func access() async -> Access {
+        Self.access(await UNUserNotificationCenter.current().notificationSettings().authorizationStatus)
+    }
+
+    /// The plan that was refused is handed over again once the permission is there.
+    func forget() { scheduled = [] }
+
+    /// The notifications of Lists in System Settings.
+    func openSystemSettings() {
+        let id = Bundle.main.bundleIdentifier ?? ""
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=\(id)") else { return }
+        NSWorkspace.shared.open(url)
+    }
+
     /// Takes the store as an argument: it is called while `AppModel.shared` is still being built.
     /// `sound` is the name of a system sound, empty for the standard one and nil for silence.
     func refresh(_ store: Store?, settings: NotifySettings, sound: String?) {
@@ -287,7 +312,9 @@ final class Reminders {
             return UNNotificationRequest(identifier: item.key, content: content, trigger: UNCalendarNotificationTrigger(dateMatching: parts, repeats: false))
         }
         // Permission is asked the first time there is something to show.
-        center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
+        center.requestAuthorization(options: [.alert, .sound]) { granted, error in
+            let refusal = error.map { "\(($0 as NSError).domain) \(($0 as NSError).code): \($0.localizedDescription)" }
+            Task { @MainActor in AppModel.shared.reloadNotificationAccess(refusal: refusal) }
             guard granted else { return }
             center.removeAllPendingNotificationRequests()
             requests.forEach { center.add($0) }
