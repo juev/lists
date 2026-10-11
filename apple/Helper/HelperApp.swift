@@ -35,10 +35,7 @@ final class HelperDelegate: NSObject, NSApplicationDelegate {
         let center = NSWorkspace.shared.notificationCenter
         center.addObserver(forName: NSWorkspace.didLaunchApplicationNotification, object: nil, queue: .main) { [weak self] note in
             guard Self.isLists(note) else { return }
-            MainActor.assumeIsolated {
-                if self?.restartIfReplaced() == true { return }
-                self?.followLists()
-            }
+            MainActor.assumeIsolated { self?.followLists() }
         }
         center.addObserver(forName: NSWorkspace.didTerminateApplicationNotification, object: nil, queue: .main) { [weak self] note in
             guard Self.isLists(note) else { return }
@@ -89,25 +86,5 @@ final class HelperDelegate: NSObject, NSApplicationDelegate {
         #if DEBUG
         print("debug: helper key \(holdsKey ? "held" : "released")")
         #endif
-    }
-
-    /// A helper left running by a version of Lists that has since been replaced starts the new one in
-    /// its place, so that an old core does not write into a newer data folder.
-    @MainActor
-    private func restartIfReplaced() -> Bool {
-        let bundle = Bundle.main.bundleURL
-        let onDisk = NSDictionary(contentsOf: bundle.appendingPathComponent("Contents/Info.plist"))?["CFBundleVersion"] as? String
-        guard onDisk != (Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String) else { return false }
-        guard onDisk != nil else {
-            NSApp.terminate(nil)
-            return true
-        }
-        let configuration = NSWorkspace.OpenConfiguration()
-        configuration.createsNewApplicationInstance = true
-        configuration.activates = false
-        NSWorkspace.shared.openApplication(at: bundle, configuration: configuration) { _, _ in
-            DispatchQueue.main.async { NSApp.terminate(nil) }
-        }
-        return true
     }
 }
