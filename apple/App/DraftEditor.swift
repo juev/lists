@@ -196,10 +196,16 @@ struct DraftEditor: View {
         onClose()
     }
 
-    /// Esc and "Cancel": the card goes and nothing is created (R37).
+    /// Esc: the card goes and its task is kept, like Return in the title (R37). There is no way out of the
+    /// card that throws a titled task away: a task made by mistake is deleted, or taken back with ⌘Z.
     private func cancel() {
         // Esc with a popover open is for the popover: it reaches the card as well.
         if popover != nil { return popover = nil }
+        close()
+    }
+
+    /// "Cancel" of the quick-entry panel: the one button that closes a card without making its task.
+    private func discard() {
         draft.files.forEach(IncomingFiles.discard)
         onClose()
     }
@@ -258,7 +264,7 @@ struct DraftEditor: View {
         HStack(spacing: 8) {
             if draft.parentId == nil { listMenu(strong: true) }
             Spacer(minLength: 8)
-            Button(L("Cancel"), action: cancel)
+            Button(L("Cancel"), action: discard)
                 .buttonStyle(StripButton(fill: Color.secondary.opacity(0.55)))
             Button(L("Save"), action: close)
                 .buttonStyle(StripButton(fill: .accentColor))

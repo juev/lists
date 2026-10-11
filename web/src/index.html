@@ -292,11 +292,11 @@ function summary(x, origin) {
   if (x.subtasks) out.push($("span", {}, `☑ ${x.subtasksDone}/${x.subtasks}`));
   if (x.attachments) out.push($("span", {}, `📎 ${x.attachments}`));
   for (const tag of x.tags) out.push($("span", {}, "#" + tag));
-  // R72: the list in its colour, unless it is the Inbox, then the project of a task of a project.
+  // R72: the list in its colour, the Inbox among them, then the project of a task of a project.
   // Only a task of a project has a parent among the rows, so the title after the list is the project's.
   if (origin) {
-    const l = x.list === "inbox" ? null : state.overview.lists.find(l => l.id === x.list);
-    const name = l ? $("span", { style: /^#[0-9a-f]{6}$/i.test(l.color) ? `color:${l.color}` : "" }, l.name) : null;
+    const l = state.overview.lists.find(l => l.id === x.list);
+    const name = l ? $("span", { style: /^#[0-9a-f]{6}$/i.test(l.color) ? `color:${l.color}` : "" }, listName(x.list)) : null;
     if (name || x.parentTitle) out.push($("span", {}, name, x.parentTitle ? (name ? " – " : "") + x.parentTitle : null));
   }
   return out.length ? $("div", { class: "meta" }, out) : null;

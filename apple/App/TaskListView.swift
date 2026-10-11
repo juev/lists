@@ -94,6 +94,17 @@ struct TaskListView: View {
                         if !typing { listFocused = true }
                         withAnimation { proxy.scrollTo(new) }
                     }
+                    // A card is taller than the row it opens from: at the bottom of the window the rest of it would be
+                    // out of sight. The list moves after the card has its height, which takes a turn or two (R38).
+                    .onChange(of: model.expanded) { before, now in
+                        guard let opened = now.subtracting(before).first else { return }
+                        for wait in [0.0, 0.2] {
+                            DispatchQueue.main.asyncAfter(deadline: .now() + wait) {
+                                guard model.expanded.contains(opened) else { return }
+                                withAnimation { proxy.scrollTo(opened) }
+                            }
+                        }
+                    }
                     .onChange(of: model.listFocusRequests) { _, _ in listFocused = true }
                 }
             }
