@@ -229,6 +229,7 @@
     <string name="quick_add">New task</string>
     <string name="reminders_channel">Reminders</string>
     <string name="quick_add_channel">Quick add</string>
+    <string name="quick_add_counted_channel">Quick add, with the count on the icon</string>
     <string name="today_notice_title">Today: %1$s</string>
     <string name="today_notice_empty">Nothing for today</string>
     <string name="today_notice_more">%1$s more</string>
@@ -238,7 +239,8 @@
     <string name="icon_count_overdue_choice">Overdue tasks</string>
     <string name="icon_count_none">Do not show</string>
     <string name="icon_count_overdue">Overdue: %1$s</string>
-    <string name="icon_count_hint">The count is carried by a silent notification. Some home screens show a dot on the icon and the number when the icon is held.</string>
+    <string name="icon_count_hint">The count is carried by the notification with the tasks of Today. Some home screens show a dot on the icon and the number when the icon is held.</string>
+    <string name="icon_count_needs_notice">The count is carried by the notification with the tasks of Today: turn it on above to see the number.</string>
     <string name="password_missing">Enter the password in the sync settings.</string>
     <string name="password_store_failed">The password could not be saved in the system keychain: %1$s</string>
     <string name="caldav_hint">Lists become calendars and tasks stay visible to other CalDAV apps. Attachments up to 5 MB are synced, up to 20 MB per task.</string>

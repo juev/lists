@@ -65,7 +65,6 @@ class ListsApp : Application() {
         Repo.scope.launch {
             Reminders.refresh(this@ListsApp)
             TodayNotice.refresh(this@ListsApp)
-            IconCount.refresh(this@ListsApp)
             TaskWidgets.refresh(this@ListsApp)
         }
     }
@@ -100,7 +99,6 @@ object Repo {
         pending = scope.launch {
             Reminders.refresh(ListsApp.instance)
             TodayNotice.refresh(ListsApp.instance)
-            IconCount.refresh(ListsApp.instance)
             TaskWidgets.refresh(ListsApp.instance)
         }
         SyncWorker.soon(ListsApp.instance)
@@ -119,7 +117,6 @@ object Repo {
             if (result.getOrNull()?.pulled?.let { it > 0u } == true) {
                 Reminders.refresh(ListsApp.instance)
                 TodayNotice.refresh(ListsApp.instance)
-                IconCount.refresh(ListsApp.instance)
                 TaskWidgets.refresh(ListsApp.instance)
             }
             result
@@ -469,7 +466,6 @@ class BootReceiver : BroadcastReceiver() {
             Repo.scope.launch {
                 Reminders.refresh(context.applicationContext)
                 TodayNotice.refresh(context.applicationContext)
-                IconCount.refresh(context.applicationContext)
                 TaskWidgets.refresh(context.applicationContext)
                 result.finish()
             }

@@ -63,7 +63,7 @@ class MainActivity : ComponentActivity() {
     private val model: MainViewModel by viewModels()
     private val askNotifications = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
         // R104, R106: the notifications that waited for the permission are shown now.
-        Repo.scope.launch { TodayNotice.refresh(applicationContext); IconCount.refresh(applicationContext) }
+        Repo.scope.launch { TodayNotice.refresh(applicationContext) }
     }
 
     override fun attachBaseContext(base: Context) {
