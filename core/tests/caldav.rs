@@ -279,6 +279,50 @@ fn c7_c8_another_client_edits_standard_properties_and_adds_its_own() {
 }
 
 #[test]
+fn c29_what_another_client_gives_a_subtask_is_removed() {
+    let dav = start();
+    let (a, b) = pair(&dav);
+    let top = add(&a, "задача");
+    let first = add_sub(&a, &top, "первая");
+    let second = add_sub(&a, &top, "вторая");
+    settle(&a, &b);
+    assert!(!dav.read(&first.id).contains("\nDUE"));
+
+    // Another client gives the first subtask a due date and a priority and hangs the second one under it.
+    dav.edit(&first.id, |mut lines| {
+        let end = lines.iter().position(|l| l == "END:VTODO").unwrap();
+        lines.insert(end, "PRIORITY:1".to_string());
+        lines.insert(end, "DUE;VALUE=DATE:20261009".to_string());
+        lines
+    });
+    let under = first.id.clone();
+    dav.edit(&second.id, move |lines| {
+        lines
+            .into_iter()
+            .map(|l| {
+                if l.starts_with("RELATED-TO") {
+                    format!("RELATED-TO;RELTYPE=PARENT:{under}")
+                } else {
+                    l
+                }
+            })
+            .collect()
+    });
+    settle(&a, &b);
+
+    for d in [&a, &b] {
+        let got = d.task(first.id.clone()).unwrap();
+        assert_eq!((got.due, got.priority), (None, Priority::None));
+        assert_eq!(titles(&d.subtasks(top.id.clone()).unwrap()), ["первая", "вторая"]);
+    }
+    let object = dav.read(&first.id);
+    assert!(!object.contains("\nDUE") && !object.contains("\nPRIORITY"), "{object}");
+    assert!(dav
+        .read(&second.id)
+        .contains(&format!("RELATED-TO;RELTYPE=PARENT:{}", top.id)));
+}
+
+#[test]
 fn c9_state_removed_by_another_client_is_restored_without_losing_fields() {
     let dav = start();
     let (a, b) = pair(&dav);

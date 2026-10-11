@@ -4,6 +4,7 @@ mod common;
 
 use common::*;
 use lists_core::*;
+use serde_json::json;
 
 fn weekly() -> Repeat {
     Repeat {
@@ -194,6 +195,7 @@ fn r7_tags_list_only_those_in_use() {
 fn r9_trash_restore_and_purge() {
     let d = device();
     let t = add(&d, "мусор");
+    d.set_project(t.id.clone(), true).unwrap();
     let sub = add_sub(&d, &t, "часть");
     d.set_due(sub.id.clone(), Some("2026-10-05".into())).unwrap();
     assert_eq!(view(&d, Scope::Today), ["часть"]);
@@ -302,32 +304,208 @@ fn r46_completed_lists_the_whole_log() {
 }
 
 #[test]
-fn r10_subtasks_carry_every_field_and_nest() {
+fn r10_a_subtask_has_a_title_only() {
     let d = device();
-    let top = add(&d, "проект");
-    let sub = add_sub(&d, &top, "этап");
-    let deep = add_sub(&d, &sub, "шаг");
-    d.set_due(deep.id.clone(), Some("2026-10-09".into())).unwrap();
-    d.set_priority(deep.id.clone(), Priority::High).unwrap();
-    d.set_repeat(deep.id.clone(), Some(weekly())).unwrap();
-    d.add_tag(deep.id.clone(), "глубоко".into()).unwrap();
+    let top = add(&d, "а");
+    let other = add(&d, "в");
+    let sub = add_sub(&d, &top, "б");
 
-    let got = d.task(deep.id).unwrap();
-    assert_eq!(got.parent_id.as_deref(), Some(sub.id.as_str()));
-    assert_eq!(got.parent_title.as_deref(), Some("этап"));
-    assert_eq!((got.priority, got.due.as_deref()), (Priority::High, Some("2026-10-09")));
-    assert!(got.repeat.is_some());
-    assert_eq!(got.tags, ["глубоко"]);
+    // No field but the title.
+    assert!(d.set_due(sub.id.clone(), Some("2026-10-09".into())).is_err());
+    assert!(d.set_start(sub.id.clone(), Some("2026-10-09".into())).is_err());
+    assert!(d.set_notes(sub.id.clone(), "заметка".into()).is_err());
+    assert!(d.set_priority(sub.id.clone(), Priority::High).is_err());
+    assert!(d.set_remind(sub.id.clone(), Some("2026-10-09T09:00".into())).is_err());
+    assert!(d.set_repeat(sub.id.clone(), Some(weekly())).is_err());
+    assert!(d.add_tag(sub.id.clone(), "дом".into()).is_err());
+    let file = d.dir().join("файл.txt");
+    std::fs::write(&file, b"1").unwrap();
+    assert!(d
+        .add_attachment(sub.id.clone(), file.to_string_lossy().into_owned(), None)
+        .is_err());
+    let with_due = NewTask {
+        title: "г".into(),
+        parent_id: Some(top.id.clone()),
+        due: Some("2026-10-09".into()),
+        ..NewTask::default()
+    };
+    assert!(d.create_task(with_due).is_err());
+    // The line typed under a task is the title as it stands: nothing is picked out of it.
+    let typed = d
+        .quick_add_under("молоко завтра !! #дом".into(), top.id.clone())
+        .unwrap();
+    assert_eq!(typed.title, "молоко завтра !! #дом");
+    assert_eq!((typed.due, typed.priority, typed.tags.len()), (None, Priority::None, 0));
 
-    assert_eq!(view(&d, Scope::Inbox), ["проект"], "only top-level tasks in a list");
-    assert_eq!(titles(&d.subtasks(top.id.clone()).unwrap()), ["этап"]);
-    assert_eq!(d.task(top.id).unwrap().subtasks_total, 1);
+    // No subtasks of its own, and it stays with its task.
+    assert!(d.quick_add_under("глубже".into(), sub.id.clone()).is_err());
+    assert!(d.move_task(sub.id.clone(), None, None, None).is_err());
+    assert!(d.move_task(sub.id.clone(), None, Some(other.id.clone()), None).is_err());
+    assert!(d.move_to_list(sub.id.clone(), INBOX_ID.into()).is_err());
+    // A task does not become a subtask.
+    assert!(d.move_task(other.id.clone(), None, Some(top.id.clone()), None).is_err());
+    assert!(d.move_task(other.id.clone(), None, Some(sub.id.clone()), None).is_err());
+
+    // What a line can do: be renamed, reordered, closed and deleted.
+    d.set_title(sub.id.clone(), "б2".into()).unwrap();
+    assert_eq!(
+        titles(&d.subtasks(top.id.clone()).unwrap()),
+        ["б2", "молоко завтра !! #дом"]
+    );
+    d.move_task(sub.id.clone(), None, Some(top.id.clone()), Some(typed.id.clone()))
+        .unwrap();
+    assert_eq!(
+        titles(&d.subtasks(top.id.clone()).unwrap()),
+        ["молоко завтра !! #дом", "б2"]
+    );
+    d.wont_do_task(typed.id).unwrap();
+    d.complete_task(sub.id.clone()).unwrap();
+    assert_eq!(d.task(top.id.clone()).unwrap().subtasks_done, 1);
+    d.delete_task(sub.id).unwrap();
+    assert_eq!(d.subtasks(top.id.clone()).unwrap().len(), 1);
+
+    assert_eq!(view(&d, Scope::Inbox), ["а", "в"], "only top-level tasks in a list");
+}
+
+#[test]
+fn r10_the_tasks_of_a_project_are_full_tasks() {
+    let d = device();
+    let project = add(&d, "п");
+    d.set_project(project.id.clone(), true).unwrap();
+    let task = d.quick_add_under("т завтра !!".into(), project.id.clone()).unwrap();
+    assert_eq!((task.title.as_str(), task.due.as_deref()), ("т", Some("2026-10-06")));
+    d.set_notes(task.id.clone(), "заметка".into()).unwrap();
+    d.add_tag(task.id.clone(), "дом".into()).unwrap();
+    assert_eq!(view(&d, Scope::Upcoming), ["т"]);
+
+    // A task of a project has subtasks, and those have a title only.
+    let sub = add_sub(&d, &task, "у");
+    assert!(d.set_due(sub.id.clone(), Some("2026-10-09".into())).is_err());
+    assert!(d.quick_add_under("глубже".into(), sub.id).is_err());
+
+    // A task goes into a project and out of it with its fields.
+    let loose = add(&d, "в");
+    d.set_due(loose.id.clone(), Some("2026-10-07".into())).unwrap();
+    d.move_task(loose.id.clone(), None, Some(project.id.clone()), None)
+        .unwrap();
+    assert_eq!(d.task(loose.id.clone()).unwrap().due.as_deref(), Some("2026-10-07"));
+    d.move_to_list(task.id.clone(), INBOX_ID.into()).unwrap();
+    let out = d.task(task.id).unwrap();
+    assert_eq!(
+        (out.parent_id, out.due.as_deref(), out.notes.as_str()),
+        (None, Some("2026-10-06"), "заметка")
+    );
+
+    // R32: a project with tasks is not turned back; an empty one is.
+    assert!(d.set_project(project.id.clone(), false).is_err());
+    let empty = add(&d, "пусто");
+    d.set_project(empty.id.clone(), true).unwrap();
+    d.set_project(empty.id, false).unwrap();
+}
+
+#[test]
+fn r112_data_from_before_the_rule_is_brought_to_it() {
+    let d = device();
+    let top = add(&d, "а");
+    let sub = add_sub(&d, &top, "б");
+    let last = add_sub(&d, &top, "я");
+    let deep = add(&d, "в");
+    let deeper = add(&d, "г");
+    let project = add(&d, "п");
+    d.set_project(project.id.clone(), true).unwrap();
+    let dated = add_sub(&d, &project, "т");
+    d.set_due(dated.id.clone(), Some("2026-10-05".into())).unwrap();
+    d.add_tag(dated.id.clone(), "дом".into()).unwrap();
+
+    let tag = "tag:дом";
+    let d = plant(
+        d,
+        &[
+            ("task", &sub.id, "due", json!("2026-10-05")),
+            ("task", &sub.id, "start", json!("2026-10-04")),
+            ("task", &sub.id, "notes", json!("заметка")),
+            ("task", &sub.id, "priority", json!(3)),
+            ("task", &sub.id, "remind", json!("2026-10-05T12:00")),
+            ("task", &sub.id, "repeat", serde_json::to_value(weekly()).unwrap()),
+            ("task", &sub.id, tag, json!(true)),
+            ("attachment", "file-1", "task", json!(sub.id)),
+            ("attachment", "file-1", "name", json!("файл.txt")),
+            // A chain three deep: а → б → в → г.
+            ("task", &deep.id, "parent", json!(sub.id)),
+            ("task", &deeper.id, "parent", json!(deep.id)),
+        ],
+    );
+
+    assert_eq!(titles(&d.subtasks(top.id.clone()).unwrap()), ["б", "в", "г", "я"]);
+    let _ = last;
+    let got = d.task(sub.id.clone()).unwrap();
+    assert_eq!(
+        (
+            got.due,
+            got.start,
+            got.notes.as_str(),
+            got.priority,
+            got.remind,
+            got.repeat
+        ),
+        (None, None, "", Priority::None, None, None)
+    );
+    assert!(got.tags.is_empty());
+    assert!(d.attachments(sub.id).unwrap().is_empty());
+    assert_eq!(d.task(deeper.id).unwrap().parent_id, Some(top.id));
+    // R12: a subtask does not stand on its own; the task of a project does, as before.
+    assert_eq!(view(&d, Scope::Today), ["т"]);
+    assert_eq!(view(&d, Scope::Tag { name: "дом".into() }), ["т"]);
+    assert_eq!(view(&d, Scope::Inbox), ["а", "п"]);
+    assert!(d
+        .planned_notifications(notify_all())
+        .unwrap()
+        .iter()
+        .all(|n| n.title != "б"));
+}
+
+#[test]
+fn r22_a_subtask_is_found_inside_its_task() {
+    let d = device();
+    let shop = add(&d, "купить");
+    add_sub(&d, &shop, "Молоко");
+    add_sub(&d, &shop, "хлеб");
+    add(&d, "молоко отдельно");
+
+    let found = d
+        .tasks(Scope::Search {
+            text: "молоко".into()
+        })
+        .unwrap();
+    assert_eq!(sorted_titles(&found), ["купить", "молоко отдельно"]);
+    assert_eq!(
+        titles(&d.found_subtasks(shop.id.clone(), "молоко".into()).unwrap()),
+        ["Молоко"]
+    );
+    assert!(d.found_subtasks(shop.id, " ".into()).unwrap().is_empty());
+}
+
+fn sorted_titles(tasks: &[TaskItem]) -> Vec<&str> {
+    let mut all = titles(tasks);
+    all.sort_unstable();
+    all
+}
+
+fn notify_all() -> NotifySettings {
+    NotifySettings {
+        enabled: true,
+        lead_minutes: vec![0],
+        all_day_at: Some("09:00".into()),
+        summary_at: None,
+    }
 }
 
 #[test]
 fn r11_completing_a_task_completes_its_open_subtasks() {
     let d = device();
     let top = add(&d, "родитель");
+    // Two levels below: the tasks of a project and a subtask of one of them (R10).
+    d.set_project(top.id.clone(), true).unwrap();
     let a = add_sub(&d, &top, "a");
     let b = add_sub(&d, &top, "b");
     let deep = add_sub(&d, &b, "deep");
@@ -343,45 +521,6 @@ fn r11_completing_a_task_completes_its_open_subtasks() {
     d.reopen_task(top.id.clone()).unwrap();
     assert!(d.task(top.id).unwrap().done.is_none());
     assert!(d.task(a.id).unwrap().done.is_some());
-}
-
-#[test]
-fn r12_dated_subtask_shows_up_on_its_own_with_parent_title() {
-    let d = device();
-    let top = add(&d, "поездка");
-    let sub = add_sub(&d, &top, "билеты");
-    d.set_due(sub.id, Some("2026-10-05".into())).unwrap();
-    let today = d.tasks(Scope::Today).unwrap();
-    assert_eq!(titles(&today), ["билеты"]);
-    assert_eq!(today[0].parent_title.as_deref(), Some("поездка"));
-}
-
-#[test]
-fn r13_moving_between_parents_and_lists() {
-    let d = device();
-    let list = d.create_list("Дом".into()).unwrap();
-    let a = add(&d, "A");
-    let b = add_sub(&d, &a, "B");
-    let c = add_sub(&d, &b, "C");
-
-    // A task cannot become its own descendant.
-    assert!(d.move_task(a.id.clone(), None, Some(b.id.clone()), None).is_err());
-    assert!(d.move_task(a.id.clone(), None, Some(c.id.clone()), None).is_err());
-    assert!(d.move_task(a.id.clone(), None, Some(a.id.clone()), None).is_err());
-
-    // Subtask becomes a top-level task of another list and takes its subtree along.
-    d.move_task(b.id.clone(), Some(list.id.clone()), None, None).unwrap();
-    assert_eq!(view(&d, Scope::List { id: list.id.clone() }), ["B"]);
-    assert_eq!(d.task(c.id.clone()).unwrap().list_id, list.id);
-    assert_eq!(d.task(a.id.clone()).unwrap().subtasks_total, 0);
-
-    // And back under A.
-    d.move_task(b.id.clone(), None, Some(a.id.clone()), None).unwrap();
-    assert_eq!(d.task(c.id).unwrap().list_id, INBOX_ID);
-    assert_eq!(titles(&d.subtasks(a.id.clone()).unwrap()), ["B"]);
-
-    d.move_to_list(a.id, list.id.clone()).unwrap();
-    assert_eq!(d.task(b.id).unwrap().list_id, list.id);
 }
 
 #[test]
@@ -621,8 +760,7 @@ fn duplicate_copies_the_subtree_next_to_the_original() {
     let d = device();
     let a = add(&d, "a");
     add(&d, "z");
-    let sub = add_sub(&d, &a, "sub");
-    add_sub(&d, &sub, "deep");
+    add_sub(&d, &a, "sub");
     d.set_repeat(a.id.clone(), Some(weekly())).unwrap();
 
     let copy = d.duplicate_task(a.id).unwrap();
@@ -630,7 +768,6 @@ fn duplicate_copies_the_subtree_next_to_the_original() {
     assert!(copy.repeat.is_some());
     let copied_sub = d.subtasks(copy.id).unwrap();
     assert_eq!(titles(&copied_sub), ["sub"]);
-    assert_eq!(titles(&d.subtasks(copied_sub[0].id.clone()).unwrap()), ["deep"]);
 }
 
 #[test]
@@ -715,14 +852,12 @@ fn projects_are_tasks_with_a_view_of_their_own() {
         "project tasks show up in the date views"
     );
 
-    // A subtask cannot be a project; turning a project back keeps its tasks.
+    // A task of a project cannot be a project; a project with tasks is not turned back (R32).
     assert!(d.set_project(design.id, true).is_err());
-    d.set_project(launch.id.clone(), false).unwrap();
-    assert!(d.projects().unwrap().is_empty());
+    assert!(d.set_project(launch.id.clone(), false).is_err());
     assert_eq!(d.subtasks(launch.id.clone()).unwrap().len(), 2);
 
     // A completed project leaves the sidebar.
-    d.set_project(launch.id.clone(), true).unwrap();
     d.complete_task(launch.id).unwrap();
     assert!(d.projects().unwrap().is_empty());
 }
@@ -1356,6 +1491,7 @@ fn r69_a_task_closed_as_wont_do_is_kept_then_logged_and_can_be_reopened() {
 fn r69_open_subtasks_get_the_same_outcome_and_completed_ones_keep_theirs() {
     let d = device();
     let top = add(&d, "родитель");
+    d.set_project(top.id.clone(), true).unwrap();
     let done = add_sub(&d, &top, "сделана");
     let open = add_sub(&d, &top, "открыта");
     let deep = add_sub(&d, &open, "глубже");
@@ -1378,6 +1514,7 @@ fn r69_r11_undoing_a_close_reopens_the_subtasks_closed_with_it() {
     for wont in [true, false] {
         let d = device();
         let top = add(&d, "родитель");
+        d.set_project(top.id.clone(), true).unwrap();
         let done = add_sub(&d, &top, "сделана");
         let open = add_sub(&d, &top, "открыта");
         let deep = add_sub(&d, &open, "глубже");

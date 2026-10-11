@@ -60,3 +60,33 @@ pub fn titles(tasks: &[TaskItem]) -> Vec<&str> {
 pub fn view(store: &Store, view: Scope) -> Vec<String> {
     store.tasks(view).unwrap().into_iter().map(|t| t.title).collect()
 }
+
+/// Writes registers straight into the database of a closed device, the way an earlier version of the
+/// app could have left them, and opens the folder again: whatever the present version makes of them
+/// at the start is in the store that comes back. A register is `(kind, id, field, value)`.
+pub fn plant(device: Device, registers: &[(&str, &str, &str, serde_json::Value)]) -> Device {
+    let Device { store, _dir: dir } = device;
+    drop(store);
+    {
+        let conn = rusqlite::Connection::open(dir.path().join("lists.sqlite")).unwrap();
+        let newest: String = conn
+            .query_row("SELECT max(stamp) FROM fields", [], |r| r.get(0))
+            .unwrap();
+        // A stamp is `<ms>-<counter>-<device>`: the planted ones are later than everything there.
+        let ms = u64::from_str_radix(&newest[..12], 16).unwrap() + 1;
+        for (index, (kind, id, field, value)) in registers.iter().enumerate() {
+            let stamp = format!("{ms:012x}-{index:04x}-{}", &newest[18..]);
+            conn.execute(
+                "INSERT OR REPLACE INTO fields (kind, id, field, value, stamp, dirty) VALUES (?1, ?2, ?3, ?4, ?5, 1)",
+                rusqlite::params![kind, id, field, value.to_string(), stamp],
+            )
+            .unwrap();
+        }
+        // The derived tables are built again from the registers at the start.
+        conn.execute("DELETE FROM meta WHERE key = 'derived_version'", [])
+            .unwrap();
+    }
+    let store = Store::open(dir.path().to_string_lossy().into_owned()).unwrap();
+    store.set_now_for_tests(NOW);
+    Device { store, _dir: dir }
+}

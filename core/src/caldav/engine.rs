@@ -139,6 +139,7 @@ impl Store {
     fn apply_remote(&self, changes: Vec<Change>) -> Result<u32> {
         let mut inner = self.lock();
         let inner = &mut *inner;
+        let now_ms = inner.now_ms();
         let tx = inner
             .conn
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -151,6 +152,8 @@ impl Store {
             }
         }
         db::settle(&tx, &touched)?;
+        // C29: what the state on the server says about a subtask is brought to the rule of subtasks.
+        crate::subtasks::tidy(&tx, &mut || inner.clock.tick(now_ms))?;
         tx.commit()?;
         Ok(changed)
     }

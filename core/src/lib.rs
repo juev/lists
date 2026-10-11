@@ -18,6 +18,7 @@ mod push;
 mod quickadd;
 mod recur;
 mod store;
+mod subtasks;
 pub mod sync;
 
 pub use backup::{Backup, BackupSettings};

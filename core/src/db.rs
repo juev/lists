@@ -28,7 +28,7 @@ const DERIVED_VERSION: &str = "4";
 /// The version of the tables that are not rebuilt from the registers: `fields` and the bookkeeping.
 /// A change that rewrites one of them raises it, and a database with a smaller number is backed up
 /// before it is migrated (R92). Adding a column or a table needs no new number.
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 
 const MAX_KEY_LEN: usize = 200;
 
