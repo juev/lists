@@ -66,6 +66,22 @@ private struct StripButton: ButtonStyle {
 /// The card of a new task, the same in the main window (⌘N) and in the
 /// quick-entry panel: every field can be filled before the task is created.
 /// Return in the title and ⌘Return anywhere save; Esc throws the card away (R37).
+/// What makes the card taller or shorter is told to whoever sized the window around it. Apart from the
+/// body of the card: one more modifier there and the compiler gives up on its type.
+private struct DraftResize: ViewModifier {
+    let draft: TaskDraft
+    let onResize: () -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: draft.subtasks.count) { _, _ in onResize() }
+            .onChange(of: draft.notes) { _, _ in onResize() }
+            .onChange(of: draft.tags) { _, _ in onResize() }
+            .onChange(of: draft.repeat) { _, _ in onResize() }
+            .onChange(of: draft.files) { _, _ in onResize() }
+    }
+}
+
 struct DraftEditor: View {
     @Environment(AppModel.self) private var model
     @Binding var draft: TaskDraft
@@ -162,12 +178,8 @@ struct DraftEditor: View {
             if shown { DispatchQueue.main.async { subtaskFocused = true } }
             onResize()
         }
-        .onChange(of: draft.subtasks.count) { _, _ in onResize() }
         .reportsCard("draft", chip: chip, popover: popover.map { "\($0)" })
-        .onChange(of: draft.notes) { _, _ in onResize() }
-        .onChange(of: draft.tags) { _, _ in onResize() }
-        .onChange(of: draft.repeat) { _, _ in onResize() }
-        .onChange(of: draft.files) { _, _ in onResize() }
+        .modifier(DraftResize(draft: draft, onResize: onResize))
         .dropDestination(for: URL.self) { urls, _ in
             add(urls.filter(\.isFileURL))
             return true
