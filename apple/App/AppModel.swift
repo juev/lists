@@ -109,6 +109,31 @@ final class AppModel {
             summaryAt: notifySummary.isEmpty ? nil : notifySummary)
     }
 
+    /// Whether the system lets Lists show notifications; Settings show a line when it does not (R111).
+    private(set) var notificationAccess = Reminders.Access.unasked
+
+    /// Reads what the system holds. `refusal` is the error of a request that was just refused.
+    func reloadNotificationAccess(refusal: String? = nil) {
+        Task { noteNotificationAccess(await Reminders.shared.access(), refusal: refusal) }
+    }
+
+    /// Takes the answer of the system: writes a refusal to the log and hands the plan over again when the refusal ends.
+    func noteNotificationAccess(_ access: Reminders.Access, refusal: String? = nil) {
+        guard access != notificationAccess else { return }
+        let was = notificationAccess
+        notificationAccess = access
+        switch access {
+        case .denied:
+            store?.log(level: .error, source: "notify", message: "the system does not allow notifications\(refusal.map { ": \($0)" } ?? "")")
+        case .granted where was == .denied:
+            store?.log(level: .info, source: "notify", message: "the system allows notifications")
+            Reminders.shared.forget()
+            Reminders.shared.refresh(store, settings: notifySettings, sound: notifySoundChoice)
+        default:
+            break
+        }
+    }
+
     private func saveNotify() {
         let defaults = UserDefaults.standard
         defaults.set(notifyEnabled, forKey: "notifyEnabled")
@@ -306,6 +331,7 @@ final class AppModel {
             startupError = describe(error)
         }
         reload()
+        reloadNotificationAccess()
         DistributedNotificationCenter.default().addObserver(
             forName: Storage.changedNotification, object: nil, queue: .main
         ) { [weak self] _ in
@@ -314,7 +340,7 @@ final class AppModel {
         NotificationCenter.default.addObserver(
             forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.reload(); self?.reloadEvents(); self?.syncNow() }
+            MainActor.assumeIsolated { self?.reload(); self?.reloadEvents(); self?.reloadNotificationAccess(); self?.syncNow() }
         }
         // R78: the block follows the calendars of the system and the change of the day.
         for name in [Notification.Name.EKEventStoreChanged, .NSCalendarDayChanged] {

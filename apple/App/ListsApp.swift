@@ -363,6 +363,12 @@ struct SettingsView: View {
                 Section(L("Notifications")) {
                     @Bindable var model = model
                     Toggle(L("Show notifications"), isOn: $model.notifyEnabled)
+                    // R111
+                    if model.notificationAccess == .denied {
+                        Button(L("macOS does not allow notifications for Lists. Open System Settings…")) {
+                            Reminders.shared.openSystemSettings()
+                        }
+                    }
                     // Several can be on at once: a day before and again fifteen minutes before.
                     LabeledContent(L("Task due at a time")) {
                         Menu {
