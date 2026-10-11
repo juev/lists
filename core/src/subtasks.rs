@@ -1,6 +1,11 @@
 //! R10, R112, S42: a subtask is a line with a mark and a title. Data that says
 //! otherwise, whatever it came from, is brought to that with ordinary stamped
 //! writes, so that the other devices get the same.
+//!
+//! The writes are made only on a state that is whole: at the start, after an
+//! import or a restore, and at the end of a sync run that read everything the
+//! storage held. Halfway through a run a task of a project may be here before
+//! the mark of its project is, and its fields would be removed for good.
 
 use rusqlite::{params, Connection};
 use serde_json::{json, Value};
@@ -9,21 +14,25 @@ use crate::db::{self, Change, Touched, KIND_ATTACHMENT, KIND_TASK};
 use crate::error::Result;
 use crate::order;
 
-/// Whether the task is a subtask: it has a parent, and the parent is not a project.
-/// A project is a task of the top level with the mark of a project; its children are full tasks (R30).
+/// The key in `meta` that is there while a sync run has merged something and has not come to its end.
+pub(crate) const HOLD: &str = "tidy_hold";
+
+/// Whether the task is a subtask: it has a parent, and the parent does not carry the mark of a project.
+/// The children of a project are full tasks (R30). The mark counts wherever the project stands: one
+/// that ended up under another task, by a merge of two moves, keeps its tasks whole.
 pub(crate) fn is_subtask(conn: &Connection, id: &str) -> Result<bool> {
     Ok(conn.query_row(
         "SELECT EXISTS (SELECT 1 FROM tasks t JOIN tasks p ON p.id = t.eff_parent
-         WHERE t.id = ?1 AND NOT (p.project = 1 AND p.eff_parent IS NULL))",
+         WHERE t.id = ?1 AND p.project = 0)",
         [id],
         |r| r.get(0),
     )?)
 }
 
-/// Whether the task is a project.
+/// Whether the task carries the mark of a project.
 pub(crate) fn is_project(conn: &Connection, id: &str) -> Result<bool> {
     Ok(conn.query_row(
-        "SELECT EXISTS (SELECT 1 FROM tasks WHERE id = ?1 AND project = 1 AND eff_parent IS NULL)",
+        "SELECT EXISTS (SELECT 1 FROM tasks WHERE id = ?1 AND project = 1)",
         [id],
         |r| r.get(0),
     )?)
@@ -34,7 +43,27 @@ pub(crate) fn is_project(conn: &Connection, id: &str) -> Result<bool> {
 pub(crate) fn tidy(conn: &Connection, stamp: &mut dyn FnMut() -> String) -> Result<()> {
     // A chain is one level shorter after each pass.
     while raise(conn, stamp)? {}
-    clear(conn, stamp)
+    clear(conn, stamp)?;
+    db::meta_del(conn, HOLD)
+}
+
+/// Writes down the cuts `rebuild_tree` made to break cycles (S5). A raise gives a task a new parent
+/// with the newest stamp; with the cut left unwritten the cycle would then be cut at that task, and
+/// the task that stood at the top would become a subtask and lose its fields.
+fn heal(conn: &Connection, stamp: &mut dyn FnMut() -> String) -> Result<()> {
+    let cut: Vec<String> = {
+        let mut stmt = conn.prepare_cached(
+            "SELECT id FROM tasks WHERE parent_id IS NOT NULL AND eff_parent IS NULL
+               AND (parent_id = id OR parent_id IN (SELECT id FROM tasks)) ORDER BY id",
+        )?;
+        let rows = stmt.query_map([], |r| r.get(0))?;
+        rows.collect::<rusqlite::Result<_>>()?
+    };
+    let mut touched = Touched::new();
+    for id in &cut {
+        write(conn, stamp, &mut touched, KIND_TASK, id, "parent", Value::Null)?;
+    }
+    db::settle(conn, &touched)
 }
 
 fn write(
@@ -66,9 +95,8 @@ fn raise(conn: &Connection, stamp: &mut dyn FnMut() -> String) -> Result<bool> {
             "SELECT t.id, p.id, g.id FROM tasks t
              JOIN tasks p ON p.id = t.eff_parent
              JOIN tasks g ON g.id = p.eff_parent
-             WHERE t.log_of IS NULL AND NOT (g.project = 1 AND g.eff_parent IS NULL)
-               AND (g.eff_parent IS NULL OR EXISTS (
-                    SELECT 1 FROM tasks x WHERE x.id = g.eff_parent AND x.project = 1 AND x.eff_parent IS NULL))
+             WHERE t.log_of IS NULL AND p.project = 0 AND g.project = 0
+               AND (g.eff_parent IS NULL OR EXISTS (SELECT 1 FROM tasks x WHERE x.id = g.eff_parent AND x.project = 1))
              ORDER BY g.id, p.pos, p.id, t.pos, t.id",
         )?;
         let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
@@ -77,6 +105,7 @@ fn raise(conn: &Connection, stamp: &mut dyn FnMut() -> String) -> Result<bool> {
     if nested.is_empty() {
         return Ok(false);
     }
+    heal(conn, stamp)?;
     let mut touched = Touched::new();
     let mut above = String::new();
     let mut siblings: Vec<(String, String)> = Vec::new();
@@ -116,7 +145,7 @@ fn clear(conn: &Connection, stamp: &mut dyn FnMut() -> String) -> Result<()> {
             "SELECT t.id, t.notes <> '', t.start IS NOT NULL, t.due IS NOT NULL, t.priority <> 0,
                     t.repeat IS NOT NULL, t.remind IS NOT NULL
              FROM tasks t JOIN tasks p ON p.id = t.eff_parent
-             WHERE t.log_of IS NULL AND NOT (p.project = 1 AND p.eff_parent IS NULL)
+             WHERE t.log_of IS NULL AND p.project = 0
                AND (t.notes <> '' OR t.start IS NOT NULL OR t.due IS NOT NULL OR t.priority <> 0
                     OR t.repeat IS NOT NULL OR t.remind IS NOT NULL
                     OR EXISTS (SELECT 1 FROM task_tags g WHERE g.task_id = t.id)

@@ -239,28 +239,37 @@ fn s4_concurrent_inserts_end_up_in_the_same_order() {
 fn s5_concurrent_moves_into_each_other_do_not_leave_a_cycle() {
     let storage = tempfile::tempdir().unwrap();
     let (a, b) = (device(), device());
-    // R10: a task goes under another one only when that one is a project.
     let x = add(&a, "X");
     let y = add(&a, "Y");
-    a.set_project(x.id.clone(), true).unwrap();
-    a.set_project(y.id.clone(), true).unwrap();
     settle(&a, &b, &storage);
 
-    a.move_task(x.id.clone(), None, Some(y.id.clone()), None).unwrap();
-    b.set_now_for_tests("2026-10-05T10:05");
-    b.move_task(y.id.clone(), None, Some(x.id.clone()), None).unwrap();
+    // R10: the apps no longer put a task under another one, so the two moves come from devices of an
+    // earlier version. The one of the second device is the later.
+    let later = 0x7fff_ffff_0000_u64;
+    for (device, ms, id, parent) in [
+        ("cccccccccccc", later, &x.id, &y.id),
+        ("dddddddddddd", later + 1, &y.id, &x.id),
+    ] {
+        let lines = [
+            serde_json::json!({"v": 1, "device": device, "seq": 1, "count": 1}).to_string(),
+            serde_json::json!({"k": "task", "i": id, "f": "parent", "v": parent, "t": format!("{ms:012x}-0000-{device}")})
+                .to_string(),
+        ];
+        std::fs::write(
+            storage.path().join(format!("lists/v1/log/{device}-0000000001.jsonl")),
+            lines.join("\n") + "\n",
+        )
+        .unwrap();
+    }
     settle(&a, &b, &storage);
 
-    // B's move is the later one, so it is the one undone: Y stays on top, X under it.
+    // The later move is the one undone: Y stays on top, X under it.
     for d in [&a, &b] {
         assert_eq!(view(d, Scope::Inbox), ["Y"]);
         assert_eq!(titles(&d.subtasks(y.id.clone()).unwrap()), ["X"]);
         assert!(d.subtasks(x.id.clone()).unwrap().is_empty());
     }
-    // The tree can be edited again afterwards.
-    a.move_task(x.id.clone(), None, None, None).unwrap();
-    settle(&a, &b, &storage);
-    assert_eq!(view(&b, Scope::Inbox), ["X", "Y"]);
+    assert_eq!(dump(&a), dump(&b));
 }
 
 #[test]
@@ -300,6 +309,79 @@ fn s42_what_an_earlier_version_sends_is_brought_to_the_rule_of_subtasks() {
         assert!(view(d, Scope::Today).is_empty());
     }
     assert_eq!(dump(&a), dump(&b));
+}
+
+#[test]
+fn s42_a_task_of_a_project_read_before_the_mark_of_its_project_keeps_its_fields() {
+    let storage = tempfile::tempdir().unwrap();
+    // Three devices wrote in turn: the task, then its mark of a project, then a task of the project
+    // with a due date. Their files are read in the order of the names, the task of the project first.
+    let file = |device: &str, changes: &[(&str, &str, serde_json::Value)], whole: bool| {
+        let mut lines =
+            vec![serde_json::json!({"v": 1, "device": device, "seq": 1, "count": changes.len()}).to_string()];
+        for (n, (id, field, value)) in changes.iter().enumerate() {
+            let stamp = format!("{:012x}-{n:04x}-{device}", 0x0100_0000_0000_u64);
+            lines.push(serde_json::json!({"k": "task", "i": id, "f": field, "v": value, "t": stamp}).to_string());
+        }
+        let text = lines.join("\n") + if whole { "\n" } else { "" };
+        std::fs::write(
+            storage.path().join(format!("lists/v1/log/{device}-0000000001.jsonl")),
+            text,
+        )
+        .unwrap();
+    };
+    let seed = device();
+    seed.set_sync_config(folder(&storage)).unwrap();
+    sync(&seed, &storage);
+    file(
+        "aaaaaaaaaaaa",
+        &[
+            ("t", "title", "т".into()),
+            ("t", "list", INBOX_ID.into()),
+            ("t", "pos", "m".into()),
+            ("t", "parent", "p".into()),
+            ("t", "due", "2026-10-05".into()),
+            ("t", "notes", "заметка".into()),
+        ],
+        true,
+    );
+    file(
+        "bbbbbbbbbbbb",
+        &[
+            ("p", "title", "п".into()),
+            ("p", "list", INBOX_ID.into()),
+            ("p", "pos", "m".into()),
+        ],
+        true,
+    );
+    // The file with the mark is cut short at first: the run cannot tell what it holds.
+    file("cccccccccccc", &[("p", "project", true.into())], false);
+
+    let d = device();
+    d.set_sync_config(folder(&storage)).unwrap();
+    sync(&d, &storage);
+    let got = d.task("t".into()).unwrap();
+    assert_eq!(
+        (got.due.as_deref(), got.notes.as_str()),
+        (Some("2026-10-05"), "заметка"),
+        "nothing is removed halfway"
+    );
+
+    file("cccccccccccc", &[("p", "project", true.into())], true);
+    sync(&d, &storage);
+    let got = d.task("t".into()).unwrap();
+    assert_eq!(
+        (got.due.as_deref(), got.notes.as_str()),
+        (Some("2026-10-05"), "заметка")
+    );
+    assert!(d.task("p".into()).unwrap().is_project);
+
+    // A device that reads the three whole files in one run keeps the fields as well.
+    let fresh = device();
+    fresh.set_sync_config(folder(&storage)).unwrap();
+    sync(&fresh, &storage);
+    assert_eq!(fresh.task("t".into()).unwrap().due.as_deref(), Some("2026-10-05"));
+    assert_eq!(view(&fresh, Scope::Today), ["т"]);
 }
 
 #[test]

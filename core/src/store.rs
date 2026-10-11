@@ -94,8 +94,8 @@ impl Writer<'_> {
         let touched = std::mem::take(&mut self.touched);
         db::settle(self.tx, &touched)
     }
-    /// R112: whatever the transaction left that does not fit R10 is brought to it before the commit.
-    fn tidy(&mut self) -> Result<()> {
+    /// R112: brings what does not fit R10 to it. Called where the state is whole: see `subtasks`.
+    pub(crate) fn tidy(&mut self) -> Result<()> {
         let (clock, now_ms) = (&mut *self.clock, self.now_ms);
         subtasks::tidy(self.tx, &mut || clock.tick(now_ms))
     }
@@ -154,7 +154,6 @@ impl Inner {
             };
             let out = f(&mut w)?;
             w.flush()?;
-            w.tidy()?;
             out
         };
         tx.commit()?;
@@ -495,6 +494,19 @@ impl Store {
         self.inner.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
+    /// R112, S42: brings the data to the rule of subtasks unless a sync run is halfway through it.
+    pub(crate) fn tidy_if_whole(&self) -> Result<()> {
+        if db::meta_get(&self.lock().conn, subtasks::HOLD)?.is_some() {
+            return Ok(());
+        }
+        self.write(|w| w.tidy())
+    }
+
+    /// R112, S42: the same at the end of a sync run that read all there was to read.
+    pub(crate) fn tidy_whole(&self) -> Result<()> {
+        self.write(|w| w.tidy())
+    }
+
     pub(crate) fn write<T>(&self, f: impl FnOnce(&mut Writer) -> Result<T>) -> Result<T> {
         self.lock().write(f)
     }
@@ -621,7 +633,8 @@ impl Store {
             db::migrate(&store.lock().conn)?;
         }
         // R112: data written before the rule of R10, by this device or by an earlier version.
-        store.write(|_| Ok(()))?;
+        // Not while a sync run was cut short: the run that comes to its end does it.
+        store.tidy_if_whole()?;
         Ok(store)
     }
 
@@ -1077,7 +1090,13 @@ impl Store {
                 return Err(AppError::invalid("only a top-level task can be a project"));
             }
             // R32: the tasks of the project would become subtasks and lose their fields.
-            if !project && task.is_project && task.subtasks_total > 0 {
+            // Those closed as "won't do" and those in the trash are its tasks as well.
+            let tasks: bool = w.tx.query_row(
+                "SELECT EXISTS (SELECT 1 FROM tasks WHERE eff_parent = ?1 AND purged = 0 AND log_of IS NULL)",
+                [&id],
+                |r| r.get(0),
+            )?;
+            if !project && task.is_project && tasks {
                 return Err(AppError::invalid("a project with tasks is not turned back into a task"));
             }
             w.task(&id, "project", json!(project))
@@ -1452,6 +1471,10 @@ impl Store {
                     get_task(w.tx, parent)?;
                     if !subtasks::is_project(w.tx, parent)? {
                         return Err(AppError::invalid("a task does not become a subtask"));
+                    }
+                    // A project is a task of the top level, and the lines of a task do not go a level down.
+                    if task.is_project || !descendants(w.tx, &id)?.is_empty() {
+                        return Err(AppError::invalid("a task with tasks under it stays at the top level"));
                     }
                 }
             }
@@ -1931,6 +1954,11 @@ fn duplicate(w: &mut Writer, original: &TaskItem, parent: Option<String>) -> Res
             tags: original.tags.clone(),
         },
     )?;
+    if original.is_project {
+        // Before its tasks are copied: under a project they keep their fields (R10).
+        w.task(&copy.id, "project", json!(true))?;
+        w.flush()?;
+    }
     if let Some(rule) = &original.repeat {
         w.task(&copy.id, "repeat", serde_json::to_value(rule)?)?;
     }

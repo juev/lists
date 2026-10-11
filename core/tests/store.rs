@@ -401,6 +401,58 @@ fn r10_the_tasks_of_a_project_are_full_tasks() {
     let empty = add(&d, "пусто");
     d.set_project(empty.id.clone(), true).unwrap();
     d.set_project(empty.id, false).unwrap();
+
+    // A project does not go into another project, nor does a task with subtasks: their tasks and
+    // lines would be a level too deep.
+    let second = add(&d, "второй");
+    d.set_project(second.id.clone(), true).unwrap();
+    assert!(d
+        .move_task(project.id.clone(), None, Some(second.id.clone()), None)
+        .is_err());
+    let holder = add(&d, "с подзадачей");
+    add_sub(&d, &holder, "строка");
+    assert!(d.move_task(holder.id, None, Some(second.id), None).is_err());
+    assert_eq!(d.task(loose.id).unwrap().due.as_deref(), Some("2026-10-07"));
+}
+
+#[test]
+fn r32_tasks_closed_as_wont_do_or_in_the_trash_are_tasks_of_the_project() {
+    let d = device();
+    let project = add(&d, "п");
+    d.set_project(project.id.clone(), true).unwrap();
+    let wont = d.quick_add_under("не буду завтра".into(), project.id.clone()).unwrap();
+    let trashed = d
+        .quick_add_under("в корзине завтра".into(), project.id.clone())
+        .unwrap();
+    d.wont_do_task(wont.id.clone()).unwrap();
+    d.delete_task(trashed.id.clone()).unwrap();
+    assert_eq!(
+        d.task(project.id.clone()).unwrap().subtasks_total,
+        0,
+        "neither is counted"
+    );
+
+    assert!(d.set_project(project.id, false).is_err());
+    d.restore_task(trashed.id.clone()).unwrap();
+    for id in [wont.id, trashed.id] {
+        assert_eq!(d.task(id).unwrap().due.as_deref(), Some("2026-10-06"));
+    }
+}
+
+#[test]
+fn r10_the_copy_of_a_project_keeps_the_fields_of_its_tasks() {
+    let d = device();
+    let project = add(&d, "п");
+    d.set_project(project.id.clone(), true).unwrap();
+    let task = d.quick_add_under("т завтра".into(), project.id.clone()).unwrap();
+    add_sub(&d, &task, "строка");
+
+    let copy = d.duplicate_task(project.id).unwrap();
+    assert!(copy.is_project);
+    let tasks = d.subtasks(copy.id).unwrap();
+    assert_eq!(titles(&tasks), ["т"]);
+    assert_eq!(tasks[0].due.as_deref(), Some("2026-10-06"));
+    assert_eq!(titles(&d.subtasks(tasks[0].id.clone()).unwrap()), ["строка"]);
 }
 
 #[test]

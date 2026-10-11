@@ -139,7 +139,6 @@ impl Store {
     fn apply_remote(&self, changes: Vec<Change>) -> Result<u32> {
         let mut inner = self.lock();
         let inner = &mut *inner;
-        let now_ms = inner.now_ms();
         let tx = inner
             .conn
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -152,8 +151,10 @@ impl Store {
             }
         }
         db::settle(&tx, &touched)?;
-        // C29: what the state on the server says about a subtask is brought to the rule of subtasks.
-        crate::subtasks::tidy(&tx, &mut || inner.clock.tick(now_ms))?;
+        // C29: brought to the rule of subtasks at the end of the run: the object of a project may come after its tasks.
+        if changed > 0 {
+            db::meta_set(&tx, crate::subtasks::HOLD, "1")?;
+        }
         tx.commit()?;
         Ok(changed)
     }
@@ -518,6 +519,9 @@ pub fn holds_objects(url: &str, user: &str, password: &str) -> Result<bool> {
 
 fn sync(store: &Store, client: &Client, calendars: Vec<Calendar>) -> Result<SyncReport> {
     let mut report = SyncReport::default();
+    // C29: from here to the end of the run the state may be halfway: an object of a task of a project
+    // may be read before the object of the project.
+    db::meta_set(&store.lock().conn, crate::subtasks::HOLD, "1")?;
 
     // ---- lists ↔ calendars ----
     let mut calendar_of: HashMap<String, String> = HashMap::new();
@@ -1018,6 +1022,8 @@ fn sync(store: &Store, client: &Client, calendars: Vec<Calendar>) -> Result<Sync
     if report.pushed > 0 || report.blobs_uploaded > 0 {
         store.poke(nudged.values().map(String::as_str));
     }
+    // C29: every object was read; what the run brings to the rule of subtasks goes up with the next one.
+    store.tidy_whole()?;
     Ok(report)
 }
 
