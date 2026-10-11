@@ -365,8 +365,8 @@ struct SettingsView: View {
                     Toggle(L("Show notifications"), isOn: $model.notifyEnabled)
                     // R111
                     if model.notificationAccess == .denied {
-                        Button(L("macOS does not allow notifications for Lists. Open System Settings…")) {
-                            Reminders.shared.openSystemSettings()
+                        LabeledContent(L("macOS does not allow notifications for Lists.")) {
+                            Button(L("Open System Settings…")) { Reminders.shared.openSystemSettings() }
                         }
                     }
                     // Several can be on at once: a day before and again fifteen minutes before.
