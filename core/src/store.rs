@@ -887,6 +887,25 @@ impl Store {
         )
     }
 
+    /// R113: the subtasks typed in the card of a new task, added in one step and in the order they
+    /// were typed. A title is taken as it stands; an empty one is passed over.
+    pub fn add_subtasks(&self, parent_id: String, titles: Vec<String>) -> Result<Vec<TaskItem>> {
+        self.write(|w| {
+            let mut added = Vec::new();
+            for title in titles.iter().map(|t| t.trim()).filter(|t| !t.is_empty()) {
+                added.push(create_task(
+                    w,
+                    NewTask {
+                        title: title.to_string(),
+                        parent_id: Some(parent_id.clone()),
+                        ..NewTask::default()
+                    },
+                )?);
+            }
+            Ok(added)
+        })
+    }
+
     /// R22: the subtasks of the task whose title holds the text of a search, for the lines shown under
     /// the task in the results. Nothing for a project: its tasks are found as rows of their own.
     pub fn found_subtasks(&self, parent_id: String, text: String) -> Result<Vec<TaskItem>> {

@@ -517,6 +517,29 @@ fn r112_data_from_before_the_rule_is_brought_to_it() {
 }
 
 #[test]
+fn r113_the_subtasks_of_a_new_task_are_added_in_the_order_they_were_typed() {
+    let d = device();
+    let trip = add(&d, "поездка");
+    let typed = vec!["билеты завтра !!".to_string(), "  ".to_string(), " отель ".to_string()];
+    let added = d.add_subtasks(trip.id.clone(), typed).unwrap();
+    assert_eq!(titles(&added), ["билеты завтра !!", "отель"]);
+    let lines = d.subtasks(trip.id.clone()).unwrap();
+    assert_eq!(titles(&lines), ["билеты завтра !!", "отель"]);
+    assert!(lines.iter().all(|l| l.due.is_none() && l.priority == Priority::None));
+
+    // All or nothing: a line cannot have lines of its own, and nothing of the call stays.
+    let refused = d.add_subtasks(lines[0].id.clone(), vec!["а".into(), "б".into()]);
+    assert!(refused.is_err());
+    assert!(d.subtasks(lines[0].id.clone()).unwrap().is_empty());
+    // A task of a project takes them as well; under a project itself they are tasks of the project.
+    let project = add(&d, "п");
+    d.set_project(project.id.clone(), true).unwrap();
+    let task = add_sub(&d, &project, "т");
+    assert_eq!(d.add_subtasks(task.id, vec!["у".into()]).unwrap().len(), 1);
+    assert!(d.add_subtasks("нет такой".into(), vec!["а".into()]).is_err());
+}
+
+#[test]
 fn r22_a_subtask_is_found_inside_its_task() {
     let d = device();
     let shop = add(&d, "купить");
