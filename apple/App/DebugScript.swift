@@ -22,7 +22,13 @@ import UserNotifications
 /// `sync` (starts a sync the way the toolbar icon does), `attach:/path` (attaches the file to the selected task), `filepointer` (prints the size of the layer the pointer works on over the first file of the open card, the items of its right-click menu and the file a drag would carry; `filepointer:click` also clicks it), `savefile:/path` (saves the first attachment of the selected task there, the way "Save As…" does once a place is chosen), `saveall:/folder` (saves every attachment of the selected task there, the way "Save All…" does once a folder is chosen, and prints what was saved), `showfile:0` (shows the attachment with that number the way a click on its name does;
 /// a hidden app shows no panel), `preview` (prints whether the Quick Look panel is open) and `preview:close` (closes it),
 /// `inbox` (switches to the Inbox view), `open` (expands the selected task), `edit` (opens it with the caret in the title, the way Return does), `select:1` and `select:-1` (move the selection the way the arrow keys do),
-/// `pick:title` (selects a row the way a click does), `indent` and `outdent` (move the selected task under the one above and back),
+/// `pick:title` (selects a row the way a click does),
+/// `addsub:title` (adds a subtask to the selected task the way its field does on Return), `subtasks` (prints the lines of the selected task, or of the task
+/// the selected subtask belongs to: the title and the state of each, which of them is a subtask without a card, the one whose title is being edited,
+/// and the lines a search shows under its rows), `renamesub:old=new` (renames the subtask in its line: starts the edit the way Return on the selected
+/// subtask does, puts the text in and ends it the way Return in the field does; `renamesub:old` only starts the edit, and `renamesub:old=new=esc` ends it the way Esc does),
+/// `submenu:title` (prints the items of the menu of that subtask, the ones a right click on it builds its menu from; `submenu:title=Item` also chooses the item),
+/// `find:text` (searches the way typing in the search field does, `find:` ends the search),
 /// `newtask` (opens the card of a new task), `title:text` (fills its title), `finish` (closes it the way Return does: a card with a title becomes a task),
 /// `due:2026-10-05` and `repeat:2` (give the new-task card a due date and the preset with that index, the way its popovers do),
 /// `due` alone (takes the due date away the way ⌫ in its popover does), `priority:3` (chooses the priority with that index in the card, 0 for none),
@@ -87,7 +93,7 @@ enum DebugScript {
 
     private static let codes: [String: (UInt16, String)] = [
         "return": (36, "\r"), "esc": (53, "\u{1b}"), "space": (49, " "), "down": (125, "\u{F701}"), "up": (126, "\u{F700}"),
-        "]": (30, "]"), "[": (33, "["), "tab": (48, "\t"), "backtab": (48, "\u{19}"),
+        "tab": (48, "\t"), "backtab": (48, "\u{19}"),
     ]
 
     static func runIfAsked() {
@@ -214,8 +220,44 @@ enum DebugScript {
                     if let id = AppModel.shared.selection { AppModel.shared.edit(id) }
                 case "select": AppModel.shared.moveSelection(Int(argument) ?? 1)
                 case "pick": AppModel.shared.selection = taskId(titled: argument)
-                case "indent": AppModel.shared.selectedTask.map(AppModel.shared.indent)
-                case "outdent": AppModel.shared.selectedTask.map(AppModel.shared.outdent)
+                case "addsub":
+                    let model = AppModel.shared
+                    if let id = model.selection {
+                        model.showSubtasks(id)
+                        model.add(argument, parent: id)
+                    }
+                case "subtasks":
+                    let model = AppModel.shared
+                    let selected = model.selectedTask
+                    let parent = selected.flatMap { model.isSubtask($0) ? $0.parentId : $0.id }
+                    let lines = (parent.flatMap { model.children[$0] } ?? []).map { line in
+                        "\(line.title) [\(line.wont ? "wont do" : line.done != nil ? "completed" : "open")\(model.isSubtask(line) ? ", line" : ", task")]"
+                    }
+                    let found = model.found.map { "\(taskTitle($0.key)): \($0.value.map(\.title))" }.sorted()
+                    print("debug: subtasks of \(parent.map(taskTitle) ?? "none") \(lines), renaming \(model.renaming.map(taskTitle) ?? "none"), found \(found)")
+                case "renamesub":
+                    let parts = argument.split(separator: "=", omittingEmptySubsequences: false).map(String.init)
+                    let model = AppModel.shared
+                    if let task = shown.first(where: { $0.title == parts[0] }) {
+                        // The same calls as Return on the selected subtask, typing, and Return or Esc in its field.
+                        model.toggleEditing(task.id)
+                        if parts.count > 1 {
+                            model.renamingTitle = parts[1]
+                            model.finishRenaming(task.id, save: parts.count < 3)
+                        }
+                    } else {
+                        print("debug: no subtask \(parts[0])")
+                    }
+                case "submenu":
+                    let parts = argument.split(separator: "=", maxSplits: 1).map(String.init)
+                    if let task = shown.first(where: { $0.title == parts.first }), AppModel.shared.isSubtask(task) {
+                        let items = SubtaskRow.menuItems(task, AppModel.shared)
+                        print("debug: subtask menu \(items.map(\.title))")
+                        if parts.count == 2 { items.first { $0.title == parts[1] }?.action() }
+                    } else {
+                        print("debug: no subtask \(parts.first ?? "")")
+                    }
+                case "find": AppModel.shared.search = argument
                 case "newtask": AppModel.shared.startDraft()
                 case "title": AppModel.shared.draft?.title = argument
                 case "finish": AppModel.shared.finishDraft()

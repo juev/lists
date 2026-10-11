@@ -224,6 +224,10 @@ struct TaskRow: View {
     var body: some View {
         let content = VStack(alignment: .leading, spacing: 6) {
             header
+            // R22: the subtasks a search found the task by; an open task shows all of its subtasks instead.
+            if !isExpanded, let lines = model.found[task.id] {
+                ForEach(lines, id: \.id) { SubtaskRow(task: $0, plain: true).padding(.leading, 22) }
+            }
             if isExpanded {
                 TaskEditor(task: task)
                     .padding(.leading, 34)
@@ -233,6 +237,7 @@ struct TaskRow: View {
         // Rows set the font themselves: a List does not hand its environment font to them.
         .font(AppFont.style(.body))
         .contextMenu { RowMenuItems(items: menuItems) }
+        // A task of a project inside the row of the project.
         .background { if depth > 0 { SubtaskMenuArea(items: { menuItems }) } }
         if isExpanded {
             content
@@ -270,8 +275,12 @@ struct TaskRow: View {
             .disabled(task.isProject)
             if shown {
                 ForEach(model.children[task.id] ?? [], id: \.id) { child in
-                    TaskRow(task: child, depth: depth + 1)
-                        .padding(.leading, 22)
+                    // The tasks of a project are full tasks with a card; a subtask is a line (R10).
+                    if task.isProject {
+                        TaskRow(task: child, depth: depth + 1).padding(.leading, 22)
+                    } else {
+                        SubtaskRow(task: child).padding(.leading, 22)
+                    }
                 }
                 if !inTrash && !task.isLog {
                     SubtaskField(parent: task.id)
@@ -283,21 +292,7 @@ struct TaskRow: View {
 
     private var header: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Button {
-                model.toggleDone(task)
-            } label: {
-                Image(systemName: task.wont ? "xmark.square.fill" : task.done != nil ? "checkmark.square.fill" : "square")
-                    // R94: the mark is as high as the text and as quiet as the icons of the fields.
-                    .font(AppFont.style(.body))
-                    .fontWeight(.light)
-                    .foregroundStyle(task.done != nil ? .secondary : .tertiary)
-            }
-            .buttonStyle(.plain)
-            // The mark is taller than a capital of the title: on the baseline it stands too high.
-            // Its middle goes to the middle of a capital of the first line instead.
-            .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + AppFont.native(.body).capHeight / 2 }
-            .disabled(task.isLog || inTrash)
-            .accessibilityLabel(task.done != nil ? L("Reopen") : L("Complete"))
+            TaskMark(task: task)
 
             if task.isProject {
                 Image(systemName: "folder").foregroundStyle(.secondary).accessibilityLabel(L("Project"))
@@ -360,8 +355,8 @@ struct TaskRow: View {
             if !task.notes.isEmpty { Image(systemName: "text.alignleft").accessibilityLabel(L("Notes")) }
             if task.attachments > 0 { Image(systemName: "paperclip").accessibilityLabel(L("Attachments")) }
             if task.subtasksTotal > 0 { Image(systemName: "checklist").accessibilityLabel(L("Subtasks")) }
-            // A subtask shown on its own says whose it is (R12).
-            if showsOrigin, let parent = task.parentTitle { Text(parent).lineLimit(1) }
+            // A task of a project says whose it is where lists are mixed (R31).
+            if showsOrigin, let project = task.parentTitle { Text(project).lineLimit(1) }
         }
         .font(AppFont.style(.caption))
         .foregroundStyle(.tertiary)
@@ -416,7 +411,8 @@ struct TaskRow: View {
             }),
             RowMenuItem(title: L("Add subtask")) { model.showSubtasks(task.id) },
         ]
-        if task.parentId == nil {
+        // R32: a project with tasks is not turned back; its tasks would become subtasks and lose their fields.
+        if task.parentId == nil, !task.isProject || task.subtasksTotal == 0 {
             items.append(RowMenuItem(title: task.isProject ? L("Turn back into a task") : L("Make it a project")) {
                 model.perform { try $0.setProject(id: task.id, project: !task.isProject) }
             })
@@ -432,6 +428,113 @@ struct TaskRow: View {
         items.append(.divider)
         items.append(RowMenuItem(title: L("Delete"), destructive: true) { model.delete(task) })
         return items
+    }
+}
+
+/// The square mark of a task or of a subtask: a click completes it or takes it back into work.
+struct TaskMark: View {
+    @Environment(AppModel.self) private var model
+    let task: TaskItem
+
+    var body: some View {
+        Button {
+            model.toggleDone(task)
+        } label: {
+            Image(systemName: task.wont ? "xmark.square.fill" : task.done != nil ? "checkmark.square.fill" : "square")
+                // R94: the mark is as high as the text and as quiet as the icons of the fields.
+                .font(AppFont.style(.body))
+                .fontWeight(.light)
+                .foregroundStyle(task.done != nil ? .secondary : .tertiary)
+        }
+        .buttonStyle(.plain)
+        // The mark is taller than a capital of the title: on the baseline it stands too high.
+        // Its middle goes to the middle of a capital of the first line instead.
+        .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + AppFont.native(.body).capHeight / 2 }
+        .disabled(task.isLog || task.deleted)
+        .accessibilityLabel(task.done != nil ? L("Reopen") : L("Complete"))
+    }
+}
+
+/// A subtask in the card of its task: a mark and a title, and no card of its own (R10, R38).
+/// `plain` is the line under a task found by a search (R22): the mark and the title alone.
+struct SubtaskRow: View {
+    @Environment(AppModel.self) private var model
+    let task: TaskItem
+    var plain = false
+
+    private var locked: Bool { task.deleted || task.isLog }
+
+    var body: some View {
+        let line = HStack(alignment: .firstTextBaseline, spacing: 8) {
+            TaskMark(task: task)
+            if model.renaming == task.id {
+                SubtaskTitleField(id: task.id)
+            } else {
+                Text(task.title)
+                    .strikethrough(task.done != nil)
+                    .foregroundStyle(task.done != nil ? .secondary : .primary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 8)
+        }
+        .font(AppFont.style(.body))
+        .padding(.vertical, 6)
+        .padding(.horizontal, 6)
+        if plain {
+            line
+        } else {
+            line
+                .background(
+                    model.selection == task.id ? Color.primary.opacity(0.07) : .clear,
+                    in: RoundedRectangle(cornerRadius: 6))
+                .contentShape(Rectangle())
+                .onTapGesture(count: 2) { if !locked { model.startRenaming(task) } }
+                .simultaneousGesture(TapGesture().onEnded { model.selection = task.id })
+                .background { SubtaskMenuArea(items: { Self.menuItems(task, model) }) }
+        }
+    }
+
+    /// The menu of a subtask: only what applies to it (R38).
+    static func menuItems(_ task: TaskItem, _ model: AppModel) -> [RowMenuItem] {
+        if task.deleted {
+            return [RowMenuItem(title: L("Restore")) { model.perform { try $0.restoreTask(id: task.id) } }]
+        }
+        if task.isLog {
+            return [RowMenuItem(title: L("Delete record"), destructive: true) { model.delete(task) }]
+        }
+        var items = [
+            RowMenuItem(title: L("Rename")) { model.startRenaming(task) },
+            RowMenuItem(title: task.done != nil ? L("Reopen") : L("Complete")) { model.toggleDone(task) },
+        ]
+        if task.done == nil {
+            items.append(RowMenuItem(title: L("Won't do")) { model.wontDo(task) })
+        }
+        items.append(RowMenuItem(title: L("Delete"), destructive: true) { model.delete(task) })
+        return items
+    }
+}
+
+/// The title of a subtask while it is edited in its line (R38): Return saves it, Esc leaves it as it was.
+struct SubtaskTitleField: View {
+    @Environment(AppModel.self) private var model
+    let id: String
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        @Bindable var model = model
+        TextField(L("Title"), text: $model.renamingTitle)
+            .textFieldStyle(.plain)
+            .focused($focused)
+            .onSubmit { model.finishRenaming(id, save: true) }
+            // Esc ends the edit and not the card of the task around the line.
+            .onExitCommand { model.finishRenaming(id, save: false) }
+            // On the next turn: the field is not in the table yet while it appears.
+            .onAppear { DispatchQueue.main.async { focused = true } }
+            .onChange(of: focused) { _, now in if !now { model.finishRenaming(id, save: true) } }
+            // R83: quitting does not take the keyboard from the title.
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
+                model.finishRenaming(id, save: true)
+            }
     }
 }
 
@@ -471,7 +574,7 @@ struct RowMenuItems: View {
     }
 }
 
-/// The place of a subtask inside the row of its parent, for the right click (#201). SwiftUI gives
+/// The place of a subtask, or of a task of a project, inside the row of its parent, for the right click (#201). SwiftUI gives
 /// the context menu of a list row to the whole row: over a subtask it opened the menu of the task
 /// the row belongs to, and "Won't do" or "Delete" chosen there went to that task. An AppKit view
 /// under the subtask marks its place, and a right click there opens the menu of the subtask.

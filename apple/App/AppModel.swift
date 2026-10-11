@@ -35,6 +35,8 @@ final class AppModel {
     /// Minutes a completed task stays in its view; shared by all devices (R68).
     private(set) var keepDone: KeepDone = .seconds(seconds: 5)
     var children: [String: [TaskItem]] = [:]
+    /// R22: the subtasks a search found a task by, shown as lines under its row.
+    var found: [String: [TaskItem]] = [:]
     var expanded: Set<String> = []
     /// Expanded tasks whose subtasks are on show; they stay folded until asked for.
     var subtasksShown: Set<String> = []
@@ -42,6 +44,8 @@ final class AppModel {
     var selection: String? {
         didSet {
             if titleFocus != selection { titleFocus = nil }
+            // The title of a subtask is saved when the selection leaves its line, as a card saves on closing (R38).
+            if let renaming, renaming != selection { finishRenaming(renaming, save: true) }
             if let selection, selection != oldValue { closeCards(except: selection) }
         }
     }
@@ -49,6 +53,9 @@ final class AppModel {
     var draft: TaskDraft?
     /// The task whose title takes the keyboard as soon as its card is on screen.
     var titleFocus: String?
+    /// The subtask whose title is being edited in its line, and the text typed so far (R38).
+    private(set) var renaming: String?
+    var renamingTitle = ""
     /// Counts the cards closed from the keyboard: each time the list takes the keyboard back.
     var listFocusRequests = 0
     // Sheets of the sidebar; here so that the menu bar can open them too.
@@ -399,17 +406,11 @@ final class AppModel {
 
     var allTasks: [TaskItem] { sections.flatMap(\.tasks) }
 
-    /// The sections as they are drawn. Today, Upcoming and a search list a subtask as a
-    /// row of its own; while it is on show inside the open card of its parent that row is left out.
+    /// The sections as they are drawn. A view that mixes lists has a task of a project as a row of
+    /// its own; while it is on show inside the open card of the project that row is left out.
+    /// A subtask is never a row of its own (R10).
     var visibleSections: [TaskSection] {
-        func inside(_ tasks: [TaskItem]) -> [String] {
-            tasks.flatMap { task -> [String] in
-                guard expanded.contains(task.id), showsSubtasks(task) else { return [] }
-                let subtasks = children[task.id] ?? []
-                return subtasks.map(\.id) + inside(subtasks)
-            }
-        }
-        let nested = Set(inside(allTasks))
+        let nested = Set(allTasks.filter { $0.isProject && expanded.contains($0.id) }.flatMap { children[$0.id] ?? [] }.map(\.id))
         guard !nested.isEmpty else { return sections }
         return sections.compactMap { section in
             var section = section
@@ -492,6 +493,14 @@ final class AppModel {
                 loaded[id] = try store.subtasks(parentId: id)
             }
             children = loaded
+            var lines: [String: [TaskItem]] = [:]
+            if isSearching {
+                for task in allTasks where task.subtasksTotal > 0 {
+                    let subtasks = try store.foundSubtasks(parentId: task.id, text: search)
+                    if !subtasks.isEmpty { lines[task.id] = subtasks }
+                }
+            }
+            found = lines
             Reminders.shared.refresh(store, settings: notifySettings, sound: notifySoundChoice)
         } catch {
             alert = describe(error)
@@ -687,8 +696,41 @@ final class AppModel {
         task.isProject || subtasksShown.contains(task.id)
     }
 
-    /// Opens the card of a task and closes the one that was open.
+    /// Whether the task is a subtask: a line with a mark and a title, without a card (R10).
+    /// The tasks of a project are full tasks.
+    func isSubtask(_ task: TaskItem) -> Bool {
+        guard let parent = task.parentId else { return false }
+        return (row(parent) ?? (try? store?.task(id: parent)))?.isProject != true
+    }
+
+    /// A task among those on screen.
+    private func row(_ id: String) -> TaskItem? {
+        allTasks.first { $0.id == id } ?? children.values.joined().first { $0.id == id }
+    }
+
+    /// Starts the edit of the title of a subtask in its line (R38).
+    func startRenaming(_ task: TaskItem) {
+        // A second double click lands in the text being typed and is not a new start.
+        guard renaming != task.id else { return }
+        selection = task.id
+        renamingTitle = task.title
+        renaming = task.id
+    }
+
+    /// Ends that edit: Return and leaving the line save the title, Esc does not. An emptied title stays what it was.
+    func finishRenaming(_ id: String, save: Bool) {
+        guard renaming == id else { return }
+        renaming = nil
+        listFocusRequests += 1
+        // A title has no line breaks: pasted text of several lines becomes one line.
+        let title = renamingTitle.split(whereSeparator: \.isNewline).joined(separator: " ").trimmingCharacters(in: .whitespaces)
+        guard save, !title.isEmpty, title != row(id)?.title else { return }
+        perform { try $0.setTitle(id: id, title: title) }
+    }
+
+    /// Opens the card of a task and closes the one that was open. A subtask has no card: it is selected.
     func expand(_ id: String) {
+        if let task = row(id), isSubtask(task) { return selection = id }
         if let draft, !draft.isBlank {
             // The table takes the row of the new task first and the open card on the next
             // turn: both in one update make it call back into its delegate.
@@ -780,6 +822,7 @@ final class AppModel {
     }
 
     func delete(_ task: TaskItem) {
+        finishRenaming(task.id, save: false)
         perform { try $0.deleteTask(id: task.id) }
         expanded.remove(task.id)
         if selection == task.id { selection = nil }
@@ -805,16 +848,17 @@ final class AppModel {
             path.append(next.id)
             task = next
         }
+        // A subtask has no card of its own: the card of its task is the innermost one.
+        let subtask = (try? store.task(id: id)).map(isSubtask) ?? false
         // The selection first: it closes every card that is not around the row it lands on.
         selection = id
-        expanded = Set(path)
+        expanded = Set(subtask ? Array(path.dropFirst()) : path)
         subtasksShown.formUnion(path.dropFirst())
         reload()
     }
 
     var selectedTask: TaskItem? {
-        guard let id = selection else { return nil }
-        return allTasks.first { $0.id == id } ?? children.values.joined().first { $0.id == id }
+        selection.flatMap(row)
     }
 
     /// Rows in the order they are drawn: each task followed by its expanded subtree.
@@ -842,7 +886,9 @@ final class AppModel {
     }
 
     /// Return and a double click: an open card closes, a closed one opens for typing.
+    /// A subtask has its title edited in its line.
     func toggleEditing(_ id: String) {
+        if let task = row(id), isSubtask(task) { return startRenaming(task) }
         if expanded.contains(id) { closeCard(id) } else { edit(id) }
     }
 
@@ -855,34 +901,6 @@ final class AppModel {
         guard let index = order.firstIndex(where: { $0.id == moved.id }) else { return }
         let after = index > 0 ? order[index - 1].id : nil
         perform { try $0.moveTask(id: moved.id, listId: nil, parentId: nil, after: after) }
-    }
-
-    /// Makes the task a subtask of the one above it in the same level.
-    func indent(_ task: TaskItem) {
-        let siblings = task.parentId.flatMap { children[$0] } ?? allTasks.filter { $0.parentId == nil }
-        guard let index = siblings.firstIndex(where: { $0.id == task.id }), index > 0 else { return }
-        let parent = siblings[index - 1]
-        // The parent opens to show where the task went; the task keeps its own card if it had one.
-        let open = expanded.contains(task.id)
-        closeCards(except: parent.id)
-        expanded.insert(parent.id)
-        if open { expanded.insert(task.id) }
-        subtasksShown.insert(parent.id)
-        perform { store in
-            let last = try store.subtasks(parentId: parent.id).last?.id
-            try store.moveTask(id: task.id, listId: nil, parentId: parent.id, after: last)
-        }
-    }
-
-    /// Moves a subtask one level up, right after its former parent.
-    func outdent(_ task: TaskItem) {
-        guard let parentId = task.parentId else { return }
-        perform { store in
-            let parent = try store.task(id: parentId)
-            try store.moveTask(id: task.id, listId: nil, parentId: parent.parentId, after: parent.id)
-        }
-        // The task has left its parent, so the parent's card is no longer around the selection.
-        if let selection { closeCards(except: selection) }
     }
 
     // MARK: Import
