@@ -132,16 +132,20 @@ struct AppCommands: Commands {
         CommandMenu(L("Task")) {
             // Plain Return and Space are handled by the list itself: as menu
             // shortcuts they would be taken away from every text field.
-            Button(L("Complete")) { selected.map(model.toggleDone) }
+            // R117: with several rows selected the commands change all of them.
+            Button(L("Complete")) { if model.picked.isEmpty { selected.map(model.toggleDone) } else { model.batch(.complete) } }
                 .keyboardShortcut(.return)
                 .disabled(selected == nil)
             Divider()
-            Button(L("Due today")) { dated.map { model.setDue($0, Moment.today()) } }
+            Button(L("Due today")) { if model.picked.isEmpty { dated.map { model.setDue($0, Moment.today()) } } else { model.batch(.due(Moment.today())) } }
                 .keyboardShortcut("t")
-                .disabled(dated == nil)
-            Button(L("Due tomorrow")) { dated.map { model.setDue($0, shiftDate(date: Moment.today(), days: 1)) } }
+                .disabled(dated == nil && model.picked.isEmpty)
+            Button(L("Due tomorrow")) {
+                let tomorrow = shiftDate(date: Moment.today(), days: 1)
+                if model.picked.isEmpty { dated.map { model.setDue($0, tomorrow) } } else if let tomorrow { model.batch(.due(tomorrow)) }
+            }
                 .keyboardShortcut("t", modifiers: [.command, .shift])
-                .disabled(dated == nil)
+                .disabled(dated == nil && model.picked.isEmpty)
         }
         CommandMenu(L("Go")) {
             scope(L("Inbox"), .inbox, "1")

@@ -50,7 +50,7 @@ import UserNotifications
 /// `chips` (prints which chip of the card has the keyboard and which of its popovers is open; `key:backtab+shift` is ⇧Tab),
 /// `ghost` (puts the windows of a hidden app on screen transparent, deaf to the mouse and without the keyboard, popovers that open later among them:
 /// a hidden app shows no popovers; key presses then go to the open popover first, as they do when it has the keyboard),
-/// `wont` (closes the selected task as "won't do"; `task` prints the state of the selected task), `go:completed`, `go:wontdo`, `go:today`, `go:#tag`, `go:List name` and `go:Project title` (switch to those views),
+/// `wont` (closes the selected task as "won't do"; `task` prints the state of the selected task), `go:completed`, `go:wontdo`, `go:today`, `go:all`, `go:trash`, `go:#tag`, `go:List name` and `go:Project title` (switch to those views),
 /// `completedview:on` and `completedview:off` (show the Completed and Won't do views always or never), `sidebarshow:wontDo=filled` (sets when a built-in view has a row in the sidebar: `always`, `filled` or `never`; `sidebarshow` alone prints the built-in rows there are), `scope` (prints the current view), `quit` (quits the app the way ⌘Q does), `search` (prints whether search is open as a field and its text),
 /// `calendarevents` (prints the setting of R78, the access the system gave, and how many calendars are listed and hidden; nothing is asked of the system),
 /// `events:14:30=Bank,-=Birthday,09:00=Standup,y=Trip` (puts those events through the order of the block in place of the calendars of the system:
@@ -232,6 +232,39 @@ enum DebugScript {
                     if let id = AppModel.shared.selection { AppModel.shared.edit(id) }
                 case "select": AppModel.shared.moveSelection(Int(argument) ?? 1)
                 case "pick": AppModel.shared.selection = taskId(titled: argument)
+                // R117: `pickmore:title` is a click with ⌘, `pickto:title` one with Shift, `extend:1` Shift with an arrow,
+                // `selectall` is ⌘A, `unpick` Esc; `picked` prints the selected rows in the order of the view.
+                case "pickmore": taskId(titled: argument).map { AppModel.shared.click($0, command: true) }
+                case "pickto": taskId(titled: argument).map { AppModel.shared.click($0, shift: true) }
+                case "extend": AppModel.shared.extendSelection(Int(argument) ?? 1)
+                case "selectall": AppModel.shared.selectAll()
+                case "unpick": print("debug: unpick \(AppModel.shared.clearPicked())")
+                case "picked":
+                    let model = AppModel.shared
+                    print("debug: picked \(model.selectedTasks.map(\.title)), several \(!model.picked.isEmpty), lead \(model.selectedTask?.title ?? "none")")
+                case "batch":
+                    // R117: `batch:complete`, `wont`, `delete`, `restore`, `due=2026-10-20`, `start=…`, `priority=high`, `move=List name`, `tag=name`.
+                    let model = AppModel.shared
+                    let parts = argument.split(separator: "=", maxSplits: 1).map(String.init)
+                    let value = parts.count > 1 ? parts[1] : ""
+                    let action: BatchAction? = switch parts.first ?? "" {
+                    case "complete": .complete
+                    case "wont": .wontDo
+                    case "delete": .delete
+                    case "restore": .restore
+                    case "due": .due(value)
+                    case "start": .start(value)
+                    case "priority": .priority(value == "high" ? .high : value == "medium" ? .medium : value == "low" ? .low : .none)
+                    case "move": (value == "inbox" ? "inbox" : model.lists.first { $0.name == value }?.id).map { .move(listId: $0) }
+                    case "tag": .tag(AppModel.cleanTag(value))
+                    default: nil
+                    }
+                    print("debug: batch \(argument) changed \(action.map { model.batch($0) } ?? -1)")
+                case "batchmenu":
+                    // The menu a right click on the selected row builds while several rows are selected.
+                    let model = AppModel.shared
+                    let items = model.selectedTask.flatMap { TaskRow.batchItems(for: $0, model) }
+                    print("debug: batch menu \(items.map { $0.filter { !$0.isDivider }.map { item in item.children.map { "\(item.title) ▸ \($0.count)" } ?? item.title } }.map(String.init(describing:)) ?? "none")")
                 case "addsub":
                     let model = AppModel.shared
                     if let id = model.selection {
@@ -321,6 +354,7 @@ enum DebugScript {
                     case "completed": model.scope = .completed
                     case "today": model.scope = .today
                     case "all": model.scope = .all
+                    case "trash": model.scope = .trash
                     case _ where argument.hasPrefix("#"): model.scope = .tag(name: String(argument.dropFirst()))
                     default:
                         model.scope = model.lists.first { $0.name == argument }.map { .list(id: $0.id) }

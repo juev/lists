@@ -63,32 +63,36 @@ struct TaskListView: View {
                     .focused($listFocused)
                     // The keys below drive the list; while a text field inside a
                     // row has the keyboard they belong to the text.
-                    .onKeyPress(.upArrow) {
+                    .onKeyPress(keys: [.upArrow, .downArrow]) { press in
                         guard !typing else { return .ignored }
-                        model.moveSelection(-1)
-                        return .handled
-                    }
-                    .onKeyPress(.downArrow) {
-                        guard !typing else { return .ignored }
-                        model.moveSelection(1)
+                        let step = press.key == .upArrow ? -1 : 1
+                        // R117: with Shift the arrows grow and shrink the selection.
+                        if press.modifiers.contains(.shift) { model.extendSelection(step) } else { model.moveSelection(step) }
                         return .handled
                     }
                     .onKeyPress(.return) {
                         guard !typing, let id = model.selection else { return .ignored }
-                        model.toggleEditing(id)
+                        // R117: several selected rows have no card to open.
+                        if model.picked.isEmpty { model.toggleEditing(id) }
                         return .handled
                     }
                     .onKeyPress(.space) {
                         guard !typing, let task = model.selectedTask else { return .ignored }
-                        model.toggleDone(task)
+                        if model.picked.isEmpty { model.toggleDone(task) } else { model.batch(.complete) }
                         return .handled
                     }
                     // A click inside an open card can leave the keyboard with the list: Esc still closes the card (R44).
+                    // R117: with several rows selected Esc leaves one of them selected first.
                     .onKeyPress(.escape) {
-                        guard !typing, model.closeSelectedCard() else { return .ignored }
+                        guard !typing, model.clearPicked() || model.closeSelectedCard() else { return .ignored }
                         return .handled
                     }
-                    .onDeleteCommand { if !typing { model.selectedTask.map(model.delete) } }
+                    .onDeleteCommand {
+                        guard !typing else { return }
+                        if model.picked.isEmpty { model.selectedTask.map(model.delete) } else { model.batch(.delete) }
+                    }
+                    // R117: ⌘A selects every row of the view; in a text field it belongs to the text.
+                    .onCommand(#selector(NSResponder.selectAll(_:))) { if !typing { model.selectAll() } }
                     .onChange(of: model.selection) { _, new in
                         guard let new else { return }
                         if !typing { listFocused = true }
@@ -379,11 +383,11 @@ struct TaskRow: View {
         .padding(.horizontal, 6)
         // The selection is a strip behind a row; an open card is set apart by its outline instead.
         .background(
-            model.selection == task.id && !isExpanded ? Color.primary.opacity(0.07) : .clear,
+            model.isSelected(task.id) && !isExpanded ? Color.primary.opacity(0.07) : .clear,
             in: RoundedRectangle(cornerRadius: 6))
         .contentShape(Rectangle())
         .onTapGesture(count: 2) { model.toggleEditing(task.id) }
-        .simultaneousGesture(TapGesture().onEnded { model.selection = task.id })
+        .simultaneousGesture(TapGesture().onEnded { TaskRow.click(task.id, model) })
     }
 
     /// Marks after the title, only for what is set, without text or numbers (R72).
@@ -422,9 +426,50 @@ struct TaskRow: View {
         }
     }
 
+    /// R117: a click on a row, with the keys held at the moment: ⌘ adds the row or takes it out, Shift selects the range.
+    @MainActor
+    static func click(_ id: String, _ model: AppModel) {
+        let flags = NSEvent.modifierFlags
+        model.click(id, command: flags.contains(.command), shift: flags.contains(.shift))
+    }
+
+    /// R117: the menu of a row that is one of several selected ones: the actions change all of them.
+    /// Nil for a row that is not, which has the menu of its own.
+    @MainActor
+    static func batchItems(for task: TaskItem, _ model: AppModel) -> [RowMenuItem]? {
+        guard model.picked.count > 1, model.picked.contains(task.id) else { return nil }
+        let tasks = model.selectedTasks
+        if tasks.allSatisfy(\.deleted) { return [RowMenuItem(title: L("Restore")) { model.batch(.restore) }] }
+        if tasks.allSatisfy(\.isLog) { return [RowMenuItem(title: L("Delete records"), destructive: true) { model.batch(.delete) }] }
+        func dates(_ action: @escaping (String) -> BatchAction) -> [RowMenuItem] {
+            [(L("Today"), 0), (L("Tomorrow"), 1), (L("In a week"), 7)].map { title, days in
+                RowMenuItem(title: title) { shiftDate(date: Moment.today(), days: Int64(days)).map { _ = model.batch(action($0)) } }
+            }
+        }
+        var items = [
+            RowMenuItem(title: L("Complete")) { model.batch(.complete) },
+            RowMenuItem(title: L("Due"), children: dates { .due($0) }),
+            RowMenuItem(title: L("Start"), children: dates { .start($0) }),
+            RowMenuItem(title: L("Priority"), children: Priority.all.map { priority in
+                RowMenuItem(title: priority.title) { model.batch(.priority(priority)) }
+            }),
+            RowMenuItem(title: L("Move to list"), children: model.lists.filter { !$0.archived }.map { list in
+                RowMenuItem(title: model.listName(list)) { model.batch(.move(listId: list.id)) }
+            }),
+        ]
+        items.append(RowMenuItem(title: L("Tag"), children: model.tags.map { tag in
+            RowMenuItem(title: "#" + tag.name) { model.batch(.tag(tag.name)) }
+        } + (model.tags.isEmpty ? [] : [.divider]) + [RowMenuItem(title: L("New tag…")) { model.askTagForSelection() }]))
+        items.append(RowMenuItem(title: L("Won't do")) { model.batch(.wontDo) })
+        items.append(.divider)
+        items.append(RowMenuItem(title: L("Delete"), destructive: true) { model.batch(.delete) })
+        return items
+    }
+
     /// The menu of the task. One description for both ways it is drawn: by SwiftUI for a row of
     /// the list and by AppKit for a subtask inside the row of its parent (`SubtaskMenuArea`).
     private var menuItems: [RowMenuItem] {
+        if let batch = Self.batchItems(for: task, model) { return batch }
         if inTrash {
             return [RowMenuItem(title: L("Restore")) { model.perform { try $0.restoreTask(id: task.id) } }]
         }
@@ -527,17 +572,18 @@ struct SubtaskRow: View {
         } else {
             line
                 .background(
-                    model.selection == task.id ? Color.primary.opacity(0.07) : .clear,
+                    model.isSelected(task.id) ? Color.primary.opacity(0.07) : .clear,
                     in: RoundedRectangle(cornerRadius: 6))
                 .contentShape(Rectangle())
                 .onTapGesture(count: 2) { if !locked { model.startRenaming(task) } }
-                .simultaneousGesture(TapGesture().onEnded { model.selection = task.id })
+                .simultaneousGesture(TapGesture().onEnded { TaskRow.click(task.id, model) })
                 .background { SubtaskMenuArea(items: { Self.menuItems(task, model) }) }
         }
     }
 
     /// The menu of a subtask: only what applies to it (R38).
     static func menuItems(_ task: TaskItem, _ model: AppModel) -> [RowMenuItem] {
+        if let batch = TaskRow.batchItems(for: task, model) { return batch }
         if task.deleted {
             return [RowMenuItem(title: L("Restore")) { model.perform { try $0.restoreTask(id: task.id) } }]
         }
