@@ -61,6 +61,7 @@ import UserNotifications
 /// `leads` (prints what each stored choice of "task due at a time" means, R36, and the choice of this Mac),
 /// `origins` (prints what each row of the view says about the list and the project of its task and the colour of the list, R72),
 /// `notifications` (prints whether the system allows notifications for the app, the requests it holds and whether Settings show the line about a refusal, R111; nothing is asked and nothing is scheduled;
+/// with `LISTS_DEBUG_DIR` it also prints the plan of the run, which is not handed to the system: the requests the system holds are those of the installed copy;
 /// `notifications:ask` also repeats the request for the permission and prints the answer, unless the app was never asked: that would open the dialog;
 /// `notifications:denied` and `notifications:allowed` give the model that answer without asking the system and print whether Settings show the line),
 /// `appearance:dark`, `appearance:light` and `appearance:system` (choose the look the way Settings does),
@@ -80,6 +81,8 @@ import UserNotifications
 /// `apphidden` (prints whether the app is hidden, whether it is active and how many of its main windows are ordered in),
 /// `quicktrace` (shows quick entry transparent and without the keyboard, and prints its geometry frame by frame:
 /// a line that differs from the next one is a card that moved after it was shown).
+/// With `LISTS_DEBUG_DIR=/folder` the run has its data in that folder, and its settings as well, in `settings.plist`: it starts with the defaults
+/// and leaves the settings and the notifications of the installed copy alone. The key of quick entry is still the one of the installed copy.
 /// With `LISTS_DEBUG_QUIET` set the script leaves the app in the background instead of bringing its window forward;
 /// key presses then go straight to the main window, which takes them hidden as well, and so do clicks after `ghost`.
 @MainActor
@@ -383,6 +386,8 @@ enum DebugScript {
                         "\(request.identifier) \((request.trigger as? UNCalendarNotificationTrigger)?.nextTriggerDate().map(String.init(describing:)) ?? "no date")"
                     }
                     print("debug: notifications \(names[status] ?? "status \(status.rawValue)"), pending \(pending)")
+                    // With `LISTS_DEBUG_DIR` the plan stays in the app, and the requests above are those of the installed copy.
+                    if Storage.debugDirectory != nil { print("debug: notifications planned and not handed over \(Reminders.shared.withheld)") }
                     // R111: the line of Settings follows the same answer.
                     print("debug: notifications line in settings \(AppModel.shared.notificationAccess == .denied ? "shown" : "not shown")")
                     // `notifications:ask` repeats the request the app makes. Only where the answer is already

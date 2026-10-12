@@ -12,6 +12,11 @@ enum Storage {
     /// Where the settings are kept. The helper of quick entry (R115) has none of its own: it reads and
     /// writes those of Lists.
     static let defaults: UserDefaults = {
+        #if DEBUG
+        // A check has settings of its own, kept in its throwaway directory: the debug build has the
+        // identifier of the installed copy, and would write into the settings of that one (#209).
+        if let dir = debugDirectory, let own = UserDefaults(suiteName: dir.appendingPathComponent("settings").path) { return own }
+        #endif
         #if LISTS_HELPER
         return UserDefaults(suiteName: "org.evsyukov.lists") ?? .standard
         #else
@@ -26,11 +31,15 @@ enum Storage {
         return id
     }
 
+    #if DEBUG
+    /// Checks run against a throwaway directory, not the user's tasks.
+    static let debugDirectory: URL? = ProcessInfo.processInfo.environment["LISTS_DEBUG_DIR"].map { URL(fileURLWithPath: $0, isDirectory: true) }
+    #endif
+
     static func directory() -> URL {
         let fm = FileManager.default
         #if DEBUG
-        // Checks run against a throwaway directory, not the user's tasks.
-        if let dir = ProcessInfo.processInfo.environment["LISTS_DEBUG_DIR"] { return URL(fileURLWithPath: dir, isDirectory: true) }
+        if let debugDirectory { return debugDirectory }
         #endif
         if let group = groupIdentifier,
            let container = fm.containerURL(forSecurityApplicationGroupIdentifier: group) {
