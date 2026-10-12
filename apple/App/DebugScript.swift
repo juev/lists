@@ -64,6 +64,8 @@ import UserNotifications
 /// with `LISTS_DEBUG_DIR` it also prints the plan of the run, which is not handed to the system: the requests the system holds are those of the installed copy;
 /// `notifications:ask` also repeats the request for the permission and prints the answer, unless the app was never asked: that would open the dialog;
 /// `notifications:denied` and `notifications:allowed` give the model that answer without asking the system and print whether Settings show the line),
+/// `dock` (prints the settings of R116, the activation policy of the app, whether its item is in the menu bar and whether a start at login would be hidden;
+/// `dock:item=off`, `dock:hidden=on` and `dock:window=off` choose first, the way Settings do; with `LISTS_DEBUG_AT_LOGIN` set the app takes its start for one made by the system at login),
 /// `appearance:dark`, `appearance:light` and `appearance:system` (choose the look the way Settings does),
 /// `appearance` alone prints the choice and the look each window of the app has, the quick-entry panel among them,
 /// `dockcount:today`, `dockcount:overdue` and `dockcount:none` (choose what the Dock icon counts the way Settings does, R103),
@@ -408,6 +410,23 @@ enum DebugScript {
                         }
                         print("debug: appearance \(AppModel.shared.appearance), windows \(looks.sorted { $0.key < $1.key }.map { "\($0.key) \($0.value)" })")
                     }
+                case "dock":
+                    // R116: `dock:item=off`, `dock:hidden=on` and `dock:window=off` choose the way Settings do; then what holds.
+                    let parts = argument.split(separator: "=").map(String.init)
+                    if parts.count == 2 {
+                        switch parts[0] {
+                        case "item": AppModel.shared.menuBarItem = parts[1] == "on"
+                        case "hidden": AppModel.shared.hiddenFromDock = parts[1] == "on"
+                        case "window": AppModel.shared.windowAtLogin = parts[1] == "on"
+                        default: break
+                        }
+                        try? await _Concurrency.Task.sleep(for: .milliseconds(500))
+                    }
+                    let model = AppModel.shared
+                    let policy = NSApp.activationPolicy() == .regular ? "regular" : NSApp.activationPolicy() == .accessory ? "accessory" : "prohibited"
+                    let bars = NSApp.windows.filter { String(describing: type(of: $0)) == "NSStatusBarWindow" }
+                    let item = bars.map { "\($0.isVisible ? "visible" : "hidden") \(Int($0.frame.width))x\(Int($0.frame.height))" }
+                    print("debug: dock item \(model.menuBarItem), hidden asked \(model.hiddenFromDock), out of dock \(model.outOfDock), policy \(policy), item in the menu bar \(item), window at login \(model.windowAtLogin), starts hidden \(AppDelegate.startsHidden(atLogin: AppDelegate.launchedAtLogin, windowAtLogin: model.windowAtLogin)), main menu \(NSApp.mainMenu?.items.count ?? 0) items")
                 case "dockcount":
                     if step.contains(":") { AppModel.shared.dockCount = argument }
                     let model = AppModel.shared

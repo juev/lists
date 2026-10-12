@@ -19,7 +19,8 @@ struct ListsApp: App {
         .defaultSize(width: 860, height: 600)
         .commands { AppCommands(model: model) }
 
-        MenuBarExtra("Lists", systemImage: model.counts.overdue > 0 ? "checkmark.circle.badge.xmark" : "checkmark.circle") {
+        // R116: the item can be switched off in the settings.
+        MenuBarExtra("Lists", systemImage: model.counts.overdue > 0 ? "checkmark.circle.badge.xmark" : "checkmark.circle", isInserted: $model.menuBarItem) {
             MenuBarView()
                 .environment(model)
                 .font(AppFont.style(.body))
@@ -41,11 +42,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         HelperAgent.renew()
         NSApp.servicesProvider = self
         AttachmentFiles.clear()
-        MainActor.assumeIsolated { AppModel.shared.applyAppearance(); AppModel.shared.applyDockCount() }
+        MainActor.assumeIsolated {
+            AppModel.shared.applyAppearance(); AppModel.shared.applyDockCount(); AppModel.shared.applyDockIcon()
+            // R116: opened by the system at login, Lists stays without a window when that is chosen.
+            if Self.startsHidden(atLogin: Self.launchedAtLogin, windowAtLogin: AppModel.shared.windowAtLogin) { NSApp.hide(nil) }
+        }
         #if DEBUG
         MainActor.assumeIsolated { DebugScript.runIfAsked() }
         #endif
     }
+
+    /// Whether the system started Lists as a login item: it says so in the event that opens the app.
+    static var launchedAtLogin: Bool {
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["LISTS_DEBUG_AT_LOGIN"] != nil { return true }
+        #endif
+        let event = NSAppleEventManager.shared().currentAppleEvent
+        return event?.eventID == kAEOpenApplication && event?.paramDescriptor(forKeyword: keyAEPropData)?.enumCodeValue == keyAELaunchedAsLogInItem
+    }
+
+    static func startsHidden(atLogin: Bool, windowAtLogin: Bool) -> Bool { atLogin && !windowAtLogin }
 
     /// The window can be closed while the menu bar item and the hotkey keep working.
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
@@ -159,6 +175,7 @@ struct AppCommands: Commands {
 struct MenuBarView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.openSettings) private var openSettings
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -192,6 +209,11 @@ struct MenuBarView: View {
             HStack {
                 Button(L("Open Lists")) {
                     openWindow(id: "main")
+                    NSApp.activate(ignoringOtherApps: true)
+                }
+                // R116: out of the Dock Lists has no main menu, and this is the way to its settings.
+                Button(L("Settings…")) {
+                    openSettings()
                     NSApp.activate(ignoringOtherApps: true)
                 }
                 Spacer()
@@ -278,12 +300,23 @@ struct SettingsView: View {
             Form {
                 // R115: first on the tab, where they are seen without scrolling.
                 Section(L("At login")) {
+                    @Bindable var model = model
                     Toggle(L("Open Lists at login"), isOn: Binding(get: { model.opensAtLogin == .on }, set: { model.setLoginItem(.app, on: $0) }))
                     loginItemNote(.app, state: model.opensAtLogin)
+                    // R116
+                    Toggle(L("Show the window at login"), isOn: $model.windowAtLogin).disabled(model.opensAtLogin != .on)
                     Toggle(L("Quick entry without opening Lists"), isOn: Binding(get: { model.helperAtLogin == .on }, set: { model.setLoginItem(.helper, on: $0) }))
                     Text(L("A helper starts at login and answers the shortcut while Lists is not running. A task written this way is synced when Lists is opened."))
                         .font(AppFont.style(.caption)).foregroundStyle(.secondary)
                     loginItemNote(.helper, state: model.helperAtLogin)
+                }
+                // R116
+                Section(L("Menu bar and Dock")) {
+                    @Bindable var model = model
+                    Toggle(L("Show Lists in the menu bar"), isOn: $model.menuBarItem)
+                    Toggle(L("Hide Lists from the Dock"), isOn: $model.hiddenFromDock).disabled(!model.menuBarItem)
+                    Text(L("Out of the Dock, Lists is opened from its item in the menu bar and is not among the apps of ⌘Tab."))
+                        .font(AppFont.style(.caption)).foregroundStyle(.secondary)
                 }
                 Section(L("Appearance")) {
                     @Bindable var model = model
@@ -437,6 +470,11 @@ struct SettingsView: View {
                         Text(L("Today")).tag("today")
                         Text(L("Overdue tasks")).tag("overdue")
                         Text(L("Do not show")).tag("none")
+                    }
+                    .disabled(model.outOfDock)
+                    // R116: out of the Dock there is no icon to carry the count.
+                    if model.outOfDock {
+                        Text(L("Lists is hidden from the Dock")).font(AppFont.style(.caption)).foregroundStyle(.secondary)
                     }
                 }
             }
