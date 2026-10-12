@@ -181,6 +181,10 @@ jobs:
             echo 'notarized=false' >> "$GITHUB_OUTPUT"
           fi
 
+      # Nothing is published when the app that was just packed does not stay running (#240).
+      - name: Start the app
+        run: ./scripts/check-launch.sh apple/build/Build/Products/Release/Lists.app release
+
       - uses: actions/upload-artifact@v7
         with:
           name: asset-macos

@@ -20,6 +20,12 @@ A tag with a hyphen, such as `v0.2.0-rc.1`, is published as a pre-release and do
 
 To try the pipeline without publishing, start the Release workflow by hand (Actions → Release → Run workflow). It builds the APK and the disk image and leaves them on the run; the Docker image is built into the cache only and is not pushed. The run needs the secrets of the Android key as a release does.
 
+## What is checked before a release, and what is not
+
+- `make test` and `make lint`, in CI and again in the Release workflow.
+- **The macOS app starts.** CI runs `scripts/check-launch.sh … debug` on the Debug build: the helper of quick entry is switched on and the app is started with a probe that stops it when the event loop is run while the model is built. That is how 0.3.1 stopped at every launch (#239); the check fails on that code and passes after the fix. The Release workflow runs `scripts/check-launch.sh … release` on the app it has just packed, which must still be running fifteen seconds after its start; when it is not, nothing is published.
+- **Not checked by a machine:** what the apps show on a screen, the Android app on a phone, and a launch of the macOS Release build under the real conditions of a Mac in use: with the installed helper, with notifications allowed and planned, with the keychain asking. The probe covers one way a launch can go wrong, not all of them. Before a tag, install the build on the Mac it is meant for and start it several times.
+
 ## Android signing key
 
 Every APK must be signed with the same key, or it will not install over the previous version. The workflow refuses to publish an APK whose certificate differs from the pinned fingerprint.

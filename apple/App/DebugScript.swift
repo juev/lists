@@ -87,6 +87,8 @@ import UserNotifications
 /// which a person at the keyboard does not get: `scripts/postkey.swift` sends presses each of which is undone on its own, #230).
 /// With `LISTS_DEBUG_DIR=/folder` the run has its data in that folder, and its settings as well, in `settings.plist`: it starts with the defaults
 /// and leaves the settings and the notifications of the installed copy alone. The key of quick entry is still the one of the installed copy.
+/// With `LISTS_DEBUG_LAUNCH_PROBE` set the launch carries a probe that stops the app when the event loop is run while the model is built,
+/// and prints a line when it is not; `scripts/check-launch.sh` is the check that uses it.
 /// With `LISTS_DEBUG_HOLD_START=10` the launch is held for that many seconds right after the helper is restarted (R115): the stand-in for a launch
 /// that waits for an answer about the keychain.
 /// With `LISTS_DEBUG_QUIET` set the script leaves the app in the background instead of bringing its window forward;
