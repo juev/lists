@@ -226,30 +226,44 @@ impl Store {
     /// "Create backup now" (R89): makes a backup, then drops the oldest beyond the number to keep.
     pub fn create_backup(&self) -> Result<Backup> {
         let backup = self.write_backup()?;
-        self.rotate()?;
+        // R102: the archive is there, but old ones are not removed and the folder grows.
+        if let Err(e) = self.rotate() {
+            self.note(LogLevel::Error, "backup", || format!("old backups not removed: {e}"));
+            return Err(e);
+        }
         Ok(backup)
     }
 
     /// R88: makes the automatic backup when its time has come. Cheap to call often.
     pub fn backup_if_due(&self) -> Result<Option<Backup>> {
         let _looking = self.backup_lock.lock().unwrap_or_else(|p| p.into_inner());
-        let every = self.backup_settings()?.every_hours;
-        if every == 0 || !self.holds_data()? {
-            return Ok(None);
+        // R102: a failure of the archive itself is said where it is written; the rest is said here.
+        let mut said = false;
+        let due = (|| {
+            let every = self.backup_settings()?.every_hours;
+            if every == 0 || !self.holds_data()? {
+                return Ok(None);
+            }
+            let (now, last) = {
+                let inner = self.lock();
+                let last = db::meta_get(&inner.conn, "backup_last")?
+                    .and_then(|v| NaiveDateTime::parse_from_str(&v, SECONDS_FMT).ok());
+                (inner.now(), last)
+            };
+            // A clock set back does not hold the backups off for good.
+            if last.is_some_and(|last| last <= now && now - last < chrono::Duration::hours(every.into())) {
+                return Ok(None);
+            }
+            let backup = self.create_backup().inspect_err(|_| said = true)?;
+            db::meta_set(&self.lock().conn, "backup_last", &now.format(SECONDS_FMT).to_string())?;
+            Ok(Some(backup))
+        })();
+        if let Err(e) = &due {
+            if !said {
+                self.note(LogLevel::Error, "backup", || format!("not created: {e}"));
+            }
         }
-        let (now, last) = {
-            let inner = self.lock();
-            let last = db::meta_get(&inner.conn, "backup_last")?
-                .and_then(|v| NaiveDateTime::parse_from_str(&v, SECONDS_FMT).ok());
-            (inner.now(), last)
-        };
-        // A clock set back does not hold the backups off for good.
-        if last.is_some_and(|last| last <= now && now - last < chrono::Duration::hours(every.into())) {
-            return Ok(None);
-        }
-        let backup = self.create_backup()?;
-        db::meta_set(&self.lock().conn, "backup_last", &now.format(SECONDS_FMT).to_string())?;
-        Ok(Some(backup))
+        due
     }
 
     pub fn delete_backup(&self, name: String) -> Result<()> {
