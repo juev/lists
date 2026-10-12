@@ -98,6 +98,43 @@ final class AppModel {
             applyDockCount()
         }
     }
+    /// R116: whether Lists has its item in the menu bar; belongs to this Mac.
+    var menuBarItem: Bool = Storage.defaults.object(forKey: "menuBarItem") as? Bool ?? true {
+        didSet {
+            Storage.defaults.set(menuBarItem, forKey: "menuBarItem")
+            // Without the item nothing on screen would open Lists: the Dock icon comes back.
+            if !menuBarItem && hiddenFromDock { hiddenFromDock = false }
+            applyDockIcon()
+        }
+    }
+    /// R116: whether Lists is taken out of the Dock; only while it has its item in the menu bar.
+    var hiddenFromDock: Bool = Storage.defaults.bool(forKey: "hiddenFromDock") {
+        didSet {
+            // Asked for without the item in the menu bar, it is not taken.
+            if hiddenFromDock && !menuBarItem { return hiddenFromDock = false }
+            Storage.defaults.set(hiddenFromDock, forKey: "hiddenFromDock")
+            guard hiddenFromDock != oldValue else { return }
+            // The change of the policy takes the app out of the front: the window where it was made stays there.
+            let active = NSApp?.isActive == true
+            applyDockIcon()
+            if active { NSApp?.activate(ignoringOtherApps: true) }
+        }
+    }
+    /// R116: whether Lists opened at login shows its window.
+    var windowAtLogin: Bool = Storage.defaults.object(forKey: "windowAtLogin") as? Bool ?? true {
+        didSet { Storage.defaults.set(windowAtLogin, forKey: "windowAtLogin") }
+    }
+
+    /// R116: out of the Dock only with the item in the menu bar, whatever was stored.
+    static func outOfDock(asked: Bool, menuBarItem: Bool) -> Bool { asked && menuBarItem }
+    var outOfDock: Bool { Self.outOfDock(asked: hiddenFromDock, menuBarItem: menuBarItem) }
+
+    /// The model loads before there is an application: the launch applies the choice once more.
+    func applyDockIcon() {
+        if LoginItems.isHelper { return }
+        NSApp?.setActivationPolicy(outOfDock ? .accessory : .regular)
+    }
+
     /// The helper of quick entry (R115) keeps no settings of its own: before it shows the window it
     /// reads again what Lists holds, since the settings may have changed while it was running.
     func reloadSettings() {

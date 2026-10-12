@@ -231,6 +231,7 @@
 "Changes waiting to upload" = "Есть неотправленные изменения";
 "Synced" = "Синхронизировано";
 "Settings" = "Настройки";
+"Settings…" = "Настройки…";
 "1st" = "1-й";
 "2nd" = "2-й";
 "3rd" = "3-й";
@@ -382,6 +383,12 @@
 "The log is a text file on this Mac. It holds what the app did and the text of errors, not what the tasks say." = "Журнал — текстовый файл на этом Mac. В нём то, что делало приложение, и тексты ошибок, но не содержимое задач.";
 "At login" = "При входе в систему";
 "Open Lists at login" = "Открывать Lists при входе в систему";
+"Show the window at login" = "Показывать окно при входе в систему";
+"Menu bar and Dock" = "Строка меню и Dock";
+"Show Lists in the menu bar" = "Показывать Lists в строке меню";
+"Hide Lists from the Dock" = "Скрывать Lists из Dock";
+"Out of the Dock, Lists is opened from its item in the menu bar and is not among the apps of ⌘Tab." = "Без значка в Dock Lists открывается из строки меню, и среди приложений ⌘Tab его нет.";
+"Lists is hidden from the Dock" = "Lists скрыт из Dock";
 "Quick entry without opening Lists" = "Быстрый ввод без запуска Lists";
 "A helper starts at login and answers the shortcut while Lists is not running. A task written this way is synced when Lists is opened." = "При входе в систему запускается помощник: он отвечает на сочетание клавиш, пока Lists не запущен. Записанная так задача синхронизируется, когда Lists открыт.";
 "The system refused: %@" = "Система отказала: %@";
