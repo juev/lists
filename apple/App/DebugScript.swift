@@ -87,6 +87,8 @@ import UserNotifications
 /// which a person at the keyboard does not get: `scripts/postkey.swift` sends presses each of which is undone on its own, #230).
 /// With `LISTS_DEBUG_DIR=/folder` the run has its data in that folder, and its settings as well, in `settings.plist`: it starts with the defaults
 /// and leaves the settings and the notifications of the installed copy alone. The key of quick entry is still the one of the installed copy.
+/// `keychain:…` (the secrets of sync in the keychain, #241: `former=account=secret`, `save=account=secret`, `load=account`, `delete=account`, `forget`, `wipe=account,account`;
+/// prints the answer and how many items of the keychain were opened since `forget`; with `LISTS_DEBUG_DIR` the items are those of the check, not of the installed copy).
 /// With `LISTS_DEBUG_LAUNCH_PROBE` set the launch carries a probe that stops the app when the event loop is run while the model is built,
 /// and prints a line when it is not; `scripts/check-launch.sh` is the check that uses it.
 /// With `LISTS_DEBUG_HOLD_START=10` the launch is held for that many seconds right after the helper is restarted (R115): the stand-in for a launch
@@ -517,6 +519,23 @@ enum DebugScript {
                     } else {
                         print("debug: row menu none")
                     }
+                case "keychain":
+                    // #241: `keychain:former=account=secret` keeps a secret the former way, in an item of its own; `save=account=secret`,
+                    // `load=account` and `delete=account` are what the app does; `forget` is what a new run starts with;
+                    // `wipe=account,account` removes the items of the check. Then how many items were opened since `forget`.
+                    let parts = argument.split(separator: "=", maxSplits: 2).map(String.init)
+                    let (account, secret) = (parts.count > 1 ? parts[1] : "", parts.count > 2 ? parts[2] : "")
+                    var said = ""
+                    switch parts.first ?? "" {
+                    case "former": said = (try? Keychain.saveFormer(secret, account: account)) == nil ? "refused" : "kept"
+                    case "save": said = (try? Keychain.save(secret, account: account)) == nil ? "refused" : "saved"
+                    case "load": said = Keychain.load(account: account) ?? "none"
+                    case "delete": Keychain.delete(account: account); said = "deleted"
+                    case "forget": Keychain.forget(); said = "forgotten"
+                    case "wipe": Keychain.wipe(formerAccounts: account.split(separator: ",").map(String.init)); said = "wiped"
+                    default: break
+                    }
+                    print("debug: keychain \(argument) \(said), items opened \(Keychain.opened)")
                 case "undostate":
                     // Whether a group of changes is still open. A press of the script is handed to the app directly, and the
                     // undo manager closes a group only after an event taken from the queue: the changes of several scripted
