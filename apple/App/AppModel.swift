@@ -432,6 +432,18 @@ final class AppModel {
     @ObservationIgnored weak var undoManager: UndoManager?
 
     private init() {
+        #if DEBUG
+        // The check of the launch (`scripts/check-launch.sh`, #240). A task of the main actor that asks for the model
+        // waits in the queue while the model is built. It runs afterwards, unless something on the way runs the event
+        // loop: then it runs inside the building, asks for a model that is not there yet, and the system stops the
+        // app, which is how 0.3.1 stopped at launch (#239).
+        if ProcessInfo.processInfo.environment["LISTS_DEBUG_LAUNCH_PROBE"] != nil {
+            Task { @MainActor in
+                _ = AppModel.shared
+                print("debug: launch probe ran after the model was built")
+            }
+        }
+        #endif
         // R115: the helper left from the version before an update is replaced before anything else. The rest of
         // the launch can wait for a long time, for the answer about the keychain for one, and all that while
         // the old helper would go on writing into the data folder with the old core.

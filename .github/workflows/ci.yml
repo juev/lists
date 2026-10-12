@@ -76,6 +76,9 @@ jobs:
           workspaces: core
       - name: Build the app
         run: make apple
+      # A build that compiles can still stop at launch, as 0.3.1 did (#239, #240).
+      - name: Start the app
+        run: ./scripts/check-launch.sh apple/build/Build/Products/Debug/Lists.app debug
 
   docker:
     name: Docker image
