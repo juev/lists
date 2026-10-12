@@ -83,6 +83,8 @@ import UserNotifications
 /// `apphidden` (prints whether the app is hidden, whether it is active and how many of its main windows are ordered in),
 /// `quicktrace` (shows quick entry transparent and without the keyboard, and prints its geometry frame by frame:
 /// a line that differs from the next one is a card that moved after it was shown).
+/// `undostate` (prints whether a group of changes is open in the undo manager; `undo` after several scripted presses takes all of them back at once,
+/// which a person at the keyboard does not get: `scripts/postkey.swift` sends presses each of which is undone on its own, #230).
 /// With `LISTS_DEBUG_DIR=/folder` the run has its data in that folder, and its settings as well, in `settings.plist`: it starts with the defaults
 /// and leaves the settings and the notifications of the installed copy alone. The key of quick entry is still the one of the installed copy.
 /// With `LISTS_DEBUG_QUIET` set the script leaves the app in the background instead of bringing its window forward;
@@ -511,6 +513,13 @@ enum DebugScript {
                     } else {
                         print("debug: row menu none")
                     }
+                case "undostate":
+                    // Whether a group of changes is still open. A press of the script is handed to the app directly, and the
+                    // undo manager closes a group only after an event taken from the queue: the changes of several scripted
+                    // presses fall into one group and are undone together. Presses of `scripts/postkey.swift` come through
+                    // the queue, and each is a group of its own, as with a keyboard (#230).
+                    let manager = AppModel.shared.undoManager
+                    print("debug: undo state level \(manager?.groupingLevel ?? -1), by event \(manager?.groupsByEvent == true), can undo \(manager?.canUndo == true), run loop modes \(manager?.runLoopModes.map(\.rawValue) ?? []), same as the window's \(manager === NSApp.mainWindow?.undoManager)")
                 case "undo":
                     // What ⌘Z does: a hidden window has no keyboard to take the press.
                     let manager = AppModel.shared.undoManager
