@@ -87,6 +87,8 @@ import UserNotifications
 /// which a person at the keyboard does not get: `scripts/postkey.swift` sends presses each of which is undone on its own, #230).
 /// With `LISTS_DEBUG_DIR=/folder` the run has its data in that folder, and its settings as well, in `settings.plist`: it starts with the defaults
 /// and leaves the settings and the notifications of the installed copy alone. The key of quick entry is still the one of the installed copy.
+/// With `LISTS_DEBUG_HOLD_START=10` the launch is held for that many seconds right after the helper is restarted (R115): the stand-in for a launch
+/// that waits for an answer about the keychain.
 /// With `LISTS_DEBUG_QUIET` set the script leaves the app in the background instead of bringing its window forward;
 /// key presses then go straight to the main window, which takes them hidden as well, and so do clicks after `ghost`.
 @MainActor
