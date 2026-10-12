@@ -39,7 +39,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         KeyboardShortcuts.onKeyUp(for: .quickEntry) { QuickEntryPanel.shared.toggle() }
         MainActor.assumeIsolated { QuickEntryPanel.shared.watchHiding() }
         LoginItems.takeKeyBackFromHelper()
-        HelperAgent.renew()
         NSApp.servicesProvider = self
         AttachmentFiles.clear()
         MainActor.assumeIsolated {

@@ -432,6 +432,14 @@ final class AppModel {
     @ObservationIgnored weak var undoManager: UndoManager?
 
     private init() {
+        // R115: the helper left from the version before an update is replaced before anything else. The rest of
+        // the launch can wait for a long time, for the answer about the keychain for one, and all that while
+        // the old helper would go on writing into the data folder with the old core.
+        if !LoginItems.isHelper { HelperAgent.renew() }
+        #if DEBUG
+        // A check holds the launch here for that many seconds, in place of a wait it cannot stage.
+        if let hold = ProcessInfo.processInfo.environment["LISTS_DEBUG_HOLD_START"].flatMap(UInt32.init) { sleep(hold) }
+        #endif
         do {
             store = try Storage.openStore()
             // The helper does not sync (R115): the passwords stay with Lists.
