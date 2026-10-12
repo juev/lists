@@ -691,7 +691,7 @@ struct SettingsView: View {
                     Keychain.delete(account: account)
                 } else {
                     do {
-                        try Keychain.save(token, account: account, label: "Lists push token")
+                        try Keychain.save(token, account: account)
                     } catch {
                         message = L("The push token could not be saved in the system keychain: %@", error.localizedDescription)
                     }

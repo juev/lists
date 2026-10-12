@@ -163,6 +163,8 @@ The token is sent only to the server named in the same settings: when the device
 
 When the server turns the token down, the sync settings say "The push server refused access", and the web server writes that to its log. Sync itself goes on as scheduled. The Mac keeps the token in the keychain and Android encrypts it with a key from the system keystore; it is never written to the storage.
 
+On the Mac the password of the storage and the token of the push server are in one item of the login keychain, named "Lists". A release that is not signed with a Developer ID is another app to the keychain after every update, so the first launch after an update asks for the password of the keychain once; "Always Allow" lasts until the next update. The first launch of the version that brought the one item asks twice, once for each secret kept the old way, and moves them over.
+
 When a device that already has tasks is connected to a storage that has tasks as well, Save and sync on macOS and Android asks which side to keep:
 
 - **Merge** keeps the tasks of both sides. This is what happens without the question, when one of the sides is empty.
