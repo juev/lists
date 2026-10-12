@@ -133,6 +133,8 @@ final class AppModel {
     func applyDockIcon() {
         if LoginItems.isHelper { return }
         NSApp?.setActivationPolicy(outOfDock ? .accessory : .regular)
+        // An icon that comes back carries the count again (R103).
+        applyDockCount()
     }
 
     /// The helper of quick entry (R115) keeps no settings of its own: before it shows the window it
