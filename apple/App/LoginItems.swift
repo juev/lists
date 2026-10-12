@@ -156,10 +156,16 @@ enum HelperAgent {
     static func renew() {
         guard FileManager.default.fileExists(atPath: file.path) else { return }
         let named = (NSDictionary(contentsOf: file)?["ProgramArguments"] as? [String])?.first
-        if named != program.path {
-            try? set(on: true)
-        } else {
-            launchctl("kickstart", "-k", service)
+        // Not on the thread of the launch: the system stops the helper at once, but keeps ten seconds between two
+        // starts of one agent, and the command waits for the start. A launch that followed another one within
+        // those seconds waited with it (#247).
+        let moved = named != program.path
+        DispatchQueue.global(qos: .userInitiated).async {
+            if moved {
+                try? set(on: true)
+            } else {
+                launchctl("kickstart", "-k", service)
+            }
         }
     }
 }
