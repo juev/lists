@@ -61,6 +61,10 @@ header input { border: 1px solid var(--line); border-radius: 8px; padding: 6px 1
 .meta { color: var(--muted); font-size: 13px; display: flex; flex-wrap: wrap; gap: 4px 10px; }
 .meta .bad { color: var(--danger); }
 .prio { color: var(--warn); font-weight: 700; }
+/* R72: the mark stands in the middle of the row; the priority is a thin bar after it, and its place is kept. */
+.task > .row { align-items: center; }
+.pbar { width: 3px; align-self: stretch; min-height: 18px; border-radius: 2px; flex: none; }
+.pbar.p1 { background: #3b82f6; } .pbar.p2 { background: var(--warn); } .pbar.p3 { background: var(--danger); }
 .edit { padding: 0 12px 0 42px; display: grid; gap: 8px; min-width: 0; }
 .edit > * { min-width: 0; }
 .edit input[type=text], .edit textarea { width: 100%; border: 0; outline: 0; background: transparent; resize: vertical; }
@@ -233,7 +237,6 @@ function dateLabel(v) {
   return v.length > 10 ? `${text}, ${v.slice(11)}` : text;
 }
 const overdue = v => v.length > 10 ? new Date(v) < new Date() : dayOf(v) < today();
-const marks = p => "!".repeat(p);
 const PRESETS = [
   ["Every day", { freq: "daily", interval: 1 }], ["On weekdays", { freq: "weekly", interval: 1, weekdays: [1, 2, 3, 4, 5] }],
   ["Every week", { freq: "weekly", interval: 1 }], ["Every two weeks", { freq: "weekly", interval: 2 }],
@@ -335,10 +338,11 @@ function taskNode(x, origin) {
   };
   const row = $("div", { class: "row", onclick: () => { open ? state.open.delete(x.id) : state.open.add(x.id); load(); } },
     $("button", { class: "check" + (x.done ? " done" : ""), "aria-label": x.done ? "reopen" : "complete", onclick: toggle }, x.wont ? "✕" : x.done ? "✓" : ""),
+    $("span", x.priority ? { class: "pbar p" + x.priority, role: "img", "aria-label": t(["Low", "Medium", "High"][x.priority - 1]) } : { class: "pbar" }),
     $("div", { class: "title" },
       // An open task shows its title once, as the editable field below.
-      open && !locked ? $("div", { class: "meta" }, x.priority ? $("span", { class: "prio" }, marks(x.priority)) : "", listName(x.list)) :
-        $("div", { class: "t" + (x.done ? " done" : "") }, x.project ? "▸ " : "", x.priority ? $("span", { class: "prio" }, marks(x.priority) + " ") : "", x.title),
+      open && !locked ? $("div", { class: "meta" }, listName(x.list)) :
+        $("div", { class: "t" + (x.done ? " done" : "") }, x.project ? "▸ " : "", x.title),
       open ? null : summary(x, origin)));
   // The subtasks a search found the task by (R22); an open task shows all of its subtasks instead.
   const found = !open && x.found && x.found.length ? $("div", { class: "sub" }, x.found.map(s => subLine(s, true))) : null;

@@ -9,9 +9,11 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -32,6 +34,8 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import org.evsyukov.lists.title
+import uniffi.lists_core.Priority
 
 // The colours of the icons of the built-in views (R79): the same as on macOS, a lighter shade in the dark look.
 // They come neither from a list nor from the dynamic palette.
@@ -51,6 +55,29 @@ internal fun viewTint(tint: ViewTint): Color =
 /** The colour of a priority, in a row and in a chip. */
 val PriorityColor = Color(0xFFE8890C)
 
+/** R72: the colour of the bar a row shows for the priority of its task; none for a task without one. */
+fun priorityBarColor(priority: Priority): Color? = when (priority) {
+    Priority.HIGH -> Color(0xFFE5484D)
+    Priority.MEDIUM -> PriorityColor
+    Priority.LOW -> Color(0xFF3B82F6)
+    else -> null
+}
+
+/** R72: the bar after the mark of a row. Its place is kept for a task without a priority; [tall] is a row of two lines. */
+@Composable
+fun PriorityBar(priority: Priority, tall: Boolean) {
+    val color = priorityBarColor(priority)
+    val name = priority.title()
+    Box(
+        Modifier
+            .padding(end = 10.dp)
+            .width(3.dp)
+            .height(if (tall) 34.dp else 20.dp)
+            .background(color ?: Color.Transparent, RoundedCornerShape(2.dp))
+            .then(if (color != null) Modifier.semantics { contentDescription = name } else Modifier)
+    )
+}
+
 enum class MarkState { Open, Done, Wont }
 
 /**
@@ -62,7 +89,7 @@ fun Mark(state: MarkState, description: String?, modifier: Modifier = Modifier, 
     val color = MaterialTheme.colorScheme.outline
     Box(
         modifier
-            .size(if (round) 16.dp else 18.dp)
+            .size(16.dp)
             .border(1.5.dp, color, if (round) CircleShape else RoundedCornerShape(5.dp))
             .semantics { if (description != null) contentDescription = description },
         contentAlignment = Alignment.Center,

@@ -794,16 +794,13 @@ fun TaskRow(
         if (task.isProject) {
             Icon(Icons.Outlined.Folder, str(R.string.project), Modifier.padding(end = 6.dp).size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        if (task.priority != Priority.NONE) {
-            Text(
-                task.priority.marks(),
-                color = PriorityColor,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(end = 6.dp).semantics { contentDescription = task.priority.title() },
-            )
-        }
+        val origin = if (showOrigin) rowOrigin(task, state.lists, str(R.string.inbox)) else null
+        // R72: the priority is a thin bar after the mark; its place is kept, so every title starts at one line.
+        // A subtask in a card has no priority (R10).
+        if (!subtask) PriorityBar(task.priority, tall = origin != null)
         // The title gives way to the marks and the date: it is what gets the ellipsis (R73).
-        Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 task.title,
                 maxLines = 1,
@@ -816,8 +813,24 @@ fun TaskRow(
                 },
                 modifier = Modifier.weight(1f, fill = false),
             )
-            // Only a task of a project is a row with a parent: a subtask is never a row of a view (R12).
-            Marks(task, origin = if (showOrigin) rowOrigin(task, state.lists, str(R.string.inbox)) else null)
+            Marks(task)
+        }
+        // R72: under the title, the list of the task in its colour and the project of a task of a project.
+        // Only a task of a project is a row with a parent: a subtask is never a row of a view (R12).
+        if (origin != null) {
+            Text(
+                buildAnnotatedString {
+                    origin.list?.let { name ->
+                        withStyle(SpanStyle(color = origin.color?.let(::parseColor) ?: MaterialTheme.colorScheme.primary)) { append(name) }
+                    }
+                    origin.project?.let { append(if (origin.list == null) it else " – $it") }
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.outline,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
         }
         val scope = state.effectiveScope
         val dayInHeading = scope == Scope.Upcoming || (scope == Scope.Today && task.due?.let(::dayOf) == today())
@@ -942,9 +955,9 @@ fun rowOrigin(listName: String?, listColor: String?, project: String?): RowOrigi
     return RowOrigin(named, listColor?.takeIf { named != null && it.isNotEmpty() }, project)
 }
 
-/** Marks after the title, only for what is set, without text or numbers (R72); then the list of the task in its colour and the project. */
+/** Marks after the title, only for what is set, without text or numbers (R72). */
 @Composable
-private fun Marks(task: TaskItem, origin: RowOrigin?) {
+private fun Marks(task: TaskItem) {
     val muted = MaterialTheme.colorScheme.outline
     val marks = buildList {
         if (task.repeat != null) add(Icons.Outlined.Repeat to str(R.string.repeat))
@@ -953,16 +966,6 @@ private fun Marks(task: TaskItem, origin: RowOrigin?) {
         if (task.subtasksTotal > 0u) add(Icons.Outlined.Checklist to str(R.string.subtasks))
     }
     for ((icon, name) in marks) Icon(icon, name, Modifier.padding(start = 6.dp).size(16.dp), tint = muted)
-    if (origin != null) {
-        val text = buildAnnotatedString {
-            origin.list?.let { name ->
-                withStyle(SpanStyle(color = origin.color?.let(::parseColor) ?: MaterialTheme.colorScheme.primary)) { append(name) }
-            }
-            origin.project?.let { append(if (origin.list == null) it else " – $it") }
-        }
-        // Cut before the title is: the title has the room that is left (R72).
-        Text(text, Modifier.padding(start = 8.dp).widthIn(max = 140.dp), style = MaterialTheme.typography.bodySmall, color = muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
-    }
 }
 
 /** The whole context menu: six actions, the rest lives in the editor. */

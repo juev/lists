@@ -316,25 +316,37 @@ struct TaskRow: View {
     }
 
     private var header: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
+        // R72: the mark stands in the middle of the height of the row, which has two lines where lists are mixed.
+        HStack(alignment: .center, spacing: 8) {
             TaskMark(task: task)
 
+            // R72: the priority is a thin bar after the mark; its place is kept, so every title starts at one line.
+            RoundedRectangle(cornerRadius: 1.5)
+                .fill(Self.priorityBar(task.priority) ?? .clear)
+                .frame(width: 3, height: !isExpanded && origin != nil ? 28 : 16)
+                .accessibilityLabel(task.priority.title)
+                .accessibilityHidden(task.priority == .none)
             if task.isProject {
                 Image(systemName: "folder").foregroundStyle(.secondary).accessibilityLabel(L("Project"))
-            }
-            if task.priority != .none {
-                Text(task.priority.marks).font(AppFont.style(.body, weight: .bold)).foregroundStyle(.orange)
-                    .accessibilityLabel(task.priority.title)
             }
             if isExpanded && !inTrash && !task.isLog {
                 TaskTitleField(task: task)
             } else {
-                Text(task.title)
-                    .font(AppFont.style(.body))
-                    .strikethrough(task.done != nil)
-                    .foregroundStyle(task.done != nil ? .secondary : .primary)
-                    .lineLimit(1)
-                if !isExpanded { marks }
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(task.title)
+                            .font(AppFont.style(.body))
+                            .strikethrough(task.done != nil)
+                            .foregroundStyle(task.done != nil ? .secondary : .primary)
+                            .lineLimit(1)
+                        if !isExpanded { marks }
+                    }
+                    // R72: where lists are mixed the row says under the title which list the task is in, in the
+                    // colour of the list, and a task of a project says whose it is (R31).
+                    if !isExpanded, let origin {
+                        origin.text.lineLimit(1).truncationMode(.tail).font(AppFont.style(.caption)).foregroundStyle(.tertiary)
+                    }
+                }
             }
             Spacer(minLength: 8)
             if !isExpanded, let date = Moment.rowDate(due: task.due, open: task.done == nil, dayInHeading: dayInHeading) {
@@ -380,11 +392,6 @@ struct TaskRow: View {
             if !task.notes.isEmpty { Image(systemName: "text.alignleft").accessibilityLabel(L("Notes")) }
             if task.attachments > 0 { Image(systemName: "paperclip").accessibilityLabel(L("Attachments")) }
             if task.subtasksTotal > 0 { Image(systemName: "checklist").accessibilityLabel(L("Subtasks")) }
-            // R72: where lists are mixed a row says which list the task is in, in the colour of the list,
-            // and a task of a project says whose it is (R31). Cut first when the row is tight.
-            if showsOrigin, let origin = model.origin(of: task) {
-                origin.text.lineLimit(1).truncationMode(.tail).layoutPriority(-1)
-            }
         }
         .font(AppFont.style(.caption))
         .foregroundStyle(.tertiary)
@@ -401,6 +408,17 @@ struct TaskRow: View {
 
     /// In views that mix lists, say where the task lives.
     private var showsOrigin: Bool { depth == 0 && model.mixesLists }
+    private var origin: RowOrigin? { showsOrigin ? model.origin(of: task) : nil }
+
+    /// R72: the colour of the bar a row shows for the priority of its task; none for a task without one.
+    static func priorityBar(_ priority: Priority) -> Color? {
+        switch priority {
+        case .high: .red
+        case .medium: .orange
+        case .low: .blue
+        case .none: nil
+        }
+    }
 
     /// The menu of the task. One description for both ways it is drawn: by SwiftUI for a row of
     /// the list and by AppKit for a subtask inside the row of its parent (`SubtaskMenuArea`).
@@ -463,8 +481,8 @@ struct TaskMark: View {
             model.toggleDone(task)
         } label: {
             Image(systemName: task.wont ? "xmark.square.fill" : task.done != nil ? "checkmark.square.fill" : "square")
-                // R94: the mark is as high as the text and as quiet as the icons of the fields.
-                .font(AppFont.style(.body))
+                // R94: the mark is as quiet as the icons of the fields; R72: a little smaller than the text.
+                .font(AppFont.style(.callout))
                 .fontWeight(.light)
                 .foregroundStyle(task.done != nil ? .secondary : .tertiary)
         }
