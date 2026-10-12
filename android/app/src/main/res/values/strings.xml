@@ -336,6 +336,7 @@
     <string name="selected_count">Selected: %1$s</string>
     <string name="batch_completed">Completed: %1$s</string>
     <string name="batch_deleted">Deleted: %1$s</string>
+    <string name="batch_restored">Restored: %1$s</string>
     <string name="batch_moved">Moved: %1$s</string>
     <string name="batch_changed">Changed: %1$s</string>
     <string name="previous_month">Previous month</string>

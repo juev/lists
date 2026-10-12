@@ -279,9 +279,13 @@ fun MainScreen(model: MainViewModel, onReminderSet: () -> Unit) {
             snackbarHost = { SnackbarHost(snackbar) },
             bottomBar = {
                 when {
-                    selection != null -> SelectionBar(enabled = selection.isNotEmpty()) { action ->
+                    selection != null -> SelectionBar(
+                        enabled = selection.isNotEmpty(),
+                        actions = selectionActions(state.sections.flatMap { it.tasks }.filter { it.id in selection }),
+                    ) { action ->
                         when (action) {
                             "complete" -> model.batch(BatchAction.Complete)
+                            "restore" -> model.batch(BatchAction.Restore)
                             "delete" -> model.batch(BatchAction.Delete)
                             "wont" -> model.batch(BatchAction.WontDo)
                             else -> batchDialog = action
@@ -747,7 +751,7 @@ private fun SwipeRow(task: TaskItem, state: UiState, onToggle: () -> Unit, onOpe
             }
         },
     ) {
-        Surface { TaskRow(task, state, onToggle, onOpen, model, showOrigin = state.showsOrigin(), selectable = task.selectable()) }
+        Surface { TaskRow(task, state, onToggle, onOpen, model, showOrigin = state.showsOrigin(), selectable = true) }
     }
 }
 
@@ -787,7 +791,7 @@ fun TaskRow(
             .padding(start = 4.dp, end = 16.dp, top = 6.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        IconButton(onClick = if (selected == null) onToggle else onSelect, enabled = !task.deleted && !task.isLog) {
+        IconButton(onClick = if (selected == null) onToggle else onSelect, enabled = selected != null || (!task.deleted && !task.isLog)) {
             // In the selection mode the mark selects like the rest of the row, and says nothing else.
             Mark(task.markState(), if (selected != null) null else if (done) str(R.string.reopen) else str(R.string.complete), round = subtask)
         }
@@ -906,10 +910,16 @@ private fun Modifier.dragSelect(rows: LazyListState, onStart: () -> Unit, onDrag
 
 /** R109: the actions on the selected tasks, in a bar that floats over the bottom of the list. */
 @Composable
-private fun SelectionBar(enabled: Boolean, onAction: (String) -> Unit) {
+private fun SelectionBar(enabled: Boolean, actions: SelectionActions, onAction: (String) -> Unit) {
     var more by remember { mutableStateOf(false) }
     Box(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 24.dp, vertical = 12.dp), contentAlignment = Alignment.Center) {
         Surface(shape = RoundedCornerShape(28.dp), tonalElevation = 3.dp, shadowElevation = 6.dp) {
+            // Tasks in the trash are only restored, and records of completed occurrences only deleted: one button.
+            if (actions == SelectionActions.Restore) {
+                TextButton(onClick = { onAction("restore") }, modifier = Modifier.padding(horizontal = 8.dp)) { Text(str(R.string.restore)) }
+            } else if (actions == SelectionActions.DeleteRecords) {
+                TextButton(onClick = { onAction("delete") }, modifier = Modifier.padding(horizontal = 8.dp)) { Text(str(R.string.delete), color = MaterialTheme.colorScheme.error) }
+            } else
             Row(Modifier.padding(horizontal = 12.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 IconButton(enabled = enabled, onClick = { onAction("complete") }) { Icon(Icons.Outlined.Check, str(R.string.complete)) }
                 IconButton(enabled = enabled, onClick = { onAction("due") }) { Icon(Icons.Outlined.CalendarMonth, str(R.string.due)) }
@@ -977,8 +987,14 @@ private fun TaskMenu(task: TaskItem, state: UiState, model: MainViewModel, onOpe
         action()
     }
     when {
-        task.deleted -> DropdownMenuItem(text = { Text(str(R.string.restore)) }, onClick = { run { model.act { it.restoreTask(task.id) } } })
-        task.isLog -> DropdownMenuItem(text = { Text(str(R.string.delete_record)) }, onClick = { run { model.delete(task) } })
+        task.deleted -> {
+            if (selectable) DropdownMenuItem(text = { Text(str(R.string.select)) }, onClick = { run { model.startSelection(task.id) } })
+            DropdownMenuItem(text = { Text(str(R.string.restore)) }, onClick = { run { model.act { it.restoreTask(task.id) } } })
+        }
+        task.isLog -> {
+            if (selectable) DropdownMenuItem(text = { Text(str(R.string.select)) }, onClick = { run { model.startSelection(task.id) } })
+            DropdownMenuItem(text = { Text(str(R.string.delete_record)) }, onClick = { run { model.delete(task) } })
+        }
         sub == "due" -> {
             DropdownMenuItem(text = { Text(str(R.string.today)) }, onClick = { run { model.act { it.setDue(task.id, today()) } } })
             DropdownMenuItem(text = { Text(str(R.string.tomorrow)) }, onClick = { run { model.act { it.setDue(task.id, plusDays(1)) } } })
