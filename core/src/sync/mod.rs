@@ -16,6 +16,7 @@ pub mod webdav;
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use chrono::NaiveDateTime;
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
@@ -126,6 +127,83 @@ fn index(names: &[String], suffix: &str) -> Index {
 
 fn blob_remote_path(sha256: &str) -> String {
     format!("{ROOT}/blobs/{}/{}", &sha256[..2], sha256)
+}
+
+/// What a download of attachment content came to.
+enum Fetched {
+    Stored,
+    /// The storage has nothing under that name.
+    Missing,
+    /// The storage has something that is not this content.
+    Mismatch,
+}
+
+const MISMATCH: &str = "the content in the storage does not match its hash";
+
+/// R102: the record of a file that the pass of attachments could not move:
+/// `meta` keeps `since`, `said` and the message under this prefix and the hash.
+const TROUBLE: &str = "blob_trouble:";
+const TROUBLE_FMT: &str = "%Y-%m-%dT%H:%M:%S";
+
+/// Which way the content was going.
+#[derive(Clone, Copy)]
+enum Way {
+    Up,
+    Down,
+}
+
+/// Why a file did not move in a pass.
+enum Trouble {
+    /// The error of the storage or of this device.
+    Failed(String),
+    /// The storage does not have the content: usually the device that has it has not sent it yet.
+    Missing,
+}
+
+/// What is known of a file that did not move: since when, when an error line
+/// last said so, and the reason it was given.
+struct BlobTrouble {
+    since: NaiveDateTime,
+    said: Option<NaiveDateTime>,
+    message: String,
+}
+
+impl BlobTrouble {
+    fn parse(value: &str) -> Option<Self> {
+        let mut parts = value.splitn(3, '\t');
+        let time = |s: &str| NaiveDateTime::parse_from_str(s, TROUBLE_FMT).ok();
+        let since = time(parts.next()?)?;
+        let said = parts.next().and_then(time);
+        Some(BlobTrouble {
+            since,
+            said,
+            message: parts.next()?.to_string(),
+        })
+    }
+
+    fn value(&self) -> String {
+        let said = self.said.map(|t| t.format(TROUBLE_FMT).to_string()).unwrap_or_default();
+        format!("{}\t{said}\t{}", self.since.format(TROUBLE_FMT), self.message)
+    }
+}
+
+/// A failure that goes on is said again at the error level after this long.
+fn trouble_repeat() -> chrono::Duration {
+    chrono::Duration::hours(1)
+}
+
+/// How a file is named in the log: its folder and the start of the hash.
+fn blob_label(sha256: &str) -> String {
+    format!("blobs/{}/{}", &sha256[..2], short_hash(sha256))
+}
+
+fn short_hash(sha256: &str) -> String {
+    format!("{}…", &sha256[..8])
+}
+
+/// An error of the storage names the file by its full hash; the log keeps only its start.
+fn hide_hash(message: &str, sha256: &str) -> String {
+    message.replace(sha256, &short_hash(sha256))
 }
 
 impl Store {
@@ -353,7 +431,13 @@ impl Store {
     /// The addresses the other devices take nudges at (S18). A storage that cannot be read names none.
     fn peer_addresses(&self, remote: &dyn Remote, me: &str) -> Vec<String> {
         let own = format!("{me}.json");
-        let names = remote.list(&format!("{ROOT}/push")).unwrap_or_default();
+        // R102: without the list no device is nudged, and nothing else would say so.
+        let names = remote.list(&format!("{ROOT}/push")).unwrap_or_else(|e| {
+            self.note(LogLevel::Error, "push", || {
+                format!("addresses of the other devices not read: {e}")
+            });
+            vec![]
+        });
         names
             .iter()
             .filter(|name| **name != own && name.ends_with(".json"))
@@ -455,14 +539,14 @@ impl Store {
         Ok(sent)
     }
 
-    /// Whether the content arrived; it does not when the storage has none or has something else.
-    fn download_blob(&self, remote: &dyn Remote, sha256: &str) -> Result<bool> {
+    /// Whether the content arrived, and why not when it did not.
+    fn download_blob(&self, remote: &dyn Remote, sha256: &str) -> Result<Fetched> {
         let Some(data) = remote.get(&blob_remote_path(sha256))? else {
-            return Ok(false);
+            return Ok(Fetched::Missing);
         };
         // The name is the hash: content that does not match is dropped, not stored.
         if hex(&Sha256::digest(&data)) != sha256 {
-            return Ok(false);
+            return Ok(Fetched::Mismatch);
         }
         let local = self.blob_path(sha256);
         // A pass and a request (S35) may fetch the same content at once: each writes its own file.
@@ -470,7 +554,7 @@ impl Store {
         std::fs::write(&tmp, &data)?;
         std::fs::rename(&tmp, &local)?;
         self.blob_uploaded(sha256)?;
-        Ok(true)
+        Ok(Fetched::Stored)
     }
 
     /// S34: one pass over attachment content against the given storage. A file
@@ -485,20 +569,131 @@ impl Store {
                 return Ok(report);
             }
         };
-        for (sha256, uploaded) in self.blobs_wanted()? {
-            if self.blob_path(&sha256).exists() {
-                if !uploaded && self.upload_blob(remote, &sha256).unwrap_or(false) {
-                    report.uploaded += 1;
+        let wanted = self.blobs_wanted()?;
+        let mut troubles = self.blob_troubles()?;
+        for (sha256, uploaded) in &wanted {
+            let (what, outcome) = if self.blob_path(sha256).exists() {
+                if *uploaded {
+                    (Way::Up, Ok(()))
+                } else {
+                    let sent = self.upload_blob(remote, sha256);
+                    report.uploaded += u32::from(matches!(sent, Ok(true)));
+                    (Way::Up, sent.map(|_| ()).map_err(|e| Trouble::Failed(e.to_string())))
                 }
-            } else if self.download_blob(remote, &sha256).unwrap_or(false) {
-                report.downloaded += 1;
-            }
+            } else {
+                let outcome = match self.download_blob(remote, sha256) {
+                    Ok(Fetched::Stored) => {
+                        report.downloaded += 1;
+                        Ok(())
+                    }
+                    Ok(Fetched::Missing) => Err(Trouble::Missing),
+                    Ok(Fetched::Mismatch) => Err(Trouble::Failed(MISMATCH.into())),
+                    Err(e) => Err(Trouble::Failed(e.to_string())),
+                };
+                (Way::Down, outcome)
+            };
+            self.note_blob(&mut troubles, sha256, what, outcome)?;
+        }
+        // A file no longer wanted takes its record of trouble with it.
+        for gone in troubles
+            .keys()
+            .filter(|sha256| !wanted.iter().any(|(w, _)| w == *sha256))
+        {
+            db::meta_del(&self.lock().conn, &format!("{TROUBLE}{gone}"))?;
         }
         report.waiting = self.blobs_waiting()?;
         if report.uploaded > 0 {
             self.poke_peers(remote, &self.device_id());
         }
         Ok(report)
+    }
+
+    /// R102: the files the passes before this one could not move.
+    fn blob_troubles(&self) -> Result<BTreeMap<String, BlobTrouble>> {
+        let inner = self.lock();
+        let mut stmt = inner.conn.prepare("SELECT key, value FROM meta WHERE key LIKE ?1")?;
+        let rows = stmt.query_map([format!("{TROUBLE}%")], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })?;
+        let mut found = BTreeMap::new();
+        for row in rows {
+            let (key, value) = row?;
+            if let (Some(sha256), Some(trouble)) = (key.strip_prefix(TROUBLE), BlobTrouble::parse(&value)) {
+                found.insert(sha256.to_string(), trouble);
+            }
+        }
+        Ok(found)
+    }
+
+    /// R102: says how one file fared in a pass. A new failure is an error line at
+    /// once; content the storage does not have is an event until it has waited an
+    /// hour; the same failure again is said at the detailed level and becomes an
+    /// error line again after an hour; a file that moves after failing is an event.
+    fn note_blob(
+        &self,
+        troubles: &mut BTreeMap<String, BlobTrouble>,
+        sha256: &str,
+        way: Way,
+        outcome: std::result::Result<(), Trouble>,
+    ) -> Result<()> {
+        let key = format!("{TROUBLE}{sha256}");
+        let target = match way {
+            Way::Up => format!("upload of {}", blob_label(sha256)),
+            Way::Down => format!("download of {}", blob_label(sha256)),
+        };
+        let before = troubles.remove(sha256);
+        let trouble = match outcome {
+            Ok(()) => {
+                if let Some(before) = before {
+                    let since = before.since.format(TROUBLE_FMT);
+                    self.note(LogLevel::Info, "attachments", || {
+                        format!("{target}: went through after failing since {since}")
+                    });
+                    db::meta_del(&self.lock().conn, &key)?;
+                }
+                return Ok(());
+            }
+            Err(trouble) => trouble,
+        };
+        let now = self.lock().now();
+        let message = match &trouble {
+            Trouble::Failed(e) => format!("{target}: {}", hide_hash(e, sha256)),
+            Trouble::Missing => format!("{target}: the storage does not have it"),
+        };
+        let due = |since: NaiveDateTime| now < since || now - since >= trouble_repeat();
+        let record = match before.filter(|b| b.message == message) {
+            None => {
+                match trouble {
+                    Trouble::Failed(_) => self.note(LogLevel::Error, "attachments", || message.clone()),
+                    Trouble::Missing => self.note(LogLevel::Info, "attachments", || format!("{message} yet")),
+                }
+                let said = matches!(trouble, Trouble::Failed(_)).then_some(now);
+                BlobTrouble {
+                    since: now,
+                    said,
+                    message,
+                }
+            }
+            Some(mut known) => {
+                let since = known.since.format(TROUBLE_FMT).to_string();
+                if due(known.said.unwrap_or(known.since)) {
+                    match trouble {
+                        Trouble::Failed(_) => self.note(LogLevel::Error, "attachments", || {
+                            format!("{message} (failing since {since})")
+                        }),
+                        Trouble::Missing => self.note(LogLevel::Error, "attachments", || {
+                            format!("{message}, waiting since {since}")
+                        }),
+                    }
+                    known.said = Some(now);
+                } else {
+                    self.note(LogLevel::Debug, "attachments", || format!("failed again: {message}"));
+                }
+                known
+            }
+        };
+        db::meta_set(&self.lock().conn, &key, &record.value())?;
+        Ok(())
     }
 
     /// One run for the fields against the given storage. Attachment content is
@@ -1064,14 +1259,27 @@ impl Store {
         if !is_sha256(&attachment.sha256) {
             return Err(AppError::sync("the attachment has no content to download"));
         }
-        let Some(remote) = self.file_storage()? else {
-            return Err(AppError::sync("the content of this attachment is not in the storage"));
-        };
-        if !self.download_blob(remote.as_ref(), &attachment.sha256)? {
-            return Err(AppError::sync(
-                "the content of this attachment has not reached the storage yet",
-            ));
+        let fetched = (|| {
+            let Some(remote) = self.file_storage()? else {
+                return Err(AppError::sync("the content of this attachment is not in the storage"));
+            };
+            match self.download_blob(remote.as_ref(), &attachment.sha256)? {
+                Fetched::Stored => Ok(()),
+                Fetched::Missing => Err(AppError::sync(
+                    "the content of this attachment has not reached the storage yet",
+                )),
+                Fetched::Mismatch => Err(AppError::sync(MISMATCH)),
+            }
+        })();
+        // R102: the app shows that the download failed; the log keeps why.
+        if let Err(e) = &fetched {
+            let target = blob_label(&attachment.sha256);
+            let reason = hide_hash(&e.to_string(), &attachment.sha256);
+            self.note(LogLevel::Error, "attachments", || {
+                format!("download of {target}: {reason}")
+            });
         }
+        fetched?;
         found(self)
     }
 

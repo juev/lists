@@ -180,12 +180,19 @@ impl Store {
     /// The address other devices should send a nudge to, or `None` to stop
     /// receiving them. It is published in the storage by the next sync run.
     pub fn set_push_endpoint(&self, url: Option<String>) -> Result<()> {
-        let inner = self.lock();
-        match url.as_deref().map(str::trim).filter(|u| !u.is_empty()) {
-            Some(url) if is_http(url) => db::meta_set(&inner.conn, ENDPOINT_KEY, url),
-            Some(_) => Err(AppError::sync("the address must start with https:// or http://")),
-            None => db::meta_del(&inner.conn, ENDPOINT_KEY),
+        let kept = {
+            let inner = self.lock();
+            match url.as_deref().map(str::trim).filter(|u| !u.is_empty()) {
+                Some(url) if is_http(url) => db::meta_set(&inner.conn, ENDPOINT_KEY, url),
+                Some(_) => Err(AppError::sync("the address must start with https:// or http://")),
+                None => db::meta_del(&inner.conn, ENDPOINT_KEY),
+            }
+        };
+        // R102: the address is not named, it carries the topic of ntfy.
+        if let Err(e) = &kept {
+            self.note(LogLevel::Error, "push", || format!("address not kept: {e}"));
         }
+        kept
     }
 
     pub fn push_endpoint(&self) -> Result<Option<String>> {
