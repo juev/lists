@@ -809,3 +809,122 @@ fn r22_a_search_shows_the_task_with_the_subtasks_it_was_found_by() {
     assert_eq!(own[0]["found"], json!([]));
     assert!(get(&web, "", "/api/tasks?scope=inbox")[0].get("found").is_none());
 }
+
+#[test]
+fn r118_a_batch_changes_every_task_it_applies_to_and_is_taken_back_in_one_step() {
+    let web = web(Some("secret"));
+    let cookie = login(&web, "secret").unwrap();
+    let add = |text: &str| {
+        call(
+            &web,
+            &cookie,
+            json!({ "op": "quickAdd", "text": text, "scope": "inbox" }),
+        )["id"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    let task = |id: &str| get(&web, &cookie, &format!("/api/task?id={id}"))["task"].clone();
+    let (a, b, c) = (add("альфа !"), add("бета"), add("гамма сегодня"));
+    let ids = json!([a, b, c]);
+
+    // A priority: the task that has it already is passed over, and each gets its own back.
+    call(&web, &cookie, json!({ "op": "setPriority", "id": b, "value": 3 }));
+    let done = call(
+        &web,
+        &cookie,
+        json!({ "op": "batch", "action": "priority", "value": 3, "ids": ids }),
+    );
+    assert_eq!(done["changed"], 2);
+    assert_eq!(task(&a)["priority"], 3);
+    call(&web, &cookie, json!({ "op": "batchBack", "steps": done["backs"] }));
+    assert_eq!(task(&a)["priority"], 1, "the former priority is back");
+    assert_eq!(task(&b)["priority"], 3, "the task that was passed over is as it was");
+    assert_eq!(task(&c)["priority"], 0);
+
+    // A tag is stored the way the core stores it, and a date goes to all.
+    let tagged = call(
+        &web,
+        &cookie,
+        json!({ "op": "batch", "action": "tag", "value": "#Дом", "ids": ids }),
+    );
+    assert_eq!(tagged["changed"], 3);
+    assert_eq!(task(&b)["tags"], json!(["дом"]));
+    call(&web, &cookie, json!({ "op": "batchBack", "steps": tagged["backs"] }));
+    assert_eq!(task(&b)["tags"], json!([]));
+    let due = task(&c)["due"].clone();
+    let dated = call(
+        &web,
+        &cookie,
+        json!({ "op": "batch", "action": "due", "value": "2031-01-02", "ids": ids }),
+    );
+    assert_eq!(dated["changed"], 3);
+    call(&web, &cookie, json!({ "op": "batchBack", "steps": dated["backs"] }));
+    assert_eq!(task(&c)["due"], due);
+    assert_eq!(task(&a)["due"], Value::Null);
+
+    // A move and its way back; a task that is in the list already is passed over.
+    let list = call(&web, &cookie, json!({ "op": "createList", "name": "Работа" }))["id"].clone();
+    call(&web, &cookie, json!({ "op": "moveToList", "id": a, "list": list }));
+    let moved = call(
+        &web,
+        &cookie,
+        json!({ "op": "batch", "action": "move", "value": list, "ids": ids }),
+    );
+    assert_eq!(moved["changed"], 2);
+    call(&web, &cookie, json!({ "op": "batchBack", "steps": moved["backs"] }));
+    assert_eq!(task(&b)["list"], "inbox");
+    assert_eq!(task(&a)["list"], list);
+
+    // Completing passes a closed task over; one step reopens the rest.
+    call(&web, &cookie, json!({ "op": "complete", "id": a }));
+    let closed = call(
+        &web,
+        &cookie,
+        json!({ "op": "batch", "action": "complete", "ids": ids }),
+    );
+    assert_eq!(closed["changed"], 2);
+    call(&web, &cookie, json!({ "op": "batchBack", "steps": closed["backs"] }));
+    assert_eq!(task(&b)["done"], Value::Null);
+    assert_ne!(
+        task(&a)["done"],
+        Value::Null,
+        "the task closed before the batch stays closed"
+    );
+
+    // The trash: nothing but restoring applies there, and its undo puts the tasks back.
+    let deleted = call(&web, &cookie, json!({ "op": "batch", "action": "delete", "ids": ids }));
+    assert_eq!(deleted["changed"], 3);
+    assert_eq!(
+        get(&web, &cookie, "/api/tasks?scope=trash").as_array().unwrap().len(),
+        3
+    );
+    let nothing = call(
+        &web,
+        &cookie,
+        json!({ "op": "batch", "action": "complete", "ids": ids }),
+    );
+    assert_eq!(nothing["changed"], 0);
+    let restored = call(&web, &cookie, json!({ "op": "batch", "action": "restore", "ids": ids }));
+    assert_eq!(restored["changed"], 3);
+    assert_eq!(
+        get(&web, &cookie, "/api/tasks?scope=trash").as_array().unwrap().len(),
+        0
+    );
+    call(&web, &cookie, json!({ "op": "batchBack", "steps": restored["backs"] }));
+    assert_eq!(
+        get(&web, &cookie, "/api/tasks?scope=trash").as_array().unwrap().len(),
+        3
+    );
+
+    // Only the steps of a batch are taken as its way back.
+    let refused = ureq::post(&format!("{}/api/call", web.base))
+        .set("Cookie", &cookie)
+        .set("X-Lists", "1")
+        .send_json(json!({ "op": "batchBack", "steps": [{ "op": "emptyTrash" }] }));
+    assert_ne!(status(refused), 200);
+    assert_eq!(
+        get(&web, &cookie, "/api/tasks?scope=trash").as_array().unwrap().len(),
+        3
+    );
+}

@@ -111,6 +111,18 @@ fn same_secret(a: &str, b: &str) -> bool {
     Sha256::digest(a.as_bytes()) == Sha256::digest(b.as_bytes())
 }
 
+/// The calls a batch takes its change back with (R118).
+const BACK_OPS: [&str; 8] = [
+    "undoClose",
+    "restore",
+    "delete",
+    "setDue",
+    "setStart",
+    "setPriority",
+    "place",
+    "removeTag",
+];
+
 fn priority_from(n: i64) -> Priority {
     match n {
         1 => Priority::Low,
@@ -333,6 +345,112 @@ impl App {
         }))
     }
 
+    /// R118: one action on several tasks, in the order they were given. A task the action does not
+    /// apply to is passed over. The answer holds how many tasks were changed and the steps that
+    /// take the change back, one for each task that can be taken back.
+    fn batch(&self, a: &Value) -> Result<Value, AppError> {
+        let s = &self.store;
+        let action = text_arg(a, "action")?;
+        let ids: Vec<String> = a
+            .get("ids")
+            .and_then(Value::as_array)
+            .map(|ids| ids.iter().filter_map(|id| id.as_str().map(str::to_string)).collect())
+            .unwrap_or_default();
+        let value = optional(a, "value");
+        let priority = priority_from(a.get("value").and_then(Value::as_i64).unwrap_or(0));
+        let tag = value
+            .clone()
+            .unwrap_or_default()
+            .trim()
+            .trim_start_matches('#')
+            .to_lowercase();
+        let need = |what: &str| {
+            value.clone().ok_or(AppError::Invalid {
+                msg: format!("{what} is missing"),
+            })
+        };
+        let (mut changed, mut backs) = (0, Vec::new());
+        for id in ids {
+            // Read anew: a task that is gone by now is passed over.
+            let Ok(task) = s.task(id.clone()) else { continue };
+            // A task in the trash is only restored, and a record of a completed occurrence only deleted.
+            let back = if task.deleted {
+                if action != "restore" {
+                    continue;
+                }
+                s.restore_task(id.clone())?;
+                Some(json!({ "op": "delete", "id": id }))
+            } else if task.is_log {
+                if action != "delete" {
+                    continue;
+                }
+                s.delete_task(id.clone())?;
+                Some(json!({ "op": "restore", "id": id }))
+            } else {
+                match action.as_str() {
+                    "complete" | "wontDo" => {
+                        if task.done.is_some() {
+                            continue;
+                        }
+                        if action == "complete" {
+                            s.complete_task(id.clone())?;
+                        } else {
+                            s.wont_do_task(id.clone())?;
+                        }
+                        // A repeating task moves on instead of closing; reopening would not bring the date back.
+                        task.repeat.is_none().then(|| json!({ "op": "undoClose", "id": id }))
+                    }
+                    "delete" => {
+                        s.delete_task(id.clone())?;
+                        Some(json!({ "op": "restore", "id": id }))
+                    }
+                    "due" => {
+                        let due = need("the date")?;
+                        if task.due.as_deref() == Some(due.as_str()) {
+                            continue;
+                        }
+                        s.set_due(id.clone(), Some(due))?;
+                        Some(json!({ "op": "setDue", "id": id, "value": task.due }))
+                    }
+                    "start" => {
+                        let start = need("the date")?;
+                        if task.start.as_deref() == Some(start.as_str()) {
+                            continue;
+                        }
+                        s.set_start(id.clone(), Some(start))?;
+                        Some(json!({ "op": "setStart", "id": id, "value": task.start }))
+                    }
+                    "priority" => {
+                        if task.priority == priority {
+                            continue;
+                        }
+                        s.set_priority(id.clone(), priority)?;
+                        Some(json!({ "op": "setPriority", "id": id, "value": priority_to(task.priority) }))
+                    }
+                    "move" => {
+                        let list = need("the list")?;
+                        if task.parent_id.is_none() && task.list_id == list {
+                            continue;
+                        }
+                        s.move_to_list(id.clone(), list)?;
+                        Some(json!({ "op": "place", "id": id, "list": task.list_id, "parent": task.parent_id }))
+                    }
+                    "tag" => {
+                        if tag.is_empty() || task.tags.contains(&tag) {
+                            continue;
+                        }
+                        s.add_tag(id.clone(), tag.clone())?;
+                        Some(json!({ "op": "removeTag", "id": id, "value": tag }))
+                    }
+                    _ => continue,
+                }
+            };
+            changed += 1;
+            backs.extend(back);
+        }
+        Ok(json!({ "changed": changed, "backs": backs }))
+    }
+
     fn call(&self, op: &str, a: &Value) -> Result<Value, AppError> {
         let s = &self.store;
         let id = || text_arg(a, "id");
@@ -397,6 +515,25 @@ impl App {
                     json!({ "removed": s.clear_completed(before)? })
                 }
                 "moveToList" => s.move_to_list(id()?, text_arg(a, "list")?).map(|_| done)?,
+                // Back to a list and a project a batch took the task from; it comes first there.
+                "place" => s
+                    .move_task(id()?, Some(text_arg(a, "list")?), optional(a, "parent"), None)
+                    .map(|_| done)?,
+                "batch" => self.batch(a)?,
+                // R118: the steps a batch handed out, the last one first.
+                "batchBack" => {
+                    let steps = a.get("steps").and_then(Value::as_array).cloned().unwrap_or_default();
+                    for step in steps.iter().rev() {
+                        let op = step.get("op").and_then(Value::as_str).unwrap_or_default();
+                        if !BACK_OPS.contains(&op) {
+                            return Err(AppError::Invalid {
+                                msg: format!("not a step of a batch: {op}"),
+                            });
+                        }
+                        self.call(op, step)?;
+                    }
+                    done
+                }
                 "duplicate" => task_json(&s.duplicate_task(id()?)?),
                 "createList" => list_json(&s.create_list(text_arg(a, "name")?)?),
                 "renameList" => s.rename_list(id()?, text_arg(a, "value")?).map(|_| done)?,

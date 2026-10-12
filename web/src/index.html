@@ -85,6 +85,12 @@ header input { border: 1px solid var(--line); border-radius: 8px; padding: 6px 1
 .chip input, .chip select { border: 0; background: transparent; outline: 0; max-width: 46vw; }
 .chip.bad { border-color: var(--danger); color: var(--danger); }
 .link { color: var(--accent); font-size: 14px; }
+/* R118: the selection mode: a circle at the right edge of a row, a pale strip under a selected row, the actions in a bar at the bottom. */
+.pick { width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--muted); flex: none; }
+.pick.on { background: var(--accent); border-color: var(--accent); }
+.task.sel > .row { background: rgba(47, 111, 237, .12); }
+#bar { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; justify-content: center; padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); }
+#bar button:disabled { opacity: .4; }
 .link.danger { color: var(--danger); }
 .sub { margin-left: 30px; }
 .line { cursor: default; align-items: center; }
@@ -147,6 +153,8 @@ const RU = {
   "Status": "Состояние", "Open": "В работе", "Contains": "Содержит", "Save": "Сохранить", "Cancel": "Отмена", "Delete filter": "Удалить фильтр", "Edit": "Изменить",
   "all of these, separated by spaces": "все сразу, через пробел", "Next 7 days": "Ближайшие 7 дней", "High priority": "Высокий приоритет", "Any list unless some are checked": "Любой список, если ничего не отмечено",
   "Completed tasks leave the view": "Выполненные пропадают", "at once": "сразу", "after an hour": "через час", "after": "через", "min": "мин", "s": "с", "at the end of the day": "в конце дня",
+  "Select": "Выбрать", "Selected": "Выбрано", "Done": "Готово", "Complete": "Выполнить", "Move to list": "Переместить в список", "More": "Ещё",
+  "Moved": "Перемещено", "Changed": "Изменено", "Restored": "Восстановлено",
   "Appearance": "Оформление", "Same as the system": "Как в системе", "Light": "Светлое", "Dark": "Тёмное"
 };
 const ru = (navigator.language || "en").toLowerCase().startsWith("ru");
@@ -202,7 +210,8 @@ function setLook(v) {
   const c = document.documentElement.classList;
   c.toggle("light", v === "light"); c.toggle("dark", v === "dark");
 }
-const state = { fetching: {}, filterEdit: null, scope: "today", search: "", overview: null, tasks: [], open: new Set(), details: {}, drawer: false, typing: false };
+// `sel` is the set of selected tasks while the selection mode is open (R118), and null otherwise.
+const state = { fetching: {}, filterEdit: null, scope: "today", search: "", overview: null, tasks: [], open: new Set(), details: {}, drawer: false, typing: false, sel: null, more: false };
 const root = document.getElementById("root");
 
 async function api(path, options) {
@@ -263,6 +272,8 @@ async function load() {
   const scope = state.search ? "search:" + state.search : state.scope;
   const [overview, tasks] = await Promise.all([api("/api/overview"), api("/api/tasks?scope=" + encodeURIComponent(scope))]);
   state.overview = overview; state.tasks = tasks;
+  // R118: a task that left the view drops out of the selection.
+  if (state.sel) state.sel = new Set(tasks.filter(x => state.sel.has(x.id)).map(x => x.id));
   // Kept rows leave by the clock, not by a change (R68): look again when the first one is due.
   clearTimeout(keptTimer);
   if (overview.keptFor != null) keptTimer = setTimeout(() => { if (!state.typing) load().catch(() => {}); }, overview.keptFor * 1000);
@@ -325,7 +336,43 @@ function subLine(s, plain) {
     plain ? null : $("button", { class: "link danger", "aria-label": t("Delete"), title: t("Delete"), onclick: () => act("delete", { id }, t("Deleted"), () => act("restore", { id })) }, "×"));
 }
 
+// R118: the actions on the selected tasks, in place of the field of a new task. Only tasks of the trash
+// are restored and nothing else, only records of completed occurrences are deleted and nothing else.
+function selectionBar() {
+  const chosen = state.tasks.filter(x => state.sel.has(x.id)), none = !chosen.length;
+  const run = async (action, value, done) => {
+    const r = await call("batch", { action, value, ids: chosen.map(x => x.id) });
+    state.sel = null; state.more = false;
+    // One bar for the whole action; nothing to say when no task was changed.
+    if (r.changed) toast(`${t(done)}: ${r.changed}`, r.backs.length ? () => call("batchBack", { steps: r.backs }).then(load) : null);
+    await load();
+  };
+  const button = (name, action, done, cls = "") => $("button", { class: "link " + cls, disabled: none, onclick: () => run(action, null, done) }, t(name));
+  if (!none && chosen.every(x => x.deleted)) return $("div", { id: "bar" }, button("Restore", "restore", "Restored"));
+  if (!none && chosen.every(x => x.log)) return $("div", { id: "bar" }, button("Delete", "delete", "Deleted", "danger"));
+  const date = (name, action) => $("label", { class: "chip" }, t(name), $("input", { type: "date", "aria-label": t(name), disabled: none, onchange: e => e.target.value && run(action, e.target.value, "Changed") }));
+  const lists = $("select", { "aria-label": t("Move to list"), disabled: none, onchange: e => e.target.value && run("move", e.target.value, "Moved") },
+    $("option", { value: "" }, t("Move to list")), state.overview.lists.filter(l => !l.archived).map(l => $("option", { value: l.id }, listName(l.id))));
+  const prio = $("select", { "aria-label": t("Priority"), disabled: none, onchange: e => e.target.value !== "" && run("priority", Number(e.target.value), "Changed") },
+    $("option", { value: "" }, t("Priority")), ["No priority", "Low", "Medium", "High"].map((name, i) => $("option", { value: i }, t(name))));
+  const tag = $("button", { class: "link", disabled: none, onclick: () => { const name = prompt(t("Tag")); if (name && name.trim()) run("tag", name, "Changed"); } }, t("Tag"));
+  return $("div", { id: "bar" },
+    button("Complete", "complete", "Completed"), date("Due", "due"), $("span", { class: "chip" }, lists), button("Delete", "delete", "Deleted", "danger"),
+    $("button", { class: "link", disabled: none, "aria-expanded": String(state.more), onclick: () => { state.more = !state.more; render(); } }, t("More")),
+    state.more ? [date("Start", "start"), $("span", { class: "chip" }, prio), tag, button("Won't do", "wontDo", "Completed")] : null);
+}
+
 function taskNode(x, origin) {
+  // R118: in the selection mode the whole row only selects; it opens no card and its mark completes nothing.
+  if (state.sel) {
+    const on = state.sel.has(x.id);
+    return $("div", { class: "task" + (on ? " sel" : "") },
+      $("div", { class: "row", role: "checkbox", "aria-checked": String(on), onclick: () => { on ? state.sel.delete(x.id) : state.sel.add(x.id); render(); } },
+        $("span", { class: "check" + (x.done ? " done" : "") }, x.wont ? "✕" : x.done ? "✓" : ""),
+        $("span", { class: x.priority ? "pbar p" + x.priority : "pbar" }),
+        $("div", { class: "title" }, $("div", { class: "t" + (x.done ? " done" : "") }, x.project ? "▸ " : "", x.title), summary(x, origin)),
+        $("span", { class: "pick" + (on ? " on" : "") })));
+  }
   const open = state.open.has(x.id), locked = x.deleted || x.log;
   const toggle = e => {
     e.stopPropagation();
@@ -484,7 +531,7 @@ function editor(d) {
 }
 
 function nav(scope, label, count, opts = {}) {
-  return $("button", { class: "nav" + (state.scope === scope && !state.search ? " on" : ""), onclick: () => { state.scope = scope; state.search = ""; state.open.clear(); state.drawer = false; load(); } },
+  return $("button", { class: "nav" + (state.scope === scope && !state.search ? " on" : ""), onclick: () => { state.scope = scope; state.search = ""; state.open.clear(); state.drawer = false; state.sel = null; load(); } },
     opts.color !== undefined ? $("span", { class: "dot", style: /^#[0-9a-f]{6}$/i.test(opts.color) ? `background:${opts.color}` : "" }) : null, $("span", {}, label),
     count ? $("span", { class: "n" + (opts.bad ? " bad" : "") }, count) : null);
 }
@@ -540,7 +587,7 @@ function render() {
   const empty = secs.every(s => !s.tasks.length);
   const current = state.scope.startsWith("list:") ? o.lists.find(l => "list:" + l.id === state.scope) : state.scope === "inbox" ? o.lists.find(l => l.id === "inbox") : null;
   const syncText = !o.sync.configured ? "" : o.sync.lastError ? t("Sync failed") : o.sync.pending ? `${o.sync.pending} ${t("waiting")}` : o.sync.attachmentsWaiting ? `${t("Attachments waiting to sync")}: ${o.sync.attachmentsWaiting}` : t("Synced");
-  const search = $("input", { type: "search", placeholder: t("Search"), value: state.search, oninput: e => { state.search = e.target.value; clearTimeout(search.timer); search.timer = setTimeout(async () => { await load(); const again = document.querySelector("header input"); again.focus(); again.setSelectionRange(again.value.length, again.value.length); }, 250); } });
+  const search = $("input", { type: "search", placeholder: t("Search"), value: state.search, oninput: e => { state.search = e.target.value; state.sel = null; clearTimeout(search.timer); search.timer = setTimeout(async () => { await load(); const again = document.querySelector("header input"); again.focus(); again.setSelectionRange(again.value.length, again.value.length); }, 250); } });
   const importer = $("input", { type: "file", style: "display:none", onchange: async e => {
     const f = e.target.files[0];
     if (!f) return;
@@ -572,7 +619,11 @@ function render() {
       $("button", { class: "nav", style: "color:var(--muted)", onclick: () => api("/api/logout", { method: "POST", headers: { "X-Lists": "1" } }).then(showLogin) }, t("Sign out"))),
     $("div", { id: "shade", onclick: () => { state.drawer = false; render(); } }),
     $("div", { id: "main" },
-      $("header", {}, $("button", { id: "menu", "aria-label": "menu", onclick: () => { state.drawer = true; render(); } }, "☰"), $("h1", {}, scopeTitle()),
+      // R118: in the selection mode the header counts the selected tasks, and the cross and "Done" close the mode.
+      state.sel ? $("header", {}, $("button", { "aria-label": t("Close"), style: "font-size:18px;width:32px", onclick: () => { state.sel = null; state.more = false; render(); } }, "✕"),
+        $("h1", {}, `${t("Selected")}: ${state.sel.size}`), $("button", { class: "link", onclick: () => { state.sel = null; state.more = false; render(); } }, t("Done")))
+      : $("header", {}, $("button", { id: "menu", "aria-label": "menu", onclick: () => { state.drawer = true; render(); } }, "☰"), $("h1", {}, scopeTitle()),
+        empty || state.filterEdit ? null : $("button", { id: "pick", class: "link", onclick: () => { state.sel = new Set(); state.open.clear(); render(); } }, t("Select")),
         $("button", { id: "sync", class: o.sync.lastError ? "bad" : "", title: o.sync.lastError || "", onclick: () => call("sync").then(load, load) }, syncText), search),
       state.filterEdit ? $("div", { id: "tasks" }, filterForm(state.filterEdit)) : $("div", { id: "tasks" },
         state.scope.startsWith("filter:") && !state.search ? $("div", { class: "chips", style: "padding:8px 10px 0" }, $("button", { class: "link", onclick: () => { state.filterEdit = o.filters.find(f => "filter:" + f.id === state.scope); render(); } }, t("Edit"))) : null,
@@ -581,7 +632,7 @@ function render() {
           : secs.map(s => [s.title ? $("div", { class: "section" + (s.bad ? " bad" : "") }, s.title) : null, s.tasks.map(x => taskNode(x, origin))]),
         state.scope === "trash" && !empty ? $("div", { style: "text-align:right;padding:14px" }, $("button", { class: "link danger", onclick: () => confirm(t("Delete everything in the trash for good?")) && act("emptyTrash") }, t("Empty Trash"))) : null,
         state.scope === "completed" && !state.search && !empty ? $("div", { style: "text-align:right;padding:14px" }, clearCompleted()) : null),
-      readOnly() || state.filterEdit || state.scope.startsWith("filter:") ? null : $("div", { id: "add" }, $("span", { style: "color:var(--muted)" }, "+"), add))));
+      state.sel ? selectionBar() : readOnly() || state.filterEdit || state.scope.startsWith("filter:") ? null : $("div", { id: "add" }, $("span", { style: "color:var(--muted)" }, "+"), add))));
 }
 
 // The times R68 offers, and the one in force when another device set something else.
