@@ -242,7 +242,7 @@ struct SettingsView: View {
     }
 
     /// The tab shown; the window opens on the one used last.
-    @AppStorage("settingsTab") private var tab = "general"
+    @AppStorage("settingsTab", store: Storage.defaults) private var tab = "general"
     @State private var kind = Kind.off
     @State private var url = ""
     @State private var user = ""

@@ -259,6 +259,10 @@ enum NotifySound {
 final class Reminders {
     static let shared = Reminders()
     private var scheduled: [String] = []
+    #if DEBUG
+    /// The plan of a check, which is not handed to the system: the key and the moment of each notification.
+    private(set) var withheld: [String] = []
+    #endif
 
     /// What the system says about notifications of the app (R111).
     enum Access { case unasked, denied, granted }
@@ -292,6 +296,14 @@ final class Reminders {
         let signature = plan.map { "\($0.key)|\($0.at)|\($0.title)|\($0.count)|\(sound ?? "-")" }
         guard signature != scheduled else { return }
         scheduled = signature
+        #if DEBUG
+        // The requests the system holds belong to the installed copy, which has the same identifier:
+        // a check against a throwaway directory keeps its plan to itself (#209).
+        if Storage.debugDirectory != nil {
+            withheld = plan.map { "\($0.key) \($0.at)" }
+            return
+        }
+        #endif
 
         let center = UNUserNotificationCenter.current()
         guard !plan.isEmpty else { return center.removeAllPendingNotificationRequests() }
