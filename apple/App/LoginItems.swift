@@ -97,7 +97,10 @@ enum HelperAgent {
         process.standardError = pipe
         do { try process.run() } catch { return (-1, error.localizedDescription) }
         let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        process.waitUntilExit()
+        // Not `waitUntilExit`: it runs the event loop while it waits. The state of the helper is read while
+        // `AppModel.shared` is still being built, and a task of the main actor that ran inside that wait
+        // and asked for `AppModel.shared` stopped the app at launch.
+        while process.isRunning { usleep(1000) }
         return (process.terminationStatus, output.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
