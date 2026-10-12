@@ -95,6 +95,8 @@
 "Overdue" = "Просрочено";
 "Complete Task" = "Выполнение";
 "Delete Task" = "Удаление";
+"Change Tasks" = "Изменение задач";
+"Delete records" = "Удалить записи";
 "That did not work" = "Не получилось";
 "Sync failed: %@\nClick to retry." = "Синхронизация не удалась: %@\nНажмите, чтобы повторить.";
 "Waiting to upload: %@" = "Ожидают отправки: %@";
@@ -205,6 +207,7 @@
 "High" = "Высокий";
 "The extension was closed" = "Расширение закрыто";
 "Add" = "Добавить";
+"New tag…" = "Новый тег…";
 "Files: %@" = "Файлов: %@";
 "File" = "Файл";
 "Attachments" = "Вложения";

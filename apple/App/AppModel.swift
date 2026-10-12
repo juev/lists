@@ -52,12 +52,23 @@ final class AppModel {
     /// Moving to another row closes the open card: one card is open at a time.
     var selection: String? {
         didSet {
+            // R117: a selection made the plain way is of one row, and a range of Shift starts from it.
+            if !keepsPicked {
+                if !picked.isEmpty { picked = [] }
+                anchor = selection
+            }
             if titleFocus != selection { titleFocus = nil }
             // The title of a subtask is saved when the selection leaves its line, as a card saves on closing (R38).
             if let renaming, renaming != selection { finishRenaming(renaming, save: true) }
             if let selection, selection != oldValue { closeCards(except: selection) }
         }
     }
+    /// R117: the rows selected together; empty while one row or none is selected. `selection` is the one
+    /// of them the keys go on from.
+    private(set) var picked: Set<String> = []
+    /// R117: the row a range of Shift starts from.
+    @ObservationIgnored private var anchor: String?
+    @ObservationIgnored private var keepsPicked = false
     /// The card of a task that does not exist yet, while it is open (⌘N).
     var draft: TaskDraft?
     /// The task whose title takes the keyboard as soon as its card is on screen.
@@ -607,6 +618,7 @@ final class AppModel {
                 }
             }
             found = lines
+            prunePicked()
             if !LoginItems.isHelper { Reminders.shared.refresh(store, settings: notifySettings, sound: notifySoundChoice) }
         } catch {
             alert = describe(error)
@@ -819,7 +831,7 @@ final class AppModel {
     }
 
     /// A task among those on screen.
-    private func row(_ id: String) -> TaskItem? {
+    func row(_ id: String) -> TaskItem? {
         allTasks.first { $0.id == id } ?? children.values.joined().first { $0.id == id }
     }
 
@@ -994,6 +1006,117 @@ final class AppModel {
             return
         }
         selection = ids[min(max(index + step, 0), ids.count - 1)]
+    }
+
+    // MARK: Several rows (R117)
+
+    func isSelected(_ id: String) -> Bool { picked.isEmpty ? selection == id : picked.contains(id) }
+
+    /// The selected rows in the order they are drawn.
+    var selectedIds: [String] { picked.isEmpty ? (selection.map { [$0] } ?? []) : visibleIds.filter(picked.contains) }
+    var selectedTasks: [TaskItem] { selectedIds.compactMap(row) }
+
+    private func pick(_ ids: Set<String>, lead: String?) {
+        keepsPicked = true
+        defer { keepsPicked = false }
+        picked = ids.count > 1 ? ids : []
+        if selection != lead { selection = lead }
+    }
+
+    /// A click on a row: plain, with ⌘ (adds the row or takes it out) or with Shift (the range from the row the last plain click chose).
+    func click(_ id: String, command: Bool = false, shift: Bool = false) {
+        let ids = visibleIds
+        if shift, let from = anchor ?? selection, let a = ids.firstIndex(of: from), let b = ids.firstIndex(of: id) {
+            pick(Set(ids[min(a, b)...max(a, b)]), lead: id)
+            anchor = from
+        } else if command {
+            var now = picked.isEmpty ? Set(selection.map { [$0] } ?? []) : picked
+            if now.contains(id) { now.remove(id) } else { now.insert(id) }
+            let lead = now.contains(id) ? id : selection.flatMap { now.contains($0) ? $0 : nil } ?? ids.first(where: now.contains)
+            pick(now, lead: lead)
+            anchor = lead
+        } else {
+            if !picked.isEmpty { picked = [] }
+            selection = id
+        }
+    }
+
+    /// Shift with an arrow key: the range grows or shrinks by a row.
+    func extendSelection(_ step: Int) {
+        let ids = visibleIds
+        guard let lead = selection, let at = ids.firstIndex(of: lead) else { return moveSelection(step) }
+        let start = anchor.flatMap { ids.contains($0) ? $0 : nil } ?? lead
+        guard let from = ids.firstIndex(of: start) else { return }
+        let to = min(max(at + step, 0), ids.count - 1)
+        pick(Set(ids[min(from, to)...max(from, to)]), lead: ids[to])
+        anchor = start
+    }
+
+    func selectAll() {
+        let ids = visibleIds
+        guard let first = ids.first else { return }
+        pick(Set(ids), lead: selection.flatMap { ids.contains($0) ? $0 : nil } ?? first)
+        anchor = first
+    }
+
+    /// Esc: back to one selected row. False when there was one already.
+    func clearPicked() -> Bool {
+        guard !picked.isEmpty else { return false }
+        picked = []
+        return true
+    }
+
+    /// A row that left the view leaves the selection.
+    private func prunePicked() {
+        guard !picked.isEmpty else { return }
+        let ids = visibleIds
+        let left = picked.intersection(ids)
+        guard left != picked else { return }
+        pick(left, lead: selection.flatMap { left.contains($0) ? $0 : nil } ?? ids.first(where: left.contains))
+    }
+
+    /// One action on every selected row it applies to, taken back by one undo. Returns how many rows it changed.
+    @discardableResult
+    func batch(_ action: BatchAction) -> Int {
+        let steps = selectedTasks.compactMap { task in action.step(for: task, subtask: isSubtask(task)).map { (task.id, $0) } }
+        guard !steps.isEmpty else { return 0 }
+        if case .delete = action {
+            for (id, _) in steps {
+                finishRenaming(id, save: false)
+                expanded.remove(id)
+            }
+        }
+        perform { store in for (id, _) in steps { try action.run(store, id) } }
+        let backs = steps.compactMap { id, step in step.back.map { (id, $0) } }
+        if !backs.isEmpty {
+            undoManager?.registerUndo(withTarget: self) { model in
+                model.perform { store in for (id, back) in backs { try back.run(store, id) } }
+            }
+            undoManager?.setActionName(action.name)
+        }
+        // The row the keys go on from may be gone with the action.
+        if picked.isEmpty, let selection, !visibleIds.contains(selection) { self.selection = nil }
+        return steps.count
+    }
+
+    /// A tag as the core stores it.
+    static func cleanTag(_ tag: String) -> String {
+        var name = tag.trimmingCharacters(in: .whitespacesAndNewlines)
+        while name.hasPrefix("#") { name.removeFirst() }
+        return name.lowercased()
+    }
+
+    /// Asks for the name of a tag and adds it to every selected task.
+    func askTagForSelection() {
+        let alert = NSAlert()
+        alert.messageText = L("New tag…")
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 240, height: 24))
+        alert.accessoryView = field
+        alert.addButton(withTitle: L("Add"))
+        alert.addButton(withTitle: L("Cancel"))
+        alert.window.initialFirstResponder = field
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        batch(.tag(Self.cleanTag(field.stringValue)))
     }
 
     func toggleExpanded(_ id: String) {
