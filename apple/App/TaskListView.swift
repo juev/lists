@@ -317,13 +317,15 @@ struct TaskRow: View {
 
     private var header: some View {
         // R72: the mark stands in the middle of the height of the row, which has two lines where lists are mixed.
-        HStack(alignment: .center, spacing: 8) {
+        // An open card keeps the mark at the first line of its title, which may take several (R73).
+        HStack(alignment: isExpanded ? .firstTextBaseline : .center, spacing: 8) {
             TaskMark(task: task)
 
             // R72: the priority is a thin bar after the mark; its place is kept, so every title starts at one line.
             RoundedRectangle(cornerRadius: 1.5)
                 .fill(Self.priorityBar(task.priority) ?? .clear)
                 .frame(width: 3, height: !isExpanded && origin != nil ? 28 : 16)
+                .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + AppFont.native(.body).capHeight / 2 }
                 .accessibilityLabel(task.priority.title)
                 .accessibilityHidden(task.priority == .none)
             if task.isProject {
