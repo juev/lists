@@ -10,6 +10,8 @@ sealed interface BatchAction {
     data object Complete : BatchAction
     data object WontDo : BatchAction
     data object Delete : BatchAction
+    /** Out of the trash; the only action for a task that is there. */
+    data object Restore : BatchAction
     data class Due(val value: String) : BatchAction
     data class Start(val value: String) : BatchAction
     data class SetPriority(val value: Priority) : BatchAction
@@ -21,6 +23,8 @@ sealed interface BatchAction {
 sealed interface Back {
     data object Reopen : Back
     data object Restore : Back
+    /** Into the trash again, after a restoring that is taken back. */
+    data object Trash : Back
     data class Due(val value: String?) : Back
     data class Start(val value: String?) : Back
     data class SetPriority(val value: Priority) : Back
@@ -31,16 +35,27 @@ sealed interface Back {
 /** What an action does to one task; [back] is null when the change cannot be taken back. */
 data class Step(val back: Back?)
 
-/** A row that can be selected: not a task in the trash and not a record of a completed occurrence. */
-fun TaskItem.selectable(): Boolean = !deleted && !isLog
+/** What the bar of the selection offers (R109): the usual actions, or the one action there is for the selected rows. */
+enum class SelectionActions { Usual, Restore, DeleteRecords }
+
+/** Only tasks in the trash can be restored and nothing else; only records of completed occurrences can be deleted and nothing else. */
+fun selectionActions(selected: List<TaskItem>): SelectionActions = when {
+    selected.isEmpty() -> SelectionActions.Usual
+    selected.all { it.deleted } -> SelectionActions.Restore
+    selected.all { it.isLog } -> SelectionActions.DeleteRecords
+    else -> SelectionActions.Usual
+}
 
 /** A tag as the core stores it. */
 internal fun cleanTag(tag: String): String = tag.trim().trimStart('#').lowercase()
 
 /** The step of the action for this task, or null when the action does not apply to it and the task is passed over. */
 fun BatchAction.on(task: TaskItem): Step? {
-    if (!task.selectable()) return null
+    // A task in the trash is only restored, and a record of a completed occurrence only deleted.
+    if (task.deleted) return if (this == BatchAction.Restore) Step(Back.Trash) else null
+    if (task.isLog) return if (this == BatchAction.Delete) Step(Back.Restore) else null
     return when (this) {
+        BatchAction.Restore -> null
         BatchAction.Complete, BatchAction.WontDo -> when {
             task.done != null -> null
             // A repeating task moves on instead of closing; reopening would not bring the date back.
@@ -61,6 +76,7 @@ fun BatchAction.run(store: Store, id: String) {
         BatchAction.Complete -> store.completeTask(id)
         BatchAction.WontDo -> store.wontDoTask(id)
         BatchAction.Delete -> store.deleteTask(id)
+        BatchAction.Restore -> store.restoreTask(id)
         is BatchAction.Due -> store.setDue(id, value)
         is BatchAction.Start -> store.setStart(id, value)
         is BatchAction.SetPriority -> store.setPriority(id, value)
@@ -74,6 +90,7 @@ fun Back.run(store: Store, id: String) {
         // With the subtasks the action closed along with the task.
         Back.Reopen -> store.undoCloseTask(id)
         Back.Restore -> store.restoreTask(id)
+        Back.Trash -> store.deleteTask(id)
         is Back.Due -> store.setDue(id, value)
         is Back.Start -> store.setStart(id, value)
         is Back.SetPriority -> store.setPriority(id, value)
@@ -87,6 +104,7 @@ fun Back.run(store: Store, id: String) {
 fun BatchAction.done(): Int = when (this) {
     BatchAction.Complete, BatchAction.WontDo -> R.string.batch_completed
     BatchAction.Delete -> R.string.batch_deleted
+    BatchAction.Restore -> R.string.batch_restored
     is BatchAction.MoveTo -> R.string.batch_moved
     else -> R.string.batch_changed
 }

@@ -335,6 +335,7 @@
     <string name="selected_count">Выбрано: %1$s</string>
     <string name="batch_completed">Выполнено: %1$s</string>
     <string name="batch_deleted">Удалено: %1$s</string>
+    <string name="batch_restored">Восстановлено: %1$s</string>
     <string name="batch_moved">Перемещено: %1$s</string>
     <string name="batch_changed">Изменено: %1$s</string>
     <string name="previous_month">Предыдущий месяц</string>

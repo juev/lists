@@ -28,11 +28,24 @@ class SelectionTest {
     )
 
     @Test
-    fun r109_a_row_can_be_selected_unless_it_is_in_the_trash_or_a_record() {
-        assertTrue(task().selectable())
-        assertTrue(task(done = "2026-10-10T10:00").selectable())
-        assertFalse(task(deleted = true).selectable())
-        assertFalse(task(isLog = true).selectable())
+    fun r109_the_bar_has_one_action_when_only_the_trash_or_only_records_are_selected() {
+        assertEquals(SelectionActions.Usual, selectionActions(emptyList()))
+        assertEquals(SelectionActions.Usual, selectionActions(listOf(task(), task(done = "2026-10-10T10:00"))))
+        assertEquals(SelectionActions.Restore, selectionActions(listOf(task(deleted = true), task(deleted = true))))
+        assertEquals(SelectionActions.DeleteRecords, selectionActions(listOf(task(isLog = true))))
+        assertEquals(SelectionActions.Usual, selectionActions(listOf(task(isLog = true), task(done = "2026-10-10T10:00"))))
+    }
+
+    @Test
+    fun r109_a_task_in_the_trash_is_restored_and_goes_back_there_on_undo() {
+        assertEquals(Step(Back.Trash), BatchAction.Restore.on(task(deleted = true)))
+        assertNull(BatchAction.Restore.on(task()))
+        assertNull(BatchAction.Restore.on(task(isLog = true)))
+    }
+
+    @Test
+    fun r109_a_record_is_deleted_and_comes_back_on_undo() {
+        assertEquals(Step(Back.Restore), BatchAction.Delete.on(task(isLog = true)))
     }
 
     @Test
@@ -83,11 +96,12 @@ class SelectionTest {
     }
 
     @Test
-    fun r109_nothing_applies_to_a_task_in_the_trash_or_to_a_record() {
-        for (action in listOf(BatchAction.Complete, BatchAction.Delete, BatchAction.Due("2026-10-11"), BatchAction.MoveTo("work"))) {
+    fun r109_the_other_actions_pass_over_a_task_in_the_trash_and_a_record() {
+        for (action in listOf(BatchAction.Complete, BatchAction.Due("2026-10-11"), BatchAction.MoveTo("work"))) {
             assertNull(action.on(task(deleted = true)))
             assertNull(action.on(task(isLog = true)))
         }
+        assertNull(BatchAction.Delete.on(task(deleted = true)))
     }
 
     @Test
