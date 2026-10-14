@@ -256,6 +256,8 @@ The settings are in five sections: General (opening at login, the helper of quic
 
 Text size (five steps) and typeface (system, rounded, serif, monospaced) are chosen in Settings → General. On Android Settings → General has Text size with the same five steps and no choice of typeface; the step multiplies the font size set in the system, so the system setting keeps working and the step corrects it for Lists alone.
 
+Spacing between tasks is chosen next to the text size on both platforms: Compact, Normal (the default) or Relaxed. On macOS a task row of one line is then 26, 30 or 40 points high at the default text size; Normal is close to Things 3. On Android rows are 48, 52 or 60 dp high, since the mark keeps its 48 dp touch target. The choice belongs to the device and does not sync.
+
 ## Light and dark
 
 By default the apps look the way the system does, and follow it when it switches between light and dark on a schedule. Appearance chooses otherwise: Same as the system, Light or Dark. It is in Settings on macOS, in Settings in the drawer on Android, and at the bottom of the sidebar in the web interface. The choice applies at once and to every window, is kept by the device (by the browser in the web interface) and does not sync. List colours and the red of an overdue date are the same in both looks.
