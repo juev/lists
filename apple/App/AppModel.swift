@@ -1008,6 +1008,17 @@ final class AppModel {
         }
     }
 
+    /// R126: completes the project whatever the state of its tasks; its open tasks close with it (R11)
+    /// and come back with it on undo. The project leaves the sidebar at once.
+    func completeProject(_ project: TaskItem) {
+        guard project.done == nil else { return }
+        perform { _ = try $0.completeTask(id: project.id) }
+        undoManager?.registerUndo(withTarget: self) { model in
+            model.perform { try $0.undoCloseTask(id: project.id) }
+        }
+        undoManager?.setActionName(L("Complete Project"))
+    }
+
     /// Closes the task as "won't do" (R69); undone the way a completion is.
     func wontDo(_ task: TaskItem) {
         guard task.done == nil else { return }
