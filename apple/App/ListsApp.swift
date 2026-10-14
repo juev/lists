@@ -268,6 +268,9 @@ struct SettingsView: View {
 
     /// The tab shown; the window opens on the one used last.
     @AppStorage("settingsTab", store: Storage.defaults) private var tab = "general"
+    /// R121: the switch was turned off and the list for Inbox's tasks is being chosen.
+    @State private var hidingInbox = false
+    @State private var noListForInbox = false
     @State private var kind = Kind.off
     @State private var url = ""
     @State private var user = ""
@@ -340,7 +343,11 @@ struct SettingsView: View {
                 }
                 Section(L("Sidebar")) {
                     @Bindable var model = model
-                    ForEach(Scope.builtins, id: \.self) { scope in
+                    // R121: one switch for all devices; turning it off asks where the tasks of Inbox go.
+                    Toggle(L("Show Inbox"), isOn: Binding(get: { !model.inboxHidden }, set: { show in
+                        if show { model.showInbox() } else if model.listsForHiddenInbox.isEmpty { noListForInbox = true } else { hidingInbox = true }
+                    }))
+                    ForEach(Scope.builtins.filter { $0 != .inbox }, id: \.self) { scope in
                         Picker(scope.builtinTitle, selection: Binding(get: { model.sidebarShow(scope) }, set: { model.setSidebarShow(scope, $0) })) {
                             ForEach(SidebarShow.allCases, id: \.self) { Text($0.title).tag($0) }
                         }
@@ -358,13 +365,16 @@ struct SettingsView: View {
             }
             .formStyle(.grouped)
             .onAppear { model.reloadLoginItems() }
+            .sheet(isPresented: $hidingInbox) { HideInboxSheet() }
+            .alert(L("To hide Inbox, create a list first."), isPresented: $noListForInbox) { Button(L("OK")) {} }
             .tabItem { Label(L("General"), systemImage: "gearshape") }
             .tag("general")
             Form {
                 Section(L("New tasks")) {
                     @Bindable var model = model
-                    Picker(L("Default list"), selection: $model.newTaskList) {
-                        Text(L("Inbox")).tag("inbox")
+                    Picker(L("Default list"), selection: Binding(get: { model.newTaskList }, set: { model.setNewTaskList($0) })) {
+                        // R121: hidden, Inbox is not offered; a choice made before stays readable.
+                        if !model.inboxHidden || model.newTaskList == "inbox" { Text(L("Inbox")).tag("inbox") }
                         Text(L("Last used list")).tag("last")
                         Divider()
                         ForEach(model.lists.filter { !$0.archived && $0.id != "inbox" }, id: \.id) { Text($0.name).tag($0.id) }
@@ -718,5 +728,45 @@ struct SettingsView: View {
         } catch {
             message = describe(error)
         }
+    }
+}
+
+/// R121: where the open tasks of Inbox go when it is hidden, and the list new tasks start from.
+struct HideInboxSheet: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+    @State private var listId = ""
+
+    var body: some View {
+        let open = model.counts.inbox
+        VStack(alignment: .leading, spacing: 12) {
+            Text(L("Hide Inbox?")).font(.headline)
+            if open > 0 {
+                Text(L("Inbox holds %d open tasks.", Int(open)))
+            }
+            Picker(L("List"), selection: $listId) {
+                ForEach(model.listsForHiddenInbox, id: \.id) { Text($0.name).tag($0.id) }
+            }
+            Text(L("New tasks without a list will go to the list used last; this one comes first."))
+                .font(AppFont.style(.caption)).foregroundStyle(.secondary)
+            HStack {
+                Spacer()
+                Button(L("Cancel"), role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction)
+                if open > 0 {
+                    Button(L("Hide Without Moving")) { hide(moving: false) }
+                    Button(L("Move and Hide")) { hide(moving: true) }.keyboardShortcut(.defaultAction)
+                } else {
+                    Button(L("Hide")) { hide(moving: false) }.keyboardShortcut(.defaultAction)
+                }
+            }
+        }
+        .padding(20)
+        .frame(width: 380)
+        .onAppear { listId = model.listsForHiddenInbox.first?.id ?? "" }
+    }
+
+    private func hide(moving: Bool) {
+        if !listId.isEmpty { model.hideInbox(movingTo: listId, moveTasks: moving) }
+        dismiss()
     }
 }

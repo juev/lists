@@ -157,7 +157,6 @@ final class AppModel {
         textScale = defaults.object(forKey: AppFont.scaleKey).flatMap { ($0 as? Double) ?? ($0 as? String).flatMap(Double.init) } ?? 1.0
         fontDesign = defaults.string(forKey: AppFont.designKey) ?? "default"
         appearance = defaults.string(forKey: "appearance") ?? "system"
-        newTaskList = defaults.string(forKey: "newTaskList") ?? "inbox"
         returnAddsLine = defaults.object(forKey: "returnAddsLine") == nil || defaults.bool(forKey: "returnAddsLine")
         parseQuickText = defaults.object(forKey: "parseQuickText") == nil || defaults.bool(forKey: "parseQuickText")
         clipboardNotes = defaults.object(forKey: "clipboardNotes") == nil || defaults.bool(forKey: "clipboardNotes")
@@ -273,11 +272,16 @@ final class AppModel {
         return !moved && leads == [15] ? [0] : leads
     }
 
-    // Editing habits of this Mac; not synced.
-    /// Where a new task goes when the view does not say: `inbox`, `last` or a list id.
-    var newTaskList: String = Storage.defaults.string(forKey: "newTaskList") ?? "inbox" {
-        didSet { Storage.defaults.set(newTaskList, forKey: "newTaskList") }
+    /// Where a new task goes when the view does not say: `inbox`, `last` or a list id (R40); synced.
+    private(set) var newTaskList = "inbox"
+    /// Inbox has no row while it holds no open tasks (R121); synced.
+    private(set) var inboxHidden = false
+
+    func setNewTaskList(_ choice: String) {
+        perform { try $0.setNewTaskList(choice: choice) }
     }
+
+    // Editing habits of this Mac; not synced.
     /// Return in the notes starts a new line (Esc finishes); otherwise it finishes editing and ⌥Return starts a line.
     var returnAddsLine: Bool = Storage.defaults.object(forKey: "returnAddsLine") == nil || Storage.defaults.bool(forKey: "returnAddsLine") {
         didSet { Storage.defaults.set(returnAddsLine, forKey: "returnAddsLine") }
@@ -326,12 +330,14 @@ final class AppModel {
         }
     }
 
-    /// Whether the sidebar and the Go menu offer the view (R93).
+    /// Whether the sidebar and the Go menu offer the view (R93). Inbox has a row unless it is
+    /// hidden and holds no open tasks (R121).
     func showsInSidebar(_ scope: Scope) -> Bool {
+        if scope == .inbox { return !inboxHidden || holds(.inbox) }
         switch sidebarShow(scope) {
-        case .always: true
-        case .filled: holds(scope)
-        case .never: false
+        case .always: return true
+        case .filled: return holds(scope)
+        case .never: return false
         }
     }
 
@@ -415,8 +421,25 @@ final class AppModel {
     }
 
     var defaultListId: String {
-        let id = newTaskList == "last" ? Storage.defaults.string(forKey: "lastUsedList") ?? "inbox" : newTaskList
-        return lists.contains { $0.id == id && !$0.archived } ? id : "inbox"
+        (try? store?.defaultListId(lastUsed: Storage.defaults.string(forKey: "lastUsedList"))) ?? "inbox"
+    }
+
+    /// The lists Inbox can be hidden in favour of (R121).
+    var listsForHiddenInbox: [TaskList] { lists.filter { !$0.archived && $0.id != "inbox" } }
+
+    /// R121: hides Inbox, moving its open tasks to the list when asked; one undo takes it all back.
+    func hideInbox(movingTo listId: String, moveTasks: Bool) {
+        guard let hiding = perform({ try $0.hideInbox(listId: listId, moveTasks: moveTasks) }) else { return }
+        noteUsedList(listId)
+        if scope == .inbox { scope = .list(id: listId) }
+        undoManager?.registerUndo(withTarget: self) { model in
+            model.perform { try $0.undoHideInbox(hiding: hiding) }
+        }
+        undoManager?.setActionName(L("Hide Inbox"))
+    }
+
+    func showInbox() {
+        perform { try $0.showInbox() }
     }
 
     func noteUsedList(_ id: String) {
@@ -470,6 +493,12 @@ final class AppModel {
             }
             if !LoginItems.isHelper, let server = read("push", "push settings", opened.pushServer) ?? nil {
                 opened.setPushToken(token: Keychain.load(account: Keychain.pushAccount(server: server)))
+            }
+            // R40: the choice this Mac kept before it synced goes to the shared settings once.
+            if !LoginItems.isHelper, let kept = Storage.defaults.string(forKey: "newTaskList") {
+                if read("app", "default list for new tasks", { try opened.adoptNewTaskList(choice: kept) }) != nil {
+                    Storage.defaults.removeObject(forKey: "newTaskList")
+                }
             }
             // R102: where a log of events begins for this run.
             let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
@@ -619,6 +648,8 @@ final class AppModel {
             applyDockCount()
             syncStatus = try store.syncStatus()
             keepDone = try store.keepDone()
+            newTaskList = try store.newTaskList()
+            inboxHidden = try store.inboxHidden()
             // Kept rows leave by the clock, not by a change: look again when the first one is due.
             keptTimer?.invalidate()
             keptTimer = try store.secondsUntilKeptLeaves().map { seconds in
