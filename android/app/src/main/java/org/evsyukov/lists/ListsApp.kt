@@ -239,6 +239,9 @@ object NotifyPrefs {
     /** `HH:MM`, empty for off. */
     fun allDay(context: Context) = prefs(context).getString("allDay", "09:00").orEmpty()
     fun summary(context: Context) = prefs(context).getString("summary", "").orEmpty()
+    /** R119: off unless chosen. */
+    fun asAlarmClock(context: Context) = prefs(context).getBoolean("alarmClock", false)
+    fun setAsAlarmClock(context: Context, on: Boolean) = prefs(context).edit().putBoolean("alarmClock", on).apply()
 
     fun save(context: Context, enabled: Boolean, leads: List<Int>, allDay: String, summary: String) {
         prefs(context).edit().putBoolean("enabled", enabled).putString("leads", leads.sorted().joinToString(",")).putString("allDay", allDay).putString("summary", summary).apply()
@@ -366,9 +369,25 @@ object Reminders {
         else alarms.setAndAllowWhileIdle(AlarmManager.RTC, at, alarm)
     }
 
+    enum class Way { INEXACT, EXACT, ALARM_CLOCK }
+
+    /**
+     * R66, R119: an alarm of the person needs the same leave as an exact one, so without it
+     * the alarm stays inexact whatever is chosen.
+     */
+    fun way(exact: Boolean, asAlarmClock: Boolean): Way = when {
+        !exact -> Way.INEXACT
+        asAlarmClock -> Way.ALARM_CLOCK
+        else -> Way.EXACT
+    }
+
     fun refresh(context: Context) {
         val alarms = context.getSystemService(AlarmManager::class.java) ?: return
-        val exact = exact(context)
+        val way = way(exact(context), NotifyPrefs.asAlarmClock(context))
+        // R119: a tap on the time of the next alarm, where the system shows it, opens the app.
+        val show = context.packageManager.getLaunchIntentForPackage(context.packageName)?.let {
+            PendingIntent.getActivity(context, 0, it, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        }
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         for (key in prefs.getStringSet(KEY, emptySet()).orEmpty()) {
             alarms.cancel(pending(context, key, "", "", ""))
@@ -385,8 +404,12 @@ object Reminders {
             // named after the task alone would replace the one before it.
             val alarm = pending(context, item.key, item.taskId ?: item.key, title, body)
             // Without the permission the system may deliver the alarm late, within a window of up to an hour.
-            if (exact) alarms.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, alarm)
-            else alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, alarm)
+            // Some firmware does the same to exact alarms and leaves only an alarm of the person alone (R119).
+            when (way) {
+                Way.ALARM_CLOCK -> alarms.setAlarmClock(AlarmManager.AlarmClockInfo(at, show), alarm)
+                Way.EXACT -> alarms.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, alarm)
+                Way.INEXACT -> alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, alarm)
+            }
             scheduled += item.key
         }
         prefs.edit().putStringSet(KEY, scheduled).apply()

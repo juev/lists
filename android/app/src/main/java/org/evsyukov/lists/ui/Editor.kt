@@ -985,6 +985,7 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
     val iconCountLabels = listOf(str(R.string.today), str(R.string.icon_count_overdue_choice), str(R.string.icon_count_none))
     // R66: asked again on the way back from the system screen where the leave is given.
     var exactAlarms by remember { mutableStateOf(Reminders.exact(context)) }
+    var asAlarmClock by remember { mutableStateOf(NotifyPrefs.asAlarmClock(context)) }
     // S31: the same on the way back from the system dialog about the battery.
     var unrestricted by remember { mutableStateOf(Background.unrestricted(context)) }
     // R78: the same on the way back from the system screen of the calendar permission.
@@ -1173,6 +1174,13 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
                                 SettingRow(str(R.string.notification_sound), str(R.string.choose)) {
                                     context.startActivity(Reminders.channelSettings(context))
                                 }
+                                // R119: the alarms are set anew at once, the other way.
+                                SwitchRow(str(R.string.as_alarm_clock), asAlarmClock) {
+                                    asAlarmClock = it
+                                    NotifyPrefs.setAsAlarmClock(context, it)
+                                    Repo.scope.launch { Reminders.refresh(context.applicationContext) }
+                                }
+                                Text(str(R.string.as_alarm_clock_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 if (!exactAlarms && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
                                     SettingRow(str(R.string.exact_alarms), str(R.string.allow)) {
                                         context.startActivity(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.parse("package:${context.packageName}")))

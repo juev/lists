@@ -271,6 +271,8 @@
     <string name="exact_alarms">Напоминания могут опаздывать</string>
     <string name="allow">Разрешить</string>
     <string name="exact_alarms_hint">Пока для Lists не разрешены «Будильники и напоминания», система может показать напоминание позже назначенного, вплоть до часа.</string>
+    <string name="as_alarm_clock">Напоминания как будильник</string>
+    <string name="as_alarm_clock_hint">Приходят точно на телефонах, которые задерживают обычные напоминания. Система может показать значок будильника.</string>
     <string name="due_at_time_setting">Задача со сроком по времени</string>
     <string name="due_on_day_setting">Задача со сроком на день</string>
     <string name="summary_setting">Сводка дня</string>
