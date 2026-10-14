@@ -444,6 +444,32 @@ fn r32_tasks_closed_as_wont_do_or_in_the_trash_are_tasks_of_the_project() {
 }
 
 #[test]
+fn r126_a_project_is_completed_whatever_the_state_of_its_tasks() {
+    let d = device();
+    let project = add(&d, "п");
+    d.set_project(project.id.clone(), true).unwrap();
+    let open = add_sub(&d, &project, "открыта");
+    let weekly_task = add_sub(&d, &project, "каждую неделю");
+    d.set_due(weekly_task.id.clone(), Some("2026-10-05".into())).unwrap();
+    d.set_repeat(weekly_task.id.clone(), Some(weekly())).unwrap();
+    assert_eq!(titles(&d.projects().unwrap()), ["п"]);
+
+    d.complete_task(project.id.clone()).unwrap();
+    assert!(d.projects().unwrap().is_empty(), "it leaves the sidebar (R32)");
+    assert!(d.task(open.id.clone()).unwrap().done.is_some());
+    let repeating = d.task(weekly_task.id.clone()).unwrap();
+    assert!(repeating.done.is_some(), "closed for good, not moved on");
+    assert_eq!(repeating.due.as_deref(), Some("2026-10-05"));
+
+    d.set_now_for_tests("2026-10-05T10:00:06");
+    d.undo_close_task(project.id.clone()).unwrap();
+    assert_eq!(titles(&d.projects().unwrap()), ["п"]);
+    for id in [open.id, weekly_task.id] {
+        assert!(d.task(id).unwrap().done.is_none());
+    }
+}
+
+#[test]
 fn r10_the_copy_of_a_project_keeps_the_fields_of_its_tasks() {
     let d = device();
     let project = add(&d, "п");
