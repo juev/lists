@@ -235,6 +235,7 @@ fun MainScreen(model: MainViewModel, onReminderSet: () -> Unit) {
                 onNewList = { creatingList = true },
                 onEditFilter = { editingFilter = it },
                 onNewFilter = { creatingFilter = true },
+                onProjectOff = { project -> model.act { it.setProject(project.id, false) } },
                 onSettings = { settings = true; scope.launch { drawer.close() } },
             )
         },
@@ -1048,6 +1049,7 @@ private fun Drawer(
     onNewList: () -> Unit,
     onEditFilter: (SavedFilter) -> Unit,
     onNewFilter: () -> Unit,
+    onProjectOff: (TaskItem) -> Unit,
     onSettings: () -> Unit,
 ) {
     ModalDrawerSheet {
@@ -1074,10 +1076,18 @@ private fun Drawer(
                 DrawerHeading(str(R.string.projects))
                 for (project in state.projects) {
                     val scope = Scope.Project(project.id)
-                    DrawerItem(
-                        project.title, Icons.Outlined.Folder, project.subtasksTotal - project.subtasksDone, state.scope == scope,
-                        tint = state.list(project.listId)?.tint(),
-                    ) { onSelect(scope) }
+                    var menu by remember(project.id) { mutableStateOf(false) }
+                    Box {
+                        // R32: only an empty project turns back into a task; a project is not a row of its list (R120).
+                        DrawerItem(
+                            project.title, Icons.Outlined.Folder, project.subtasksTotal - project.subtasksDone, state.scope == scope,
+                            tint = state.list(project.listId)?.tint(),
+                            onLong = if (project.offersProjectSwitch()) ({ menu = true }) else null,
+                        ) { onSelect(scope) }
+                        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                            DropdownMenuItem(text = { Text(str(R.string.project_off)) }, onClick = { menu = false; onProjectOff(project) })
+                        }
+                    }
                 }
             }
             DrawerHeading(str(R.string.filters))
