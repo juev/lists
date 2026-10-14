@@ -343,4 +343,14 @@
     <string name="batch_changed">Changed: %1$s</string>
     <string name="previous_month">Previous month</string>
     <string name="next_month">Next month</string>
+    <string name="show_inbox">Show Inbox</string>
+    <string name="hide_inbox_question">Hide Inbox?</string>
+    <string name="inbox_open_tasks">Inbox holds %1$d open tasks.</string>
+    <string name="hide_inbox_hint">New tasks without a list will go to the list used last; this one comes first.</string>
+    <string name="move_and_hide">Move and hide</string>
+    <string name="hide_without_moving">Hide without moving</string>
+    <string name="hide">Hide</string>
+    <string name="inbox_needs_list">To hide Inbox, create a list first.</string>
+    <string name="inbox_hidden_notice">Inbox is hidden</string>
+    <string name="ok">OK</string>
 </resources>
