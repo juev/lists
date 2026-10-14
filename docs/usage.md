@@ -80,6 +80,8 @@ Subtasks made by an earlier version, by an import or by a CalDAV client may carr
 
 A project is a top-level task marked as a project. It appears in the sidebar with a "done/total" counter and opens as its own view. A task entered in that view becomes a task of the project: a full task with dates and all other fields, which can have subtasks of its own. A project that has tasks is not turned back into a plain task; an empty one is. A completed project leaves the sidebar.
 
+A project is shown only in the sidebar: it is not a row in its list, the Inbox, All, Today, Upcoming, a tag or a filter, and the counters of those views leave it out. Its own dates, tags and priority do not bring it there; Today and Upcoming show the tasks of the project that have dates. Making a task a project takes its row away; turning an empty project back into a task brings the row back to its place. Completed, Won't do, the trash and search still show a project as a row, so a finished or deleted project can be found and restored.
+
 ## Repeats
 
 A repeat is set in the card of a task. On macOS the card of a new task, in the main window, in the quick-entry window and in the menu bar, always has a Repeat chip. In an open task the chip appears once a rule is set; until then Repeat is under the "+" button. ⇧⌘R opens it from anywhere in either card. On Android the card of a new task and the quick-entry window have a Repeat icon, and in the editor Repeat is a light icon in the row of fields until a rule is set. The rule counts from the due date, or from the start date when there is no due date.
