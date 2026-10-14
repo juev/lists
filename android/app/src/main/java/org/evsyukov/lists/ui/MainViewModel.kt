@@ -5,6 +5,8 @@ import androidx.lifecycle.viewModelScope
 import org.evsyukov.lists.R
 import org.evsyukov.lists.str
 import org.evsyukov.lists.Repo
+import org.evsyukov.lists.logError
+import org.evsyukov.lists.logged
 import org.evsyukov.lists.EntryPrefs
 import org.evsyukov.lists.ListsApp
 import org.evsyukov.lists.dateLabel
@@ -190,7 +192,7 @@ class MainViewModel : ViewModel() {
 
     private fun load(store: Store, id: String): Editing? = runCatching {
         Editing(store.task(id), store.subtasks(id), store.attachments(id))
-    }.getOrNull()
+    }.onFailure { logError("app", "a task card did not open: ${logged(it)}") }.getOrNull()
 
     /** R22: for each task of the results of a search, the subtasks whose title holds the text. */
     private fun found(store: Store, scope: Scope, tasks: List<TaskItem>): Map<String, List<TaskItem>> {

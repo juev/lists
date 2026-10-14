@@ -61,7 +61,9 @@ fun AppTheme(bars: Boolean = false, content: @Composable () -> Unit) {
 
 class MainActivity : ComponentActivity() {
     private val model: MainViewModel by viewModels()
-    private val askNotifications = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
+    private val askNotifications = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        // R102: as on macOS, a refusal goes to the log; reminders are not shown from here on.
+        if (!granted) logError("notify", "the system does not allow notifications")
         // R104, R106: the notifications that waited for the permission are shown now.
         Repo.scope.launch { TodayNotice.refresh(applicationContext) }
     }

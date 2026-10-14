@@ -180,6 +180,7 @@ class TaskWidgetReceiver : BroadcastReceiver() {
         val result = goAsync()
         Repo.scope.launch {
             runCatching { Repo.store.completeTask(id) }
+                .onFailure { logError("widget", "a task was not completed: ${logged(it)}") }
             Repo.changed()
             // Drawn here as well: what Repo.changed() starts is not waited for.
             TaskWidgets.refresh(context.applicationContext)

@@ -34,6 +34,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import uniffi.lists_core.AppException
 import uniffi.lists_core.LogLevel
 import uniffi.lists_core.finishPushes
 import uniffi.lists_core.NotificationKind
@@ -50,8 +51,8 @@ class ListsApp : Application() {
     /** The database lives in the app's private storage; nothing else on the device can read it. */
     val store: Store by lazy {
         Store.open(File(filesDir, "lists").absolutePath).also {
-            it.setSyncPassword(Secrets.load(this))
-            it.setPushToken(Secrets.load(this, Secrets.PUSH_TOKEN))
+            it.setSyncPassword(Secrets.load(this) { error -> it.log(LogLevel.ERROR, "sync", "the stored password was not decrypted: ${logged(error)}") })
+            it.setPushToken(Secrets.load(this, Secrets.PUSH_TOKEN) { error -> it.log(LogLevel.ERROR, "push", "the stored token was not decrypted: ${logged(error)}") })
             // R102: where a log of events begins for this run.
             val version = runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrNull() ?: "?"
             it.log(LogLevel.INFO, "app", "started $version on Android ${android.os.Build.VERSION.RELEASE}")
@@ -73,6 +74,23 @@ class ListsApp : Application() {
         lateinit var instance: ListsApp
             private set
     }
+}
+
+/**
+ * An error as the cause in a line of the log (R102): the text of the core, and of any other error only its class,
+ * because the message of an error about a file or an intent names the file.
+ */
+fun logged(error: Throwable): String = when (error) {
+    is AppException.NotFound -> "not found"
+    is AppException.Invalid -> "invalid: ${error.msg}"
+    is AppException.Storage -> "storage: ${error.msg}"
+    is AppException.Sync -> "sync: ${error.msg}"
+    else -> error.javaClass.simpleName
+}
+
+/** R102: an ERROR line of the log. Nothing when the store does not open: the core writes the log through it. */
+fun logError(source: String, message: String) {
+    runCatching { Repo.store.log(LogLevel.ERROR, source, message) }
 }
 
 /** One place every screen goes through to reach the core and to learn that data changed. */
@@ -107,7 +125,10 @@ object Repo {
     suspend fun sync(): Result<SyncReport> = withContext(Dispatchers.IO) {
         // R88: the automatic backup is looked at with every run, with sync on or off.
         runCatching { store.backupIfDue() }
-        if (store.syncConfig() is SyncConfig.Off) return@withContext Result.success(SyncReport(0u, 0u, 0u, 0u))
+        val config = runCatching { store.syncConfig() }
+            .onFailure { logError("sync", "the sync settings were not read: ${logged(it)}") }
+            .getOrElse { return@withContext Result.failure(it) }
+        if (config is SyncConfig.Off) return@withContext Result.success(SyncReport(0u, 0u, 0u, 0u))
         val result = syncMutex.withLock {
             syncing.value = true
             val result = runCatching { store.syncNow() }
@@ -353,6 +374,8 @@ object Reminders {
     private const val CHANNEL = "reminders"
     private const val PREFS = "reminders"
     private const val KEY = "ids"
+    /** Whether the last line of the log about the way of alarms was about inexact ones. */
+    private const val INEXACT_NOTED = "inexactNoted"
 
     /** R66: always before Android 12, by the user's leave since. */
     fun exact(context: Context): Boolean =
@@ -372,6 +395,16 @@ object Reminders {
     enum class Way { INEXACT, EXACT, ALARM_CLOCK }
 
     /**
+     * R66, R102: what the log says when reminders turn inexact or exact again, null when that did not change.
+     * `wasInexact` is what the last line said, so a pass over the plan repeats nothing.
+     */
+    fun wayNote(wasInexact: Boolean, inexact: Boolean): Pair<LogLevel, String>? = when {
+        inexact && !wasInexact -> LogLevel.ERROR to "no leave for exact alarms: reminders may come up to an hour late"
+        !inexact && wasInexact -> LogLevel.INFO to "exact alarms are allowed again"
+        else -> null
+    }
+
+    /**
      * R66, R119: an alarm of the person needs the same leave as an exact one, so without it
      * the alarm stays inexact whatever is chosen.
      */
@@ -381,9 +414,17 @@ object Reminders {
         else -> Way.EXACT
     }
 
+    private fun noteWay(context: Context, inexact: Boolean) {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val (level, message) = wayNote(prefs.getBoolean(INEXACT_NOTED, false), inexact) ?: return
+        runCatching { Repo.store.log(level, "notify", message) }
+        prefs.edit().putBoolean(INEXACT_NOTED, inexact).apply()
+    }
+
     fun refresh(context: Context) {
         val alarms = context.getSystemService(AlarmManager::class.java) ?: return
         val way = way(exact(context), NotifyPrefs.asAlarmClock(context))
+        noteWay(context, way == Way.INEXACT)
         // R119: a tap on the time of the next alarm, where the system shows it, opens the app.
         val show = context.packageManager.getLaunchIntentForPackage(context.packageName)?.let {
             PendingIntent.getActivity(context, 0, it, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
