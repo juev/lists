@@ -585,6 +585,7 @@ function render() {
   if (state.typing) return; // never rebuild the page under the user's cursor
   const o = state.overview, c = o.counts, secs = sections(), origin = state.search || ["today", "upcoming", "all", "completed", "wontdo", "trash"].includes(state.scope) || state.scope.startsWith("tag:") || state.scope.startsWith("filter:");
   const empty = secs.every(s => !s.tasks.length);
+  const project = o.projects.find(p => "project:" + p.id === state.scope);
   const current = state.scope.startsWith("list:") ? o.lists.find(l => "list:" + l.id === state.scope) : state.scope === "inbox" ? o.lists.find(l => l.id === "inbox") : null;
   const syncText = !o.sync.configured ? "" : o.sync.lastError ? t("Sync failed") : o.sync.pending ? `${o.sync.pending} ${t("waiting")}` : o.sync.attachmentsWaiting ? `${t("Attachments waiting to sync")}: ${o.sync.attachmentsWaiting}` : t("Synced");
   const search = $("input", { type: "search", placeholder: t("Search"), value: state.search, oninput: e => { state.search = e.target.value; state.sel = null; clearTimeout(search.timer); search.timer = setTimeout(async () => { await load(); const again = document.querySelector("header input"); again.focus(); again.setSelectionRange(again.value.length, again.value.length); }, 250); } });
@@ -628,6 +629,8 @@ function render() {
       state.filterEdit ? $("div", { id: "tasks" }, filterForm(state.filterEdit)) : $("div", { id: "tasks" },
         state.scope.startsWith("filter:") && !state.search ? $("div", { class: "chips", style: "padding:8px 10px 0" }, $("button", { class: "link", onclick: () => { state.filterEdit = o.filters.find(f => "filter:" + f.id === state.scope); render(); } }, t("Edit"))) : null,
         current && !state.search ? $("div", { class: "chips", style: "padding:8px 10px 0" }, listTools(current)) : null,
+        // R32: an empty project turns back into a task here, since a project is not a row of its list (R120).
+        project && !project.subtasks && !state.search ? $("div", { class: "chips", style: "padding:8px 10px 0" }, $("button", { class: "link", onclick: async () => { await call("setProject", { id: project.id, value: false }); state.scope = project.list === "inbox" ? "inbox" : "list:" + project.list; load(); } }, t("Turn back into a task"))) : null,
         empty ? $("div", { class: "empty" }, t(state.search ? "Nothing found" : state.scope === "today" ? "All done for today" : "No tasks"))
           : secs.map(s => [s.title ? $("div", { class: "section" + (s.bad ? " bad" : "") }, s.title) : null, s.tasks.map(x => taskNode(x, origin))]),
         state.scope === "trash" && !empty ? $("div", { style: "text-align:right;padding:14px" }, $("button", { class: "link danger", onclick: () => confirm(t("Delete everything in the trash for good?")) && act("emptyTrash") }, t("Empty Trash"))) : null,
