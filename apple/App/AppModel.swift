@@ -95,6 +95,10 @@ final class AppModel {
     var fontDesign: String = Storage.defaults.string(forKey: AppFont.designKey) ?? "default" {
         didSet { Storage.defaults.set(fontDesign, forKey: AppFont.designKey) }
     }
+    /// R122: how far apart the task rows stand, one of `RowSpacing.choices`; belongs to this Mac.
+    var rowSpacing: String = RowSpacing.from(Storage.defaults.string(forKey: RowSpacing.key)) {
+        didSet { Storage.defaults.set(rowSpacing, forKey: RowSpacing.key) }
+    }
     /// "system", "light" or "dark" (R61); belongs to this Mac.
     var appearance: String = Storage.defaults.string(forKey: "appearance") ?? "system" {
         didSet {

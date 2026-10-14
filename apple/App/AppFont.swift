@@ -1,6 +1,26 @@
 import AppKit
 import SwiftUI
 
+/// R122: how far apart the rows of a task list stand, chosen in Settings.
+enum RowSpacing {
+    static let choices: [(String, String)] = [("Compact", "compact"), ("Normal", "normal"), ("Relaxed", "relaxed")]
+    static let key = "rowSpacing"
+
+    /// The choice a saved value stands for; anything else is the default.
+    static func from(_ saved: String?) -> String {
+        saved.flatMap { value in choices.first { $0.1 == value }?.1 } ?? "normal"
+    }
+
+    /// The space above and below the content of a row, in points.
+    static func padding(_ choice: String) -> CGFloat {
+        switch choice {
+        case "compact": return 1
+        case "relaxed": return 8
+        default: return 3
+        }
+    }
+}
+
 /// Fonts of the app, scaled and styled by the user's choice in Settings.
 ///
 /// macOS has no system-wide text size for apps to follow, so the app keeps its
