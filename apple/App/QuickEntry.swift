@@ -5,6 +5,8 @@ import SwiftUI
 
 extension KeyboardShortcuts.Name {
     static let quickEntry = Self("quickEntry", default: .init(.space, modifiers: [.control, .option]))
+    /// R124: shows the main window or hides Lists; it has no key until one is recorded in the settings.
+    static let showLists = Self("showLists")
 }
 
 /// The new-task card shared by the floating quick-entry panel and the menu bar window.

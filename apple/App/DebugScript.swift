@@ -83,6 +83,9 @@ import UserNotifications
 /// `hideapp` (hides the app the way Hide Lists does), `unhideapp` (shows it again without making it active),
 /// `quickopen` and `quickclose` (show quick entry transparent and without the keyboard, and close it; while it is open that way, `type` and `key` go to its card),
 /// `apphidden` (prints whether the app is hidden, whether it is active and how many of its main windows are ordered in),
+/// `closemain` (closes the main window), `showlists` (does what the key that shows Lists does, R124; with `LISTS_DEBUG_QUIET` it leaves
+/// the app in the background), `mainwindow` (prints whether the main window is there, on screen, minimised and key, and the answer of R124
+/// for each state of the app),
 /// `quicktrace` (shows quick entry transparent and without the keyboard, and prints its geometry frame by frame:
 /// a line that differs from the next one is a card that moved after it was shown).
 /// `undostate` (prints whether a group of changes is open in the undo manager; `undo` after several scripted presses takes all of them back at once,
@@ -621,6 +624,17 @@ enum DebugScript {
                     // What Hide Lists (⌘H) does.
                     NSApp.hide(nil)
                     try? await _Concurrency.Task.sleep(for: .milliseconds(300))
+                case "closemain":
+                    AppDelegate.mainWindow?.close()
+                    try? await _Concurrency.Task.sleep(for: .milliseconds(300))
+                case "showlists":
+                    AppDelegate.showOrHideLists(activate: !quiet)
+                    try? await _Concurrency.Task.sleep(for: .milliseconds(500))
+                case "mainwindow":
+                    let window = AppDelegate.mainWindow
+                    let answers = [(false, false), (false, true), (true, false), (true, true)]
+                        .map { "active \($0.0) in front \($0.1): \(AppDelegate.hidesOnShowKey(active: $0.0, mainInFront: $0.1) ? "hide" : "show")" }
+                    print("debug: main window \(window == nil ? "none" : "there"), on screen \(window?.isVisible ?? false), minimised \(window?.isMiniaturized ?? false), key \(window?.isKeyWindow ?? false); \(answers.joined(separator: ", "))")
                 case "apphidden":
                     let shown = NSApp.windows.filter { !($0 is NSPanel) && $0.canBecomeMain && $0.isVisible }.count
                     print("debug: app \(NSApp.isHidden ? "hidden" : "shown"), active \(NSApp.isActive), main windows in the window list \(shown), quick entry \(QuickEntryPanel.shared.isVisible ? "shown" : "hidden")")
