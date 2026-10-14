@@ -467,20 +467,34 @@ fn r126_a_project_is_completed_from_the_sidebar_and_comes_back_on_undo() {
     call(&web, "", json!({ "op": "setProject", "id": id, "value": true }));
     let scope = format!("project:{id}");
     let open = call(&web, "", json!({ "op": "quickAdd", "text": "Коробки", "scope": scope }));
-    let done = call(&web, "", json!({ "op": "quickAdd", "text": "Грузчики", "scope": scope }));
+    let done = call(
+        &web,
+        "",
+        json!({ "op": "quickAdd", "text": "Грузчики", "scope": scope }),
+    );
     call(&web, "", json!({ "op": "complete", "id": done["id"] }));
 
     call(&web, "", json!({ "op": "complete", "id": id }));
     let overview = get(&web, "", "/api/overview");
-    assert_eq!(overview["projects"].as_array().unwrap().len(), 0, "it leaves the sidebar (R32)");
+    assert_eq!(
+        overview["projects"].as_array().unwrap().len(),
+        0,
+        "it leaves the sidebar (R32)"
+    );
     let task = get(&web, "", &format!("/api/task?id={}", open["id"].as_str().unwrap()));
-    assert!(!task["task"]["done"].is_null(), "its open task is completed with it (R11)");
+    assert!(
+        !task["task"]["done"].is_null(),
+        "its open task is completed with it (R11)"
+    );
 
     call(&web, "", json!({ "op": "undoClose", "id": id }));
     let overview = get(&web, "", "/api/overview");
     assert_eq!(overview["projects"][0]["title"], "Переезд");
     assert_eq!(overview["projects"][0]["subtasks"], 2);
-    assert_eq!(overview["projects"][0]["subtasksDone"], 1, "the task completed before stays completed");
+    assert_eq!(
+        overview["projects"][0]["subtasksDone"], 1,
+        "the task completed before stays completed"
+    );
 }
 
 #[test]
