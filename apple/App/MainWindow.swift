@@ -367,6 +367,12 @@ struct Sidebar: View {
             }
         }
         .listStyle(.sidebar)
+        // The sidebar keeps the keyboard after a click on it, and a chevron opens a card without taking it:
+        // Esc closes that card all the same (R44), and leaves one of several selected rows first (R117).
+        .onKeyPress(.escape) {
+            guard Keyboard.text == nil, model.clearPicked() || model.closeSelectedCard() else { return .ignored }
+            return .handled
+        }
         .safeAreaInset(edge: .bottom) {
             HStack {
                 Menu {

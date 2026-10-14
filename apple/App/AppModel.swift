@@ -921,6 +921,14 @@ final class AppModel {
         return true
     }
 
+    /// A click outside an open card closes it the way Esc does (R44); the keyboard goes to the list only when
+    /// the click leaves it nowhere else, such as on the title of the view or on the toolbar.
+    func closeCardByClick(_ id: String, keyboardToList: Bool) {
+        guard expanded.contains(id) else { return }
+        collapse(id)
+        if keyboardToList { listFocusRequests += 1 }
+    }
+
     /// Closes a card together with the cards of the subtasks inside it.
     func collapse(_ id: String) {
         if titleFocus == id { titleFocus = nil }

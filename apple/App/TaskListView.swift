@@ -275,6 +275,7 @@ struct TaskRow: View {
                 .padding(.top, 10)
                 .padding(.bottom, 14)
                 .cardBackground()
+                .background { CardArea(id: task.id) }
                 .padding(.vertical, 8)
         } else {
             content
@@ -757,6 +758,83 @@ final class SubtaskMenuView: NSView {
             else { return event }
             NSMenu.popUpContextMenu(area.subtaskMenu(), with: event, for: area)
             return nil
+        }
+    }
+}
+
+/// The place of an open card, for the click outside it that closes it (R44). SwiftUI tells a click on a view, not a click
+/// that missed one: the empty space of the list, the title of the view, the sidebar and the toolbar get none of it.
+struct CardArea: NSViewRepresentable {
+    let id: String
+
+    func makeNSView(context: Context) -> CardAreaView { CardAreaView() }
+
+    func updateNSView(_ view: CardAreaView, context: Context) { view.id = id }
+}
+
+final class CardAreaView: NSView {
+    var id = ""
+
+    private static let areas = NSHashTable<CardAreaView>.weakObjects()
+    private static var monitor: Any?
+
+    /// The view marks a place and takes nothing from the pointer: clicks go to the card over it.
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window == nil {
+            Self.areas.remove(self)
+        } else {
+            Self.areas.add(self)
+            Self.watch()
+        }
+    }
+
+    /// Looks at a click in a window with open cards and closes those it missed. A click on another row of the list is
+    /// left to the list, which selects that row and closes the card itself (R38): closing it here first would move the
+    /// rows under a drag that starts there. A click on the scroller only scrolls. Popovers of a card, Quick Look and
+    /// menus are windows of their own, so a click there is not in the window of the card.
+    static func clicked(at point: NSPoint, in window: NSWindow) {
+        let open = areas.allObjects.filter {
+            $0.window === window && !$0.isHiddenOrHasHiddenAncestor && AppModel.shared.expanded.contains($0.id)
+        }
+        guard let table = open.lazy.compactMap(\.table).first,
+              let hit = (window.contentView?.superview ?? window.contentView)?.hitTest(point)
+        else { return }
+        var row: NSView? = hit
+        while let current = row, !(current is NSTableRowView) { row = current.superview }
+        if let row, row.isDescendant(of: table) { return }
+        var view: NSView? = hit
+        while let current = view {
+            if current is NSScroller { return }
+            view = current.superview
+        }
+        // The keyboard stays where the click puts it: in the sidebar, in a text field, in the list itself.
+        var keyboardToList = true
+        view = hit
+        while let current = view {
+            if current is NSTableView || current is NSTextField || current is NSText { keyboardToList = false }
+            view = current.superview
+        }
+        for area in open where !area.convert(area.bounds, to: nil).contains(point) {
+            AppModel.shared.closeCardByClick(area.id, keyboardToList: keyboardToList)
+        }
+    }
+
+    /// The table of the list the card is drawn in.
+    private var table: NSTableView? {
+        var view = superview
+        while let current = view, !(current is NSTableView) { view = current.superview }
+        return view as? NSTableView
+    }
+
+    /// Clicks are looked at before the views under them get them, and passed on.
+    private static func watch() {
+        guard monitor == nil else { return }
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { event in
+            if let window = event.window { clicked(at: event.locationInWindow, in: window) }
+            return event
         }
     }
 }
