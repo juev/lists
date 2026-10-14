@@ -321,13 +321,19 @@ struct Sidebar: View {
                                 Text("\(project.subtasksDone)/\(project.subtasksTotal)").foregroundStyle(.secondary).monospacedDigit()
                             }
                         } icon: {
-                            Image(systemName: "folder").foregroundStyle(model.list(project.listId)?.tint ?? .accentColor)
+                            // R126: the row is a large task; its mark completes the project.
+                            Button { model.completeProject(project) } label: {
+                                ProjectMark(done: project.subtasksDone, total: project.subtasksTotal, tint: model.list(project.listId)?.tint ?? .accentColor)
+                            }
+                            .buttonStyle(.plain)
+                            .help(L("Complete Project"))
                         }
                         .font(AppFont.style(.body))
                         .tag(Scope.project(id: project.id))
                         .dropDestination(for: String.self) { ids, _ in drop(ids, on: .project(id: project.id)) }
                         .contextMenu {
                             // R32: only an empty project; its tasks would become subtasks and lose their fields.
+                            Button(L("Complete Project")) { model.completeProject(project) }
                             if project.subtasksTotal == 0 {
                                 Button(L("Turn back into a task")) { model.perform { try $0.setProject(id: project.id, project: false) } }
                             }
@@ -682,5 +688,35 @@ struct FilterEditor: View {
         }
         if filter == nil, let created { model.scope = .filter(id: created) }
         dismiss()
+    }
+}
+
+/// R126: the mark of a project in the sidebar, a circle filled by the share of its done tasks.
+struct ProjectMark: View {
+    let done: UInt32
+    let total: UInt32
+    let tint: Color
+
+    var body: some View {
+        ZStack {
+            Circle().strokeBorder(tint, lineWidth: 1.5)
+            Pie(fraction: total == 0 ? 0 : Double(done) / Double(total)).fill(tint).padding(3)
+        }
+        .frame(width: 14, height: 14)
+        .contentShape(Circle())
+    }
+
+    private struct Pie: Shape {
+        let fraction: Double
+
+        func path(in rect: CGRect) -> Path {
+            var path = Path()
+            guard fraction > 0 else { return path }
+            let center = CGPoint(x: rect.midX, y: rect.midY)
+            path.move(to: center)
+            path.addArc(center: center, radius: min(rect.width, rect.height) / 2, startAngle: .degrees(-90), endAngle: .degrees(-90 + 360 * min(fraction, 1)), clockwise: false)
+            path.closeSubpath()
+            return path
+        }
     }
 }
