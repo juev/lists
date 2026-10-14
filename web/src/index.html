@@ -46,6 +46,8 @@ header input { border: 1px solid var(--line); border-radius: 8px; padding: 6px 1
 .nav .n { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; font-weight: 400; }
 .nav .n.bad { color: var(--danger); }
 .nav select { margin-left: auto; border: 0; outline: 0; background: transparent; cursor: pointer; }
+.pnav { display: flex; align-items: center; }
+.pmark { width: 16px; height: 16px; margin-left: 10px; flex: none; border: 1.5px solid; border-radius: 50%; padding: 2px; background-clip: content-box; }
 .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); flex: none; }
 .side-title { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; padding: 14px 10px 4px; }
 .section { color: var(--accent); font-size: 13px; font-weight: 600; padding: 14px 10px 4px; }
@@ -149,7 +151,7 @@ const RU = {
   "not downloaded yet": "ещё не загружено", "downloading…": "загружается…", "could not download, try later": "не удалось загрузить, попробуйте позже", "Attachments waiting to sync": "Вложения ждут синхронизации", "Download": "Скачать", "Close": "Закрыть", "from": "с", "Delete list": "Удалить список", "Delete this list and move its tasks to the trash?": "Удалить список и отправить его задачи в корзину?",
   "Sort": "Сортировка", "Manually": "Вручную", "By due date": "По сроку", "By priority": "По приоритету", "By title": "По названию", "Rename": "Переименовать", "time": "время",
   "Sign in with single sign-on": "Войти через единый вход", "Import…": "Импорт…", "tasks": "задач", "attachments": "вложений",
-  "Projects": "Проекты", "Filters": "Фильтры", "New filter": "Новый фильтр", "Make it a project": "Сделать проектом", "Turn back into a task": "Сделать обычной задачей",
+  "Projects": "Проекты", "Filters": "Фильтры", "New filter": "Новый фильтр", "Make it a project": "Сделать проектом", "Turn back into a task": "Сделать обычной задачей", "Complete project": "Выполнить проект", "Project completed": "Проект выполнен",
   "Filter": "Фильтр", "Date": "Дата", "Any": "Любой", "The coming days": "Ближайшие дни", "No date": "Без даты", "Days": "Дней", "Priority at least": "Приоритет не ниже",
   "Status": "Состояние", "Open": "В работе", "Contains": "Содержит", "Save": "Сохранить", "Cancel": "Отмена", "Delete filter": "Удалить фильтр", "Edit": "Изменить",
   "all of these, separated by spaces": "все сразу, через пробел", "Next 7 days": "Ближайшие 7 дней", "High priority": "Высокий приоритет", "Any list unless some are checked": "Любой список, если ничего не отмечено",
@@ -540,6 +542,23 @@ function nav(scope, label, count, opts = {}) {
     count ? $("span", { class: "n" + (opts.bad ? " bad" : "") }, count) : null);
 }
 
+// R126: completes the project whatever the state of its tasks; they close with it (R11). It leaves the sidebar
+// at once, so the Undo bar comes whatever R68 says, and its own view gives way to the Inbox.
+function completeProject(p) {
+  if (state.scope === "project:" + p.id) state.scope = "inbox";
+  act("complete", { id: p.id }, t("Project completed"), () => act("undoClose", { id: p.id }));
+}
+
+// R126: the row of a project is a large task: a circle filled by the share of its done tasks completes it.
+function projectNav(p) {
+  const list = state.overview.lists.find(l => l.id === p.list);
+  const color = list && /^#[0-9a-f]{6}$/i.test(list.color) ? list.color : "var(--accent)";
+  const share = p.subtasks ? Math.round(360 * p.subtasksDone / p.subtasks) : 0;
+  return $("div", { class: "pnav" },
+    $("button", { class: "pmark", title: t("Complete project"), "aria-label": t("Complete project"), style: `border-color:${color};background-image:conic-gradient(${color} ${share}deg, transparent 0)`, onclick: () => completeProject(p) }),
+    nav("project:" + p.id, p.title, `${p.subtasksDone}/${p.subtasks}`));
+}
+
 function listTools(l) {
   const sort = $("select", { "aria-label": t("Sort"), onchange: e => act("setListSort", { id: l.id, value: e.target.value }) },
     [["manual", "Manually"], ["due", "By due date"], ["priority", "By priority"], ["title", "By title"]].map(([v, n]) => $("option", { value: v, selected: l.sort === v }, t(n))));
@@ -609,7 +628,7 @@ function render() {
       o.lists.filter(l => l.id !== "inbox" && !l.archived).map(l => nav("list:" + l.id, l.name, l.open, { color: l.color })),
       $("button", { class: "nav", style: "color:var(--muted)", onclick: () => { const name = prompt(t("List name")); if (name && name.trim()) call("createList", { name: name.trim() }).then(l => { state.scope = "list:" + l.id; load(); }); } }, "+ " + t("New list")),
       o.projects.length ? $("div", { class: "side-title" }, t("Projects")) : null,
-      o.projects.map(p => nav("project:" + p.id, p.title, `${p.subtasksDone}/${p.subtasks}`)),
+      o.projects.map(projectNav),
       $("div", { class: "side-title" }, t("Filters")), o.filters.map(f => nav("filter:" + f.id, f.name, f.open)),
       $("button", { class: "nav", style: "color:var(--muted)", onclick: () => { state.filterEdit = {}; state.drawer = false; render(); } }, "+ " + t("New filter")),
       o.tags.length ? $("div", { class: "side-title" }, t("Tags")) : null, o.tags.map(g => nav("tag:" + g.name, "#" + g.name, g.open)),
@@ -633,8 +652,9 @@ function render() {
       state.filterEdit ? $("div", { id: "tasks" }, filterForm(state.filterEdit)) : $("div", { id: "tasks" },
         state.scope.startsWith("filter:") && !state.search ? $("div", { class: "chips", style: "padding:8px 10px 0" }, $("button", { class: "link", onclick: () => { state.filterEdit = o.filters.find(f => "filter:" + f.id === state.scope); render(); } }, t("Edit"))) : null,
         current && !state.search ? $("div", { class: "chips", style: "padding:8px 10px 0" }, listTools(current)) : null,
-        // R32: an empty project turns back into a task here, since a project is not a row of its list (R120).
-        project && !project.subtasks && !state.search ? $("div", { class: "chips", style: "padding:8px 10px 0" }, $("button", { class: "link", onclick: async () => { await call("setProject", { id: project.id, value: false }); state.scope = project.list === "inbox" ? "inbox" : "list:" + project.list; load(); } }, t("Turn back into a task"))) : null,
+        // R126 and R32: the project is completed here, and an empty one turns back into a task, since a project is not a row of its list (R120).
+        project && !state.search ? $("div", { class: "chips", style: "padding:8px 10px 0" }, $("button", { class: "link", onclick: () => completeProject(project) }, t("Complete project")),
+          project.subtasks ? null : $("button", { class: "link", onclick: async () => { await call("setProject", { id: project.id, value: false }); state.scope = project.list === "inbox" ? "inbox" : "list:" + project.list; load(); } }, t("Turn back into a task"))) : null,
         empty ? $("div", { class: "empty" }, t(state.search ? "Nothing found" : state.scope === "today" ? "All done for today" : "No tasks"))
           : secs.map(s => [s.title ? $("div", { class: "section" + (s.bad ? " bad" : "") }, s.title) : null, s.tasks.map(x => taskNode(x, origin))]),
         state.scope === "trash" && !empty ? $("div", { style: "text-align:right;padding:14px" }, $("button", { class: "link danger", onclick: () => confirm(t("Delete everything in the trash for good?")) && act("emptyTrash") }, t("Empty Trash"))) : null,
