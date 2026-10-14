@@ -237,7 +237,7 @@ fn keep_done(conn: &Connection) -> Result<KeepDone> {
 }
 
 /// R121: Inbox has no row while this is set.
-fn inbox_hidden(conn: &Connection) -> Result<bool> {
+pub(crate) fn inbox_hidden(conn: &Connection) -> Result<bool> {
     Ok(setting(conn, "inbox_hidden")?
         .and_then(|v| v.as_bool())
         .unwrap_or(false))

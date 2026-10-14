@@ -284,18 +284,30 @@ fn trello_board_json() {
 fn r121_tasks_without_a_list_go_to_the_default_list_while_inbox_is_hidden() {
     let d = device();
     let home = d.create_list("Дом".into()).unwrap();
-    d.hide_inbox(home.id.clone(), true).unwrap();
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("todo.json");
-    std::fs::write(
-        &file,
-        r#"[{"id":"L0","displayName":"Tasks","wellknownListName":"defaultList","tasks":[
-               {"id":"a","title":"Pay rent","importance":"normal","status":"notStarted"}]}]"#,
-    )
-    .unwrap();
-    d.import_file(file.to_string_lossy().into_owned()).unwrap();
+    let write = |id: &str, title: &str| {
+        std::fs::write(
+            &file,
+            format!(
+                r#"[{{"id":"L0","displayName":"Tasks","wellknownListName":"defaultList","tasks":[
+                   {{"id":"{id}","title":"{title}","importance":"normal","status":"notStarted"}}]}}]"#
+            ),
+        )
+        .unwrap();
+        file.to_string_lossy().into_owned()
+    };
+    // R1: while Inbox is shown it takes them, whatever the default list for new tasks is.
+    d.set_new_task_list(home.id.clone()).unwrap();
+    d.import_file(write("a", "Pay rent")).unwrap();
+    assert_eq!(view(&d, Scope::Inbox), ["Pay rent"]);
+
+    d.hide_inbox(home.id.clone(), true).unwrap();
+    d.import_file(write("b", "Call the bank")).unwrap();
     assert!(view(&d, Scope::Inbox).is_empty());
-    assert_eq!(view(&d, Scope::List { id: home.id }), ["Pay rent"]);
+    let mut moved = view(&d, Scope::List { id: home.id });
+    moved.sort();
+    assert_eq!(moved, ["Call the bank", "Pay rent"]);
 }
 
 #[test]
