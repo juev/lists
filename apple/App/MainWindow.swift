@@ -251,10 +251,13 @@ struct Sidebar: View {
                 // R93: each built-in view has a row always, while it holds something, or never.
                 if model.showsInSidebar(.inbox) {
                     row(.inbox, L("Inbox"), count: model.counts.inbox)
-                        .dropDestination(for: String.self) { ids, _ in moveTasks(ids, to: "inbox") }
+                        .dropDestination(for: String.self) { ids, _ in drop(ids, on: .inbox) }
                         .contextMenu { Button(L("Configure…")) { editing = model.list("inbox") } }
                 }
-                if model.showsInSidebar(.today) { row(.today, L("Today"), count: model.counts.today, alert: model.counts.overdue > 0) }
+                if model.showsInSidebar(.today) {
+                    row(.today, L("Today"), count: model.counts.today, alert: model.counts.overdue > 0)
+                        .dropDestination(for: String.self) { ids, _ in drop(ids, on: .today) }
+                }
                 if model.showsInSidebar(.upcoming) { row(.upcoming, L("Upcoming"), count: model.counts.upcoming) }
                 if model.showsInSidebar(.all) { row(.all, L("All"), count: 0) }
                 if model.showsInSidebar(.completed) { row(.completed, L("Completed"), count: 0) }
@@ -274,7 +277,7 @@ struct Sidebar: View {
                     }
                     .font(AppFont.style(.body))
                     .tag(Scope.list(id: list.id))
-                    .dropDestination(for: String.self) { ids, _ in moveTasks(ids, to: list.id) }
+                    .dropDestination(for: String.self) { ids, _ in drop(ids, on: .list(id: list.id)) }
                     .contextMenu {
                         Button(L("Configure…")) { editing = list }
                         Button(L("Archive")) { model.perform { try $0.setListArchived(id: list.id, archived: true) } }
@@ -317,6 +320,7 @@ struct Sidebar: View {
                         }
                         .font(AppFont.style(.body))
                         .tag(Scope.project(id: project.id))
+                        .dropDestination(for: String.self) { ids, _ in drop(ids, on: .project(id: project.id)) }
                         .contextMenu {
                             // R32: only an empty project; its tasks would become subtasks and lose their fields.
                             if project.subtasksTotal == 0 {
@@ -425,11 +429,9 @@ struct Sidebar: View {
         .tag(scope)
     }
 
-    private func moveTasks(_ ids: [String], to list: String) -> Bool {
-        for id in ids {
-            model.perform { try $0.moveToList(id: id, listId: list) }
-        }
-        return !ids.isEmpty
+    /// R123: a drag of tasks carries their ids a line each.
+    private func drop(_ items: [String], on target: Scope) -> Bool {
+        model.drop(items.flatMap { $0.split(separator: "\n").map(String.init) }, on: target)
     }
 
     private func moveList(_ source: IndexSet, _ destination: Int) {

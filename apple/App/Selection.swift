@@ -6,6 +6,8 @@ enum BatchAction {
     case due(String), start(String)
     case priority(Priority)
     case move(listId: String)
+    /// R123: into a project, at its end.
+    case project(id: String)
     case tag(String)
 
     /// How the change an action made to one task is taken back.
@@ -38,6 +40,10 @@ enum BatchAction {
         case .priority(let value): return subtask || task.priority == value ? nil : Step(back: .priority(task.priority))
         case .move(let listId):
             return subtask || (task.parentId == nil && task.listId == listId) ? nil : Step(back: .place(listId: task.listId, parentId: task.parentId))
+        case .project(let id):
+            // A project and a task with lines under it stay at the top level (R10).
+            let stays = subtask || task.id == id || task.parentId == id || task.isProject || task.subtasksTotal > 0
+            return stays ? nil : Step(back: .place(listId: task.listId, parentId: task.parentId))
         case .tag(let name): return subtask || name.isEmpty || task.tags.contains(name) ? nil : Step(back: .untag(name))
         }
     }
@@ -52,6 +58,7 @@ enum BatchAction {
         case .start(let value): try store.setStart(id: id, start: value)
         case .priority(let value): try store.setPriority(id: id, priority: value)
         case .move(let listId): try store.moveToList(id: id, listId: listId)
+        case .project(let project): try store.moveTask(id: id, listId: nil, parentId: project, after: store.subtasks(parentId: project).last?.id)
         case .tag(let name): try store.addTag(id: id, tag: name)
         }
     }

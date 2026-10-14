@@ -1146,10 +1146,28 @@ final class AppModel {
         pick(left, lead: selection.flatMap { left.contains($0) ? $0 : nil } ?? ids.first(where: left.contains))
     }
 
-    /// One action on every selected row it applies to, taken back by one undo. Returns how many rows it changed.
+    /// R123: what a drag of this row carries: every selected row when it is one of them, the row alone otherwise.
+    func dragIds(_ id: String) -> [String] { picked.contains(id) ? selectedIds : [id] }
+
+    /// R123: tasks dropped on a row of the sidebar. False when the row takes no tasks or none of them changed.
+    func drop(_ ids: [String], on target: Scope) -> Bool {
+        let action: BatchAction
+        switch target {
+        case .inbox: action = .move(listId: "inbox")
+        case .list(let id): action = .move(listId: id)
+        case .project(let id): action = .project(id: id)
+        case .today: action = .due(Moment.today())
+        default: return false
+        }
+        return batch(action, ids: ids) > 0
+    }
+
+    /// One action on every selected row it applies to, or on the rows `ids` names, taken back by one undo.
+    /// Returns how many rows it changed.
     @discardableResult
-    func batch(_ action: BatchAction) -> Int {
-        let steps = selectedTasks.compactMap { task in action.step(for: task, subtask: isSubtask(task)).map { (task.id, $0) } }
+    func batch(_ action: BatchAction, ids: [String]? = nil) -> Int {
+        let tasks = ids.map { $0.compactMap(row) } ?? selectedTasks
+        let steps = tasks.compactMap { task in action.step(for: task, subtask: isSubtask(task)).map { (task.id, $0) } }
         guard !steps.isEmpty else { return 0 }
         if case .delete = action {
             for (id, _) in steps {
