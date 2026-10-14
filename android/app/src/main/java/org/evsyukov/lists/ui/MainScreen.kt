@@ -1,5 +1,6 @@
 package org.evsyukov.lists.ui
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
@@ -115,7 +116,10 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -237,6 +241,8 @@ fun MainScreen(model: MainViewModel, onReminderSet: () -> Unit) {
                 onEditFilter = { editingFilter = it },
                 onNewFilter = { creatingFilter = true },
                 onProjectOff = { project -> model.act { it.setProject(project.id, false) } },
+                // The drawer closes so that the bar with Undo is in reach (R126).
+                onProjectDone = { project -> model.completeProject(project); scope.launch { drawer.close() } },
                 onSettings = { settings = true; scope.launch { drawer.close() } },
             )
         },
@@ -1057,6 +1063,7 @@ private fun Drawer(
     onEditFilter: (SavedFilter) -> Unit,
     onNewFilter: () -> Unit,
     onProjectOff: (TaskItem) -> Unit,
+    onProjectDone: (TaskItem) -> Unit,
     onSettings: () -> Unit,
 ) {
     ModalDrawerSheet {
@@ -1087,14 +1094,22 @@ private fun Drawer(
                     val scope = Scope.Project(project.id)
                     var menu by remember(project.id) { mutableStateOf(false) }
                     Box {
-                        // R32: only an empty project turns back into a task; a project is not a row of its list (R120).
+                        // R126: the row is a large task, its mark completes the project. A project is not a row of its list (R120).
                         DrawerItem(
                             project.title, Icons.Outlined.Folder, project.subtasksTotal - project.subtasksDone, state.scope == scope,
-                            tint = state.list(project.listId)?.tint(),
-                            onLong = if (project.offersProjectSwitch()) ({ menu = true }) else null,
+                            onLong = { menu = true },
+                            leading = {
+                                ProjectMark(project.subtasksDone, project.subtasksTotal, state.list(project.listId)?.tint() ?: MaterialTheme.colorScheme.primary) {
+                                    onProjectDone(project)
+                                }
+                            },
                         ) { onSelect(scope) }
                         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                            DropdownMenuItem(text = { Text(str(R.string.project_off)) }, onClick = { menu = false; onProjectOff(project) })
+                            DropdownMenuItem(text = { Text(str(R.string.complete_project)) }, onClick = { menu = false; onProjectDone(project) })
+                            // R32: only an empty project turns back into a task.
+                            if (project.offersProjectSwitch()) {
+                                DropdownMenuItem(text = { Text(str(R.string.project_off)) }, onClick = { menu = false; onProjectOff(project) })
+                            }
                         }
                     }
                 }
@@ -1142,6 +1157,7 @@ private fun DrawerItem(
     alert: Boolean = false,
     tint: Color? = null,
     onLong: (() -> Unit)? = null,
+    leading: (@Composable () -> Unit)? = null,
     onClick: () -> Unit,
 ) {
     Row(
@@ -1160,7 +1176,7 @@ private fun DrawerItem(
             .padding(start = 16.dp, end = 24.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(icon, null, tint = tint ?: MaterialTheme.colorScheme.onSurfaceVariant)
+        if (leading != null) leading() else Icon(icon, null, tint = tint ?: MaterialTheme.colorScheme.onSurfaceVariant)
         Text(
             label,
             Modifier.weight(1f).padding(horizontal = 12.dp),
@@ -1171,6 +1187,28 @@ private fun DrawerItem(
         )
         if (count > 0u) {
             Text("$count", style = MaterialTheme.typography.labelLarge, color = if (alert) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+/** R126: the mark of a project in the drawer, a circle filled by the share of its done tasks; a tap completes the project. */
+@Composable
+private fun ProjectMark(done: UInt, total: UInt, tint: Color, onComplete: () -> Unit) {
+    val description = str(R.string.complete_project)
+    Canvas(
+        Modifier
+            .size(24.dp)
+            .clip(CircleShape)
+            .clickable(role = Role.Checkbox, onClick = onComplete)
+            .semantics { contentDescription = description }
+            .padding(3.dp),
+    ) {
+        val stroke = 1.5.dp.toPx()
+        drawCircle(tint, radius = size.minDimension / 2 - stroke / 2, style = Stroke(stroke))
+        val fraction = if (total == 0u) 0f else done.toFloat() / total.toFloat()
+        if (fraction > 0f) {
+            val inset = 3.dp.toPx()
+            drawArc(tint, -90f, 360f * fraction.coerceAtMost(1f), useCenter = true, topLeft = Offset(inset, inset), size = Size(size.width - 2 * inset, size.height - 2 * inset))
         }
     }
 }
