@@ -318,6 +318,10 @@
     <string name="text_size_large">Large</string>
     <string name="text_size_larger">Larger</string>
     <string name="text_size_largest">Largest</string>
+    <string name="row_spacing">Spacing between tasks</string>
+    <string name="row_spacing_compact">Compact</string>
+    <string name="row_spacing_normal">Normal</string>
+    <string name="row_spacing_relaxed">Relaxed</string>
     <string name="completed_leave">Completed tasks leave the view</string>
     <string name="leave_at_once">at once</string>
     <string name="leave_after_minutes">after %1$d min</string>

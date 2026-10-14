@@ -319,6 +319,30 @@ object LookPrefs {
     fun textConfiguration(base: Context) = Configuration().apply {
         fontScale = base.resources.configuration.fontScale * textScale(base)
     }
+
+    /** R122: how far apart the task rows stand; the second is the default. */
+    val rowSpacings = listOf("compact", "normal", "relaxed")
+
+    /** The choice a saved value stands for; anything else is the default. */
+    internal fun rowSpacingFrom(saved: String?): String = saved?.takeIf { it in rowSpacings } ?: "normal"
+
+    /** R122: the space above and below a row of a view, in dp; the mark keeps a row at least 48 dp high. */
+    fun rowPadding(spacing: String): Int = when (spacing) {
+        "compact" -> 0
+        "relaxed" -> 6
+        else -> 2
+    }
+
+    /** Set once the spacing is chosen; the rows read it, so the list is laid out again at once. */
+    private val spacing = mutableStateOf<String?>(null)
+
+    fun rowSpacing(context: Context): String =
+        spacing.value ?: rowSpacingFrom(prefs(context).getString("rowSpacing", null))
+
+    fun setRowSpacing(context: Context, value: String) {
+        prefs(context).edit().putString("rowSpacing", value).apply()
+        spacing.value = value
+    }
 }
 
 /** How new tasks are entered on this device; not synced. The default list itself is a shared setting (R40). */
