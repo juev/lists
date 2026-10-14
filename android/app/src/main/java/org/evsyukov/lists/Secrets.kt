@@ -46,12 +46,15 @@ object Secrets {
         prefs.edit().putString(name, Base64.encodeToString(sealed, Base64.NO_WRAP)).apply()
     }
 
-    /** Null when nothing is stored or the key is gone (for example after a restore to another device). */
-    fun load(context: Context, name: String = VALUE): String? = runCatching {
+    /**
+     * Null when nothing is stored or the key is gone (for example after a restore to another device);
+     * `failed` hears of the second, so that it can go to the log (R102).
+     */
+    fun load(context: Context, name: String = VALUE, failed: (Throwable) -> Unit = {}): String? = runCatching {
         val stored = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(name, null) ?: return null
         val sealed = Base64.decode(stored, Base64.NO_WRAP)
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, sealed, 0, 12))
         String(cipher.doFinal(sealed, 12, sealed.size - 12))
-    }.getOrNull()
+    }.onFailure(failed).getOrNull()
 }

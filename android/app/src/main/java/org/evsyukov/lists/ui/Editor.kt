@@ -123,6 +123,8 @@ import org.evsyukov.lists.NotifyPrefs
 import org.evsyukov.lists.EntryPrefs
 import org.evsyukov.lists.LookPrefs
 import org.evsyukov.lists.Repo
+import org.evsyukov.lists.logError
+import org.evsyukov.lists.logged
 import org.evsyukov.lists.EventPrefs
 import org.evsyukov.lists.IconCount
 import org.evsyukov.lists.SystemCalendars
@@ -161,16 +163,20 @@ import uniffi.lists_core.TaskList
 import uniffi.lists_core.checkSyncConnection
 import java.io.File
 
-/** Copies what a content URI points at into a cache file named like the original. */
+/** Copies what a content URI points at into a cache file named like the original; a file that does not come is logged (R102). */
 fun copyToCache(context: Context, uri: Uri): File? = runCatching {
     val name = context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
         if (cursor.moveToFirst()) cursor.getString(0) else null
     } ?: uri.lastPathSegment ?: "file"
     val dir = File(context.cacheDir, "incoming/${System.nanoTime()}").apply { mkdirs() }
     val target = File(dir, name.replace('/', '_'))
-    context.contentResolver.openInputStream(uri)?.use { input -> target.outputStream().use(input::copyTo) } ?: return null
+    context.contentResolver.openInputStream(uri)?.use { input -> target.outputStream().use(input::copyTo) }
+        ?: run {
+            logError("attachments", "a picked or shared file was not copied: the provider gave no content")
+            return null
+        }
     target
-}.getOrNull()
+}.onFailure { logError("attachments", "a picked or shared file was not copied: ${logged(it)}") }.getOrNull()
 
 /** Attaches the files behind the URIs to a task; the temporary copies are removed afterwards. */
 fun attach(context: Context, store: Store, taskId: String, uris: List<Uri>) {
@@ -207,7 +213,7 @@ private fun shareAttachment(context: Context, file: Attachment) {
         val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", File(path), file.name)
         val intent = Intent(Intent.ACTION_SEND).setType(file.mime).putExtra(Intent.EXTRA_STREAM, uri).readable(listOf(uri))
         context.startActivity(Intent.createChooser(intent, file.name))
-    }
+    }.onFailure { logError("attachments", "a file was not shared: ${logged(it)}") }
 }
 
 /** R91: fetches the content that has not arrived; gives the attachments that are here now and the names of those that are not. */
@@ -257,7 +263,7 @@ private fun shareAttachments(context: Context, files: List<Attachment>) {
         val intent = Intent(Intent.ACTION_SEND_MULTIPLE).setType(shareType(files.map { it.mime }))
             .putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris).readable(uris)
         context.startActivity(Intent.createChooser(intent, null))
-    }
+    }.onFailure { logError("attachments", "files were not shared: ${logged(it)}") }
 }
 
 /**
@@ -283,7 +289,7 @@ private fun openAttachment(context: Context, file: Attachment) {
         val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", File(path), file.name)
         val intent = Intent(Intent.ACTION_VIEW).setDataAndType(uri, file.mime).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         context.startActivity(Intent.createChooser(intent, file.name))
-    }
+    }.onFailure { logError("attachments", "a file was not opened: ${logged(it)}") }
 }
 
 /**

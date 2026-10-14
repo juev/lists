@@ -17,6 +17,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -32,6 +33,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.evsyukov.lists.R
 import org.evsyukov.lists.Repo
+import org.evsyukov.lists.logError
+import org.evsyukov.lists.logged
 import org.evsyukov.lists.dateLabel
 import org.evsyukov.lists.str
 import uniffi.lists_core.Backup
@@ -59,7 +62,17 @@ private data class Restore(val path: String, val label: String, val temporary: F
 fun BackupsDialog(model: MainViewModel, onDismiss: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var settings by remember { mutableStateOf(Repo.store.backupSettings()) }
+    // R102: settings that cannot be read close the dialog and go to the log; before, they ended the app.
+    val stored = remember {
+        runCatching { Repo.store.backupSettings() }
+            .onFailure { logError("app", "the backup settings were not read: ${logged(it)}") }
+            .getOrNull()
+    }
+    if (stored == null) {
+        LaunchedEffect(Unit) { onDismiss() }
+        return
+    }
+    var settings by remember { mutableStateOf(stored) }
     var backups by remember { mutableStateOf(runCatching { Repo.store.backups() }.getOrDefault(emptyList())) }
     var choosing by remember { mutableStateOf<String?>(null) }
     var chosen by remember { mutableStateOf<Backup?>(null) }

@@ -19,6 +19,7 @@ object Push {
 
     /** Picks the distributor, asking the user when several are installed. `done(false)`: none is. */
     fun enable(activity: Activity, done: (Boolean) -> Unit) {
+        turnedOff(activity, false)
         UnifiedPush.tryUseCurrentOrDefaultDistributor(activity) { found ->
             if (found) UnifiedPush.register(activity, messageForDistributor = activity.getString(R.string.app_name))
             done(found)
@@ -26,9 +27,19 @@ object Push {
     }
 
     fun disable(context: Context) {
+        turnedOff(context, true)
         UnifiedPush.unregister(context)
         forget(context)
     }
+
+    /** Whether the person turned push off: the distributor confirms that as it confirms a removal of its own. */
+    private const val TURNED_OFF = "turnedOff"
+
+    private fun turnedOff(context: Context, value: Boolean) =
+        context.getSharedPreferences("push", Context.MODE_PRIVATE).edit().putBoolean(TURNED_OFF, value).apply()
+
+    internal fun turnedOff(context: Context): Boolean =
+        context.getSharedPreferences("push", Context.MODE_PRIVATE).getBoolean(TURNED_OFF, false)
 
     /** Takes the address out of the storage, so that nobody keeps sending to it. */
     internal fun forget(context: Context) {
@@ -47,7 +58,14 @@ class PushReceiver : PushService() {
     /** The message says nothing but "sync": whatever it carries is not read. */
     override fun onMessage(message: PushMessage, instance: String) = SyncWorker.now(this)
 
-    override fun onRegistrationFailed(reason: FailedReason, instance: String) = Push.forget(this)
+    /** R102: push is off from here on, and the log says why. */
+    override fun onRegistrationFailed(reason: FailedReason, instance: String) {
+        logError("push", "the distributor did not register the app: $reason")
+        Push.forget(this)
+    }
 
-    override fun onUnregistered(instance: String) = Push.forget(this)
+    override fun onUnregistered(instance: String) {
+        if (!Push.turnedOff(this)) logError("push", "the distributor unregistered the app")
+        Push.forget(this)
+    }
 }
