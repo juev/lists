@@ -787,6 +787,138 @@ fn r93_counts_say_which_built_in_views_hold_something() {
 }
 
 #[test]
+fn r121_hiding_inbox_moves_its_open_tasks_and_takes_the_default_list_along() {
+    let d = device();
+    let a = add(&d, "а");
+    add_sub(&d, &a, "а1");
+    let b = add(&d, "б");
+    d.complete_task(b.id).unwrap();
+    let p = add(&d, "п");
+    d.set_project(p.id.clone(), true).unwrap();
+    let home = d.create_list("Дом".into()).unwrap();
+    let own = add(&d, "своя");
+    d.move_to_list(own.id, home.id.clone()).unwrap();
+    let old = d.create_list("Старое".into()).unwrap();
+    d.set_list_archived(old.id.clone(), true).unwrap();
+    d.set_new_task_list(home.id.clone()).unwrap();
+
+    assert!(d.hide_inbox(old.id.clone(), true).is_err());
+    assert!(d.hide_inbox(INBOX_ID.into(), true).is_err());
+    assert!(!d.inbox_hidden().unwrap());
+
+    let hiding = d.hide_inbox(home.id.clone(), true).unwrap();
+    assert_eq!(hiding.moved.len(), 2);
+    assert_eq!(hiding.new_task_list, home.id);
+    assert!(d.inbox_hidden().unwrap());
+    assert_eq!(d.new_task_list().unwrap(), "last");
+    // The moved ones go to the end, in their order; the project is shown in the sidebar only (R120).
+    assert_eq!(view(&d, Scope::List { id: home.id.clone() }), ["своя", "а"]);
+    assert!(d
+        .projects()
+        .unwrap()
+        .iter()
+        .any(|t| t.title == "п" && t.list_id == home.id));
+    assert_eq!(
+        d.tasks(Scope::Inbox)
+            .unwrap()
+            .iter()
+            .filter(|t| t.done.is_none())
+            .count(),
+        0
+    );
+    assert_eq!(d.counts().unwrap().inbox, 0);
+    // The subtask went along with its task.
+    let moved = d
+        .tasks(Scope::List { id: home.id.clone() })
+        .unwrap()
+        .into_iter()
+        .find(|t| t.title == "а")
+        .unwrap();
+    assert_eq!(moved.list_id, home.id);
+    assert_eq!(titles(&d.subtasks(moved.id).unwrap()), ["а1"]);
+    assert!(d.subtasks(a.id.clone()).unwrap().iter().all(|t| t.list_id == home.id));
+
+    // R40: the list used last, and while Inbox is hidden it does not count.
+    assert_eq!(d.default_list_id(None).unwrap(), home.id);
+    assert_eq!(d.default_list_id(Some(INBOX_ID.into())).unwrap(), home.id);
+    assert_eq!(d.default_list_id(Some(old.id.clone())).unwrap(), home.id);
+
+    d.undo_hide_inbox(hiding).unwrap();
+    assert!(!d.inbox_hidden().unwrap());
+    assert_eq!(d.new_task_list().unwrap(), home.id);
+    assert_eq!(view(&d, Scope::List { id: home.id.clone() }), ["своя"]);
+    assert!(view(&d, Scope::Inbox).contains(&"а".to_string()));
+    assert!(d
+        .projects()
+        .unwrap()
+        .iter()
+        .any(|t| t.title == "п" && t.list_id == INBOX_ID));
+}
+
+#[test]
+fn r121_inbox_hidden_without_moving_keeps_its_tasks_and_is_shown_again_unchanged() {
+    let d = device();
+    add(&d, "а");
+    let home = d.create_list("Дом".into()).unwrap();
+    let hiding = d.hide_inbox(home.id.clone(), false).unwrap();
+    assert!(hiding.moved.is_empty());
+    assert!(d.inbox_hidden().unwrap());
+    // The row comes back by its counter while open tasks are there.
+    assert_eq!(d.counts().unwrap().inbox, 1);
+    let a = d.tasks(Scope::Inbox).unwrap().remove(0);
+    d.move_to_list(a.id, home.id.clone()).unwrap();
+    assert_eq!(d.counts().unwrap().inbox, 0);
+
+    d.set_new_task_list(INBOX_ID.into()).unwrap();
+    d.show_inbox().unwrap();
+    assert!(!d.inbox_hidden().unwrap());
+    assert_eq!(d.new_task_list().unwrap(), INBOX_ID);
+    assert_eq!(d.default_list_id(None).unwrap(), INBOX_ID);
+}
+
+#[test]
+fn r40_default_list_falls_back_to_inbox_or_while_it_is_hidden_to_the_first_list() {
+    let d = device();
+    assert_eq!(d.new_task_list().unwrap(), INBOX_ID);
+    assert_eq!(d.default_list_id(None).unwrap(), INBOX_ID);
+    let work = d.create_list("Работа".into()).unwrap();
+    let home = d.create_list("Дом".into()).unwrap();
+
+    d.set_new_task_list(home.id.clone()).unwrap();
+    assert_eq!(d.default_list_id(Some(work.id.clone())).unwrap(), home.id);
+    d.set_new_task_list("last".into()).unwrap();
+    assert_eq!(d.default_list_id(Some(work.id.clone())).unwrap(), work.id);
+    assert_eq!(d.default_list_id(None).unwrap(), INBOX_ID);
+    d.set_list_archived(work.id.clone(), true).unwrap();
+    assert_eq!(d.default_list_id(Some(work.id.clone())).unwrap(), INBOX_ID);
+    d.delete_list(home.id.clone()).unwrap();
+    d.set_new_task_list(home.id.clone()).unwrap();
+    assert_eq!(d.default_list_id(None).unwrap(), INBOX_ID);
+
+    let other = d.create_list("Другое".into()).unwrap();
+    d.hide_inbox(other.id.clone(), true).unwrap();
+    d.set_new_task_list(INBOX_ID.into()).unwrap();
+    assert_eq!(d.default_list_id(None).unwrap(), other.id);
+    // Not even Inbox fits: it is all there is.
+    d.set_list_archived(other.id, true).unwrap();
+    assert_eq!(d.default_list_id(None).unwrap(), INBOX_ID);
+}
+
+#[test]
+fn r40_the_choice_kept_on_the_device_is_adopted_only_into_an_empty_setting() {
+    let d = device();
+    let home = d.create_list("Дом".into()).unwrap();
+    d.adopt_new_task_list(INBOX_ID.into()).unwrap();
+    assert_eq!(d.setting_for_tests("new_task_list"), None);
+    d.adopt_new_task_list("last".into()).unwrap();
+    assert_eq!(d.new_task_list().unwrap(), "last");
+    d.adopt_new_task_list(home.id.clone()).unwrap();
+    assert_eq!(d.new_task_list().unwrap(), "last");
+    d.set_setting_for_tests("new_task_list", json!(5));
+    assert_eq!(d.new_task_list().unwrap(), INBOX_ID);
+}
+
+#[test]
 fn r22_search_ignores_case_in_any_script() {
     let d = device();
     let t = add(&d, "Купить МОЛОКО");

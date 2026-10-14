@@ -17,8 +17,8 @@ use uuid::Uuid;
 
 use crate::db::{KIND_ATTACHMENT, KIND_LIST, KIND_TASK};
 use crate::error::{AppError, Result};
-use crate::model::{Freq, Repeat, INBOX_ID};
-use crate::store::{hex, Store};
+use crate::model::{Freq, Repeat};
+use crate::store::{self, hex, Store};
 use crate::LogLevel;
 use crate::{order, quickadd};
 
@@ -791,6 +791,8 @@ impl Store {
         let mut blobs: Vec<(PathBuf, String)> = Vec::new();
 
         self.write(|w| {
+            // R121: while Inbox is hidden, tasks without a list go to the default list instead.
+            let no_list = store::default_list_id(w.tx, None)?;
             let mut last: Option<String> =
                 w.tx.query_row("SELECT max(pos) FROM lists WHERE id != 'inbox'", [], |r| r.get(0))?;
             for list in &parsed.lists {
@@ -834,7 +836,7 @@ impl Store {
                     .as_ref()
                     .and_then(|l| list_id.get(l))
                     .cloned()
-                    .unwrap_or_else(|| INBOX_ID.to_string());
+                    .unwrap_or_else(|| no_list.clone());
                 let container = parent.cloned().unwrap_or_else(|| format!("list:{list}"));
                 let pos = order::between(cursor.get(&container).map(String::as_str), None);
                 cursor.insert(container, pos.clone());
