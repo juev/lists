@@ -373,14 +373,15 @@ struct TaskRow: View {
                     Image(systemName: "chevron.right")
                         .font(AppFont.style(.caption))
                         .foregroundStyle(.tertiary)
-                        .frame(width: 20, height: 20)
+                        // R122: as high as the text, so the spacing alone sets the height of the row.
+                        .frame(width: 20)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(L("Expand"))
             }
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, isExpanded ? 6 : RowSpacing.padding(model.rowSpacing))
         .padding(.horizontal, 6)
         // The selection is a strip behind a row; an open card is set apart by its outline instead.
         .background(

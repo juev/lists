@@ -340,6 +340,9 @@ struct SettingsView: View {
                     Picker(L("Typeface"), selection: $model.fontDesign) {
                         ForEach(AppFont.designs, id: \.1) { name, value in Text(L(name)).tag(value) }
                     }
+                    Picker(L("Spacing between tasks"), selection: $model.rowSpacing) {
+                        ForEach(RowSpacing.choices, id: \.1) { name, value in Text(L(name)).tag(value) }
+                    }
                 }
                 Section(L("Sidebar")) {
                     @Bindable var model = model

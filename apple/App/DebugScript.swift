@@ -76,6 +76,7 @@ import UserNotifications
 /// `rowmenu:300,140=Title` also chooses the item with that title; asking the list for the menu of a row leaves its highlight over the row,
 /// and a later `rowmenu` in the same run finds the highlight under the pointer in place of the row, so a subtask is asked first), `undo` (prints what ⌘Z would take back and takes it back),
 /// `sidebar` (prints how many rows each list of the main window has, the sidebar among them),
+/// `rowheights` (prints the height of each row of the task list in points and the spacing chosen, R122; `spacing:compact`, `spacing:normal` and `spacing:relaxed` choose it the way Settings do),
 /// `copytext:text`, `copysecret:text` and `copyfile:path` (fill the pasteboard quick entry reads; with `LISTS_DEBUG_PASTEBOARD=name` that is a pasteboard of its own, not the general one),
 /// `clipnotes:on` and `clipnotes:off` (flip the setting of R58), `quicknote` (shows quick entry transparent and without the keyboard, and prints the note it starts with; `quicknote:/path.png` also draws the card into a file),
 /// `veil` (makes the windows of the app transparent and deaf to the mouse and leaves the app hidden) and
@@ -466,6 +467,7 @@ enum DebugScript {
                         }
                         print("debug: appearance \(AppModel.shared.appearance), windows \(looks.sorted { $0.key < $1.key }.map { "\($0.key) \($0.value)" })")
                     }
+                case "spacing": AppModel.shared.rowSpacing = argument
                 case "dock":
                     // R116: `dock:item=off`, `dock:hidden=on` and `dock:window=off` choose the way Settings do; then what holds.
                     let parts = argument.split(separator: "=").map(String.init)
@@ -563,6 +565,11 @@ enum DebugScript {
                     print("debug: undo \(manager?.canUndo == true ? manager?.undoActionName ?? "" : "nothing")")
                     manager?.undo()
                 case "sidebar": print("debug: sidebar rows \(tableRows(in: target?.contentView?.superview))")
+                case "rowheights":
+                    // R122: the height of each row of the task list, in points, the empty first row and headings among them.
+                    let tables = tables(in: target?.contentView?.superview).filter { $0.style != .sourceList }
+                    let heights = tables.map { table in (0..<table.numberOfRows).map { Int(table.rect(ofRow: $0).height.rounded()) } }
+                    print("debug: row heights \(heights), spacing \(AppModel.shared.rowSpacing)")
                 case "cards":
                     let model = AppModel.shared
                     let open = model.expanded.map(taskTitle).sorted()
@@ -773,8 +780,12 @@ enum DebugScript {
 
     /// Row counts of the tables in a window: SwiftUI draws each `List` as one, the sidebar included.
     private static func tableRows(in view: NSView?) -> [Int] {
+        tables(in: view).map(\.numberOfRows)
+    }
+
+    private static func tables(in view: NSView?) -> [NSTableView] {
         guard let view else { return [] }
-        return ((view as? NSTableView).map { [$0.numberOfRows] } ?? []) + view.subviews.flatMap(tableRows(in:))
+        return ((view as? NSTableView).map { [$0] } ?? []) + view.subviews.flatMap(tables(in:))
     }
 
     private static func geometry(_ panel: NSPanel) -> String {
