@@ -199,6 +199,8 @@ On Android the launcher icon can carry a count as well: Settings → Notificatio
 
 On Android 13 and newer a notification arrives at its minute only when "Alarms & reminders" is allowed for Lists; the same goes for the renewal of the notification with today's tasks, and of the count on the icon with it, right after midnight. Until then the notification settings show "Reminders may come late": tap it and allow. Without it the system may deliver a notification up to an hour late.
 
+Some phones delay notifications even with "Alarms & reminders" allowed: on a OnePlus with Android 16 they came minutes late all the same. For such a phone turn on Settings → Notifications → "Reminders as alarms". Lists then sets each reminder the way an alarm clock does, which the phone leaves on time. The system may show an alarm icon in the status bar and the time of the next reminder where it shows the next alarm; on the OnePlus neither appeared. The switch is off by default, works only while "Alarms & reminders" is allowed, belongs to the device and does not sync.
+
 ## Calendar events in Today
 
 Today can show the events of the day from the calendars of the device, in a muted block above the tasks. It is off until you turn it on, each device has its own setting, and it does not sync:
