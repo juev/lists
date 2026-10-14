@@ -626,7 +626,7 @@ enum DateKey: Equatable {
 
 /// Shows the key presses headed for the window it sits in to `handle` before
 /// the focused control gets them; a press that was handled goes no further.
-private struct KeyCatcher: NSViewRepresentable {
+struct KeyCatcher: NSViewRepresentable {
     let handle: (NSEvent) -> Bool
 
     func makeNSView(context: Context) -> Catcher { Catcher() }

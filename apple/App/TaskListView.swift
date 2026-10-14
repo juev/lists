@@ -149,6 +149,17 @@ struct TaskListView: View {
         } message: { _ in
             Text(L("This cannot be undone."))
         }
+        .background(KeyCatcher(handle: selectAll))
+    }
+
+    /// R117: ⌘A selects every row of the view. The Edit menu takes the press before the list does and hands selectAll:
+    /// to the table the list is drawn with, which answers it by itself: `.onCommand` never hears it. So the press is
+    /// caught before the menu; in a text field or a card it is left to them.
+    private func selectAll(_ event: NSEvent) -> Bool {
+        let flags = event.modifierFlags.intersection([.command, .shift, .option, .control])
+        guard flags == .command, event.keyCode == 0 || event.charactersIgnoringModifiers == "a", !typing else { return false }
+        model.selectAll()
+        return true
     }
 
     /// True while a text view, the field editor of a text field, a chip of a card or the row of a file in it has the keyboard.
