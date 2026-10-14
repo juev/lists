@@ -22,7 +22,7 @@ import UserNotifications
 /// `sync` (starts a sync the way the toolbar icon does), `attach:/path` (attaches the file to the selected task), `filepointer` (prints the size of the layer the pointer works on over the first file of the open card, the items of its right-click menu and the file a drag would carry; `filepointer:click` also clicks it), `savefile:/path` (saves the first attachment of the selected task there, the way "Save As…" does once a place is chosen), `saveall:/folder` (saves every attachment of the selected task there, the way "Save All…" does once a folder is chosen, and prints what was saved), `showfile:0` (shows the attachment with that number the way a click on its name does;
 /// a hidden app shows no panel), `preview` (prints whether the Quick Look panel is open) and `preview:close` (closes it),
 /// `inbox` (switches to the Inbox view), `open` (expands the selected task), `edit` (opens it with the caret in the title, the way Return does), `select:1` and `select:-1` (move the selection the way the arrow keys do),
-/// `pick:title` (selects a row the way a click does),
+/// `pick:title` (selects a row the way a click does), `drag:title>target` (drops what a drag of that row carries on a row of the sidebar, R123),
 /// `addsub:title` (adds a subtask to the selected task the way its field does on Return), `subtasks` (prints the lines of the selected task, or of the task
 /// the selected subtask belongs to: the title and the state of each, which of them is a subtask without a card, the one whose title is being edited,
 /// and the lines a search shows under its rows), `renamesub:old=new` (renames the subtask in its line: starts the edit the way Return on the selected
@@ -272,6 +272,21 @@ enum DebugScript {
                     default: nil
                     }
                     print("debug: batch \(argument) changed \(action.map { model.batch($0) } ?? -1)")
+                case "drag":
+                    // R123: `drag:title>target` drops what a drag of that row carries on a row of the sidebar the way the drop
+                    // does there: `inbox`, `today`, `upcoming`, a list name or a project title; prints the titles carried and whether the drop was taken.
+                    let model = AppModel.shared
+                    let parts = argument.split(separator: ">", maxSplits: 1).map(String.init)
+                    let target = parts.count > 1 ? parts[1] : ""
+                    let scope: Scope? = switch target {
+                    case "inbox": .inbox
+                    case "today": .today
+                    case "upcoming": .upcoming
+                    default: model.lists.first { $0.name == target }.map { .list(id: $0.id) }
+                        ?? model.projects.first { $0.title == target }.map { .project(id: $0.id) }
+                    }
+                    let ids = taskId(titled: parts[0]).map(model.dragIds) ?? []
+                    print("debug: drag \(ids.compactMap(model.row).map(\.title)) taken \(scope.map { model.drop(ids, on: $0) } ?? false)")
                 case "batchmenu":
                     // The menu a right click on the selected row builds while several rows are selected.
                     let model = AppModel.shared

@@ -162,7 +162,10 @@ struct TaskListView: View {
         let each = ForEach(section.tasks, id: \.id) { task in
             TaskRow(task: task, depth: 0)
                 .listRowSeparator(.hidden)
-                .draggable(task.id)
+                // R123: the ids of the rows the drag carries, a line each.
+                .draggable(model.dragIds(task.id).joined(separator: "\n")) {
+                    DragPreview(title: task.title, count: model.dragIds(task.id).count)
+                }
         }
         if model.canReorder {
             each.onMove { model.move(from: $0, to: $1) }
@@ -923,5 +926,30 @@ enum ClearCompleted: CaseIterable {
         case .everything: return nil
         }
         return Calendar.current.date(byAdding: .month, value: -months, to: Date()).map { Moment.string($0, withTime: false) }
+    }
+}
+
+/// R123: what follows the pointer: the title of the row the drag started on and, for several tasks, their number.
+struct DragPreview: View {
+    let title: String
+    let count: Int
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(title).lineLimit(1).font(AppFont.style(.body))
+            if count > 1 {
+                Text("\(count)")
+                    .font(AppFont.style(.caption, weight: .semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 1)
+                    .background(Capsule().fill(Color.accentColor))
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .frame(maxWidth: 280, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 6).fill(.regularMaterial))
     }
 }
