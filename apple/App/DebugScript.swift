@@ -51,6 +51,7 @@ import UserNotifications
 /// `ghost` (puts the windows of a hidden app on screen transparent, deaf to the mouse and without the keyboard, popovers that open later among them:
 /// a hidden app shows no popovers; key presses then go to the open popover first, as they do when it has the keyboard),
 /// `wont` (closes the selected task as "won't do"; `task` prints the state of the selected task), `go:completed`, `go:wontdo`, `go:today`, `go:all`, `go:trash`, `go:#tag`, `go:List name` and `go:Project title` (switch to those views),
+/// `hideinbox:List name=move` (hides Inbox the way the dialog of R121 does, `=keep` without moving, `hideinbox:show` shows it; alone it prints the setting and the default list),
 /// `completedview:on` and `completedview:off` (show the Completed and Won't do views always or never), `sidebarshow:wontDo=filled` (sets when a built-in view has a row in the sidebar: `always`, `filled` or `never`; `sidebarshow` alone prints the built-in rows there are), `scope` (prints the current view), `quit` (quits the app the way ⌘Q does), `search` (prints whether search is open as a field and its text),
 /// `calendarevents` (prints the setting of R78, the access the system gave, and how many calendars are listed and hidden; nothing is asked of the system),
 /// `events:14:30=Bank,-=Birthday,09:00=Standup,y=Trip` (puts those events through the order of the block in place of the calendars of the system:
@@ -87,6 +88,8 @@ import UserNotifications
 /// which a person at the keyboard does not get: `scripts/postkey.swift` sends presses each of which is undone on its own, #230).
 /// With `LISTS_DEBUG_DIR=/folder` the run has its data in that folder, and its settings as well, in `settings.plist`: it starts with the defaults
 /// and leaves the settings and the notifications of the installed copy alone. The key of quick entry is still the one of the installed copy.
+/// A setting the installed copy holds is read in place of the one the check wrote (seen with `lastUsedList`, #255): what was written is
+/// in `settings.plist`, read it with `defaults read`.
 /// `keychain:…` (the secrets of sync in the keychain, #241: `former=account=secret`, `save=account=secret`, `load=account`, `delete=account`, `forget`, `wipe=account,account`;
 /// prints the answer and how many items of the keychain were opened since `forget`; with `LISTS_DEBUG_DIR` the items are those of the check, not of the installed copy).
 /// With `LISTS_DEBUG_LAUNCH_PROBE` set the launch carries a probe that stops the app when the event loop is run while the model is built,
@@ -378,6 +381,17 @@ enum DebugScript {
                     } else {
                         print("debug: sidebar shows \(AppModel.shared.shownBuiltins.compactMap(\.builtinName))")
                     }
+                case "hideinbox":
+                    // `hideinbox:List name=move` hides Inbox the way the dialog of R121 does (`=keep` without moving);
+                    // `hideinbox:show` shows it again; alone it prints the setting, the default lists and the Inbox counter.
+                    let model = AppModel.shared
+                    let parts = argument.split(separator: "=").map(String.init)
+                    if argument == "show" { model.showInbox() }
+                    else if parts.count == 2, let list = model.listsForHiddenInbox.first(where: { $0.name == parts[0] }) {
+                        model.hideInbox(movingTo: list.id, moveTasks: parts[1] == "move")
+                    }
+                    let name = { (id: String) in model.lists.first { $0.id == id }.map { $0.id == "inbox" ? "Inbox" : $0.name } ?? id }
+                    print("debug: inbox \(model.inboxHidden ? "hidden" : "shown"), open \(model.counts.inbox), new tasks \(model.newTaskList == "last" || model.newTaskList == "inbox" ? model.newTaskList : name(model.newTaskList)), default \(name(model.defaultListId))")
                 case "calendarevents":
                     let model = AppModel.shared
                     print("debug: calendar events \(model.showCalendarEvents ? "on" : "off"), access \(SystemCalendars.shared.access), calendars \(model.eventCalendars.count), hidden \(model.hiddenCalendars.count)")

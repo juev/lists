@@ -28,7 +28,10 @@ final class ShareViewController: NSViewController {
             }
             let form = ShareForm(
                 content: content,
-                lists: (try? store?.lists())?.filter { !$0.archived } ?? [],
+                // R121: hidden Inbox is not offered. R40: the form starts with the default list; the list used last
+                // is a setting of the app, which the extension does not see.
+                lists: (try? store?.lists())?.filter { !$0.archived && ($0.id != "inbox" || (try? store?.inboxHidden()) != true) } ?? [],
+                defaultListId: (try? store?.defaultListId(lastUsed: nil)) ?? "inbox",
                 onCancel: { [weak self] in
                     self?.extensionContext?.cancelRequest(withError: NSError(domain: NSCocoaErrorDomain, code: NSUserCancelledError))
                 },
@@ -135,6 +138,7 @@ final class ShareViewController: NSViewController {
 struct ShareForm: View {
     let content: SharedContent
     let lists: [TaskList]
+    let defaultListId: String
     let onCancel: () -> Void
     /// Returns an error text or nil.
     let onSave: (String, String, String) -> String?
@@ -171,7 +175,10 @@ struct ShareForm: View {
             }
         }
         .padding(16)
-        .onAppear { title = content.title }
+        .onAppear {
+            title = content.title
+            listId = defaultListId
+        }
     }
 
     private func save() {

@@ -396,3 +396,13 @@
 "A helper starts at login and answers the shortcut while Lists is not running. A task written this way is synced when Lists is opened." = "При входе в систему запускается помощник: он отвечает на сочетание клавиш, пока Lists не запущен. Записанная так задача синхронизируется, когда Lists открыт.";
 "The system refused: %@" = "Система отказала: %@";
 "Allow it in System Settings → General → Login Items." = "Разрешите в Системных настройках → Основные → Объекты входа.";
+"Show Inbox" = "Показывать «Входящие»";
+"Hide Inbox" = "Скрыть «Входящие»";
+"Hide Inbox?" = "Скрыть «Входящие»?";
+"Inbox holds %d open tasks." = "Открытых задач во «Входящих»: %d.";
+"New tasks without a list will go to the list used last; this one comes first." = "Новые задачи без списка будут попадать в последний использованный список; первым станет этот.";
+"Hide Without Moving" = "Скрыть, не перенося";
+"Move and Hide" = "Перенести и скрыть";
+"Hide" = "Скрыть";
+"To hide Inbox, create a list first." = "Чтобы скрыть «Входящие», сначала создайте список.";
+"OK" = "OK";
