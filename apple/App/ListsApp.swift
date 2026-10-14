@@ -223,7 +223,7 @@ struct MenuBarView: View {
                                     .accessibilityLabel(L("Complete"))
                                 Text(task.title).lineLimit(1)
                                 Spacer()
-                                if let due = task.due, Moment.isOverdue(due) {
+                                if let due = task.effectiveDue, Moment.isOverdue(due) {
                                     Text(Moment.label(due)).font(AppFont.style(.caption)).foregroundStyle(.red)
                                 }
                             }

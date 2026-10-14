@@ -359,13 +359,17 @@ struct TaskRow: View {
                 }
             }
             Spacer(minLength: 8)
-            if !isExpanded, let date = Moment.rowDate(due: task.due, open: task.done == nil, dayInHeading: dayInHeading) {
-                Text(date.text)
-                    .font(AppFont.style(.caption))
-                    .monospacedDigit()
-                    .foregroundStyle(date.late ? .red : .secondary)
-                    .lineLimit(1)
-                    .fixedSize()
+            if !isExpanded, let date = Moment.rowDate(due: task.effectiveDue, open: task.done == nil, dayInHeading: dayInHeading) {
+                // R125: a due date taken from the project is muted, with the project's mark before it.
+                let inherited = task.due == nil
+                HStack(spacing: 3) {
+                    if inherited { Image(systemName: "folder").accessibilityLabel(L("Project")) }
+                    Text(date.text).monospacedDigit()
+                }
+                .font(AppFont.style(.caption))
+                .foregroundStyle(date.late ? AnyShapeStyle(.red) : inherited ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.secondary))
+                .lineLimit(1)
+                .fixedSize()
             }
             // R94: an open card has no chevron; a key or another task closes it.
             if !isExpanded {
@@ -411,7 +415,7 @@ struct TaskRow: View {
     /// Whether the heading of the group already names the day of the due date.
     private var dayInHeading: Bool {
         switch model.effectiveScope {
-        case .today: return task.due.map { Moment.day($0) == Moment.today() } ?? false
+        case .today: return task.effectiveDue.map { Moment.day($0) == Moment.today() } ?? false
         case .upcoming: return true
         default: return false
         }
