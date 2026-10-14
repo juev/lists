@@ -360,7 +360,9 @@ struct TaskEditor: View {
         let one = [
             MenuChoice(title: L("Quick Look")) { show(file) },
             MenuChoice(title: L("Open in Default App")) {
-                if let url = AttachmentFiles.named(file) { NSWorkspace.shared.open(url) }
+                if let url = AttachmentFiles.named(file), !NSWorkspace.shared.open(url) {
+                    model.store?.log(level: .error, source: "attachments", message: "the system did not open a file in its default app")
+                }
             },
             MenuChoice(title: L("Save As…")) {
                 AttachmentFiles.saveAs(file) { reason in

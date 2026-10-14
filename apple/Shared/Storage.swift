@@ -87,3 +87,17 @@ extension AppError {
 func describe(_ error: Error) -> String {
     (error as? AppError)?.message ?? error.localizedDescription
 }
+
+/// An error as the cause in a line of the log (R102): in English, and of a system error only its domain and code,
+/// because the description of an error about a file names the file.
+func logged(_ error: Error) -> String {
+    switch error as? AppError {
+    case .NotFound?: return "not found"
+    case .Invalid(let msg)?: return "invalid: \(msg)"
+    case .Storage(let msg)?: return "storage: \(msg)"
+    case .Sync(let msg)?: return "sync: \(msg)"
+    case nil:
+        let error = error as NSError
+        return "\(error.domain) \(error.code)"
+    }
+}

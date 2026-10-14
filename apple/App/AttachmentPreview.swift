@@ -25,6 +25,9 @@ enum AttachmentFiles {
             try fm.copyItem(at: URL(fileURLWithPath: path), to: target)
             return target
         } catch {
+            // R102: Quick Look or the default app would get nothing, without a word.
+            let cause = logged(error)
+            Task { @MainActor in AppModel.shared.store?.log(level: .error, source: "attachments", message: "a file was not copied to be shown: \(cause)") }
             return nil
         }
     }

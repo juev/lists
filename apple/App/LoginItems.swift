@@ -162,7 +162,11 @@ enum HelperAgent {
         let moved = named != program.path
         DispatchQueue.global(qos: .userInitiated).async {
             if moved {
-                try? set(on: true)
+                do { try set(on: true) } catch {
+                    // R102: quick entry stays without its helper. The text is what launchctl said, as at AppModel.setLoginItem.
+                    let cause = error.localizedDescription
+                    Task { @MainActor in AppModel.shared.store?.log(level: .error, source: "login", message: "the helper was not registered again after Lists moved: \(cause)") }
+                }
             } else {
                 launchctl("kickstart", "-k", service)
             }

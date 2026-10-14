@@ -329,7 +329,21 @@ final class Reminders {
             Task { @MainActor in AppModel.shared.reloadNotificationAccess(refusal: refusal) }
             guard granted else { return }
             center.removeAllPendingNotificationRequests()
-            requests.forEach { center.add($0) }
+            // R102: one line for the requests the system refused, not one for each.
+            let group = DispatchGroup()
+            let lock = NSLock()
+            var refused: [Error] = []
+            for request in requests {
+                group.enter()
+                center.add(request) { error in
+                    if let error { lock.withLock { refused.append(error) } }
+                    group.leave()
+                }
+            }
+            group.notify(queue: .global()) {
+                guard let first = refused.first else { return }
+                store.log(level: .error, source: "notify", message: "the system refused \(refused.count) of \(requests.count) notifications: \(logged(first))")
+            }
         }
     }
 }

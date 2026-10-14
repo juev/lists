@@ -694,6 +694,7 @@ struct SettingsView: View {
                         try Keychain.save(token, account: account)
                     } catch {
                         message = L("The push token could not be saved in the system keychain: %@", error.localizedDescription)
+                        store.log(level: .error, source: "push", message: "the token was not saved in the keychain: \(logged(error))")
                     }
                 }
                 store.setPushToken(token: token)
@@ -707,6 +708,7 @@ struct SettingsView: View {
                 } catch {
                     // Sync still works until the app quits; say why it will ask again.
                     message = L("The password could not be saved in the system keychain: %@", error.localizedDescription)
+                    store.log(level: .error, source: "sync", message: "the password was not saved in the keychain: \(logged(error))")
                 }
                 store.setSyncPassword(password: password)
             }
