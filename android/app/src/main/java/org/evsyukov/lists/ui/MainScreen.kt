@@ -1055,7 +1055,9 @@ private fun Drawer(
     ModalDrawerSheet {
         Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 8.dp)) {
             val inbox = state.list("inbox")
-            DrawerItem(str(R.string.inbox), Icons.Filled.Inbox, state.counts.inbox, state.scope == Scope.Inbox, tint = viewTint(ViewTint.Blue), onLong = inbox?.let { { onEditList(it) } }) { onSelect(Scope.Inbox) }
+            if (state.showsInbox) {
+                DrawerItem(str(R.string.inbox), Icons.Filled.Inbox, state.counts.inbox, state.scope == Scope.Inbox, tint = viewTint(ViewTint.Blue), onLong = inbox?.let { { onEditList(it) } }) { onSelect(Scope.Inbox) }
+            }
             DrawerItem(str(R.string.today), Icons.Filled.Star, state.counts.today, state.scope == Scope.Today, alert = state.counts.overdue > 0u, tint = viewTint(ViewTint.Yellow)) { onSelect(Scope.Today) }
             DrawerItem(str(R.string.upcoming), Icons.Filled.CalendarMonth, state.counts.upcoming, state.scope == Scope.Upcoming, tint = viewTint(ViewTint.Pink)) { onSelect(Scope.Upcoming) }
             DrawerItem(str(R.string.all), Icons.Filled.Layers, 0u, state.scope == Scope.All, tint = viewTint(ViewTint.Teal)) { onSelect(Scope.All) }

@@ -81,7 +81,7 @@ class QuickAddActivity : ComponentActivity() {
                         modifier = Modifier.fillMaxWidth().padding(12.dp)
                             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {},
                     ) {
-                        val listId = EntryPrefs.defaultListId(this@QuickAddActivity, lists)
+                        val listId = remember { EntryPrefs.defaultListId(this@QuickAddActivity) }
                         val entry = rememberSaveable(saver = NewTaskEntry.Saver) { NewTaskEntry(shared.title, shared.notes, listId) }
                         val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
                         Column {

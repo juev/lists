@@ -342,4 +342,14 @@
     <string name="batch_changed">Изменено: %1$s</string>
     <string name="previous_month">Предыдущий месяц</string>
     <string name="next_month">Следующий месяц</string>
+    <string name="show_inbox">Показывать «Входящие»</string>
+    <string name="hide_inbox_question">Скрыть «Входящие»?</string>
+    <string name="inbox_open_tasks">Открытых задач во «Входящих»: %1$d.</string>
+    <string name="hide_inbox_hint">Новые задачи без списка будут попадать в последний использованный список; первым станет этот.</string>
+    <string name="move_and_hide">Перенести и скрыть</string>
+    <string name="hide_without_moving">Скрыть, не перенося</string>
+    <string name="hide">Скрыть</string>
+    <string name="inbox_needs_list">Чтобы скрыть «Входящие», сначала создайте список.</string>
+    <string name="inbox_hidden_notice">«Входящие» скрыты</string>
+    <string name="ok">OK</string>
 </resources>

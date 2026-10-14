@@ -60,6 +60,10 @@ data class UiState(
     val notice: Notice? = null,
     /** How long a completed task stays in its view; shared by all devices (R68). */
     val keepDone: KeepDone = KeepDone.Seconds(5u),
+    /** Where a new task goes when the view does not say: `inbox`, `last` or a list id (R40); synced. */
+    val newTaskList: String = "inbox",
+    /** Inbox has no row while it holds no open tasks (R121); synced. */
+    val inboxHidden: Boolean = false,
     val loaded: Boolean = false,
     /** R109: the tasks selected for an action on several at once; null while the selection mode is off. */
     val selection: Set<String>? = null,
@@ -67,6 +71,12 @@ data class UiState(
     val effectiveScope: Scope get() = search?.takeIf { it.isNotBlank() }?.let { Scope.Search(it) } ?: scope
 
     fun list(id: String): TaskList? = lists.firstOrNull { it.id == id }
+
+    /** Whether the panel with the lists shows Inbox: hidden, it still does while it holds open tasks (R121). */
+    val showsInbox: Boolean get() = !inboxHidden || counts.inbox > 0u
+
+    /** The lists Inbox can be hidden in favour of (R121). */
+    val listsForHiddenInbox: List<TaskList> get() = lists.filter { !it.archived && it.id != "inbox" }
 
     /** The tasks of the view in the order of their rows. */
     val shownIds: List<String> get() = sections.flatMap { section -> section.tasks.map { it.id } }
@@ -92,7 +102,7 @@ data class UiState(
         is Scope.Project -> null
         Scope.Inbox -> "inbox"
         is Scope.List -> s.id
-        else -> EntryPrefs.defaultListId(ListsApp.instance, lists)
+        else -> EntryPrefs.defaultListId(ListsApp.instance)
     }
 
     val readOnly: Boolean
@@ -164,6 +174,8 @@ class MainViewModel : ViewModel() {
                     editing = editingId?.let { id -> load(store, id) },
                     sync = store.syncStatus(),
                     keepDone = store.keepDone(),
+                    newTaskList = store.newTaskList(),
+                    inboxHidden = store.inboxHidden(),
                     loaded = true,
                 )
             }
@@ -246,6 +258,23 @@ class MainViewModel : ViewModel() {
     }
 
     fun dismissNotice() = _state.update { it.copy(notice = null) }
+
+    /** R121: hides Inbox, moving its open tasks to the list when asked; the notice takes it all back. */
+    fun hideInbox(listId: String, moveTasks: Boolean) {
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) { runCatching { Repo.store.hideInbox(listId, moveTasks) } }
+            result.onSuccess { hiding ->
+                EntryPrefs.noteUsedList(ListsApp.instance, listId)
+                _state.update {
+                    it.copy(
+                        scope = if (it.scope == Scope.Inbox) Scope.List(listId) else it.scope,
+                        notice = Notice(str(R.string.inbox_hidden_notice)) { store -> store.undoHideInbox(hiding) },
+                    )
+                }
+            }.onFailure { e -> _state.update { it.copy(notice = Notice(describe(e))) } }
+            Repo.changed()
+        }
+    }
 
     fun undo(notice: Notice) {
         val back = notice.undo ?: return

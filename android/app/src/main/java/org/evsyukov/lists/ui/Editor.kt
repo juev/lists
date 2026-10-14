@@ -1009,7 +1009,7 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
         calendarGranted = SystemCalendars.granted(context)
     }
     var leads by remember { mutableStateOf(NotifyPrefs.leads(context)) }
-    var newTaskList by remember { mutableStateOf(EntryPrefs.newTaskList(context)) }
+    val newTaskList = state.newTaskList
     var parse by remember { mutableStateOf(EntryPrefs.parse(context)) }
     var clipboard by remember { mutableStateOf(EntryPrefs.clipboard(context)) }
     val lookLabels = listOf(str(R.string.appearance_system), str(R.string.appearance_light), str(R.string.appearance_dark))
@@ -1104,6 +1104,14 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
                             SettingRow(str(R.string.appearance), lookLabels[LookPrefs.choices.indexOf(LookPrefs.appearance(context))]) { choosing = "appearance" }
                             SettingRow(str(R.string.text_size), sizeLabels[LookPrefs.textScales.indexOf(LookPrefs.textScale(context))]) { choosing = "textSize" }
                             SettingRow(str(R.string.completed_leave), keepDoneLabel(state.keepDone)) { choosing = "keepDone" }
+                            // R121: one switch for all devices; turning it off asks where the tasks of Inbox go.
+                            SwitchRow(str(R.string.show_inbox), !state.inboxHidden) { on ->
+                                choosing = when {
+                                    on -> { model.act { store -> store.showInbox() }; null }
+                                    state.listsForHiddenInbox.isEmpty() -> "noListForInbox"
+                                    else -> "hideInbox"
+                                }
+                            }
                             HorizontalDivider(Modifier.padding(vertical = 8.dp))
                             // R102: the level of the log and the way to its files.
                             Text(str(R.string.log), style = MaterialTheme.typography.labelLarge)
@@ -1374,15 +1382,62 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
         }
         "newTaskList" -> {
             val lists = state.lists.filter { !it.archived && it.id != "inbox" }
-            val values = listOf("inbox", "last") + lists.map { it.id }
-            ChoiceDialog(str(R.string.default_list), listOf(str(R.string.inbox), str(R.string.last_used_list)) + lists.map { it.name }, values.indexOf(newTaskList), { choosing = null }) {
-                newTaskList = values[it]
-                EntryPrefs.setNewTaskList(context, values[it])
+            // R121: hidden, Inbox is not offered; a choice made before stays readable.
+            val inbox = if (!state.inboxHidden || newTaskList == "inbox") listOf("inbox") else emptyList()
+            val values = inbox + "last" + lists.map { it.id }
+            val labels = inbox.map { str(R.string.inbox) } + str(R.string.last_used_list) + lists.map { it.name }
+            ChoiceDialog(str(R.string.default_list), labels, values.indexOf(newTaskList), { choosing = null }) {
+                model.act { store -> store.setNewTaskList(values[it]) }
             }
         }
+        // The notice that takes hiding back is shown on the main screen: settings close for it.
+        "hideInbox" -> HideInboxDialog(state, onDismiss = { choosing = null }) { listId, move ->
+            model.hideInbox(listId, move)
+            onDismiss()
+        }
+        "noListForInbox" -> AlertDialog(
+            onDismissRequest = { choosing = null },
+            text = { Text(str(R.string.inbox_needs_list)) },
+            confirmButton = { TextButton(onClick = { choosing = null }) { Text(str(R.string.ok)) } },
+        )
         "allDay" -> ChoiceDialog(str(R.string.due_on_day_setting), (listOf("") + NotifyPrefs.times).map(::timeLabel), (listOf("") + NotifyPrefs.times).indexOf(allDay), { choosing = null }) { allDay = (listOf("") + NotifyPrefs.times)[it]; saveNotify() }
         "summary" -> ChoiceDialog(str(R.string.summary_setting), (listOf("") + NotifyPrefs.times).map(::timeLabel), (listOf("") + NotifyPrefs.times).indexOf(summary), { choosing = null }) { summary = (listOf("") + NotifyPrefs.times)[it]; saveNotify() }
     }
+}
+
+/** R121: where the open tasks of Inbox go when it is hidden, and the list new tasks start from. */
+@Composable
+private fun HideInboxDialog(state: UiState, onDismiss: () -> Unit, onHide: (String, Boolean) -> Unit) {
+    val lists = state.listsForHiddenInbox
+    var listId by remember { mutableStateOf(lists.firstOrNull()?.id ?: "") }
+    val open = state.counts.inbox.toInt()
+    val hide = { move: Boolean -> if (listId.isNotEmpty()) onHide(listId, move); onDismiss() }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(str(R.string.hide_inbox_question)) },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                if (open > 0) Text(str(R.string.inbox_open_tasks, open))
+                lists.forEach { list ->
+                    Text(
+                        list.name,
+                        fontWeight = if (list.id == listId) FontWeight.Bold else null,
+                        modifier = Modifier.fillMaxWidth().clickable { listId = list.id }.padding(vertical = 12.dp),
+                    )
+                }
+                Text(str(R.string.hide_inbox_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { hide(open > 0) }) { Text(str(if (open > 0) R.string.move_and_hide else R.string.hide)) }
+        },
+        dismissButton = {
+            Row {
+                TextButton(onClick = onDismiss) { Text(str(R.string.cancel)) }
+                if (open > 0) TextButton(onClick = { hide(false) }) { Text(str(R.string.hide_without_moving)) }
+            }
+        },
+    )
 }
 
 internal fun keepDoneChoices(current: KeepDone): List<KeepDone> {

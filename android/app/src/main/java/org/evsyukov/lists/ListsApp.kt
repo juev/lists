@@ -56,6 +56,7 @@ class ListsApp : Application() {
             // R102: where a log of events begins for this run.
             val version = runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrNull() ?: "?"
             it.log(LogLevel.INFO, "app", "started $version on Android ${android.os.Build.VERSION.RELEASE}")
+            EntryPrefs.adoptNewTaskList(this, it)
         }
     }
 
@@ -320,13 +321,18 @@ object LookPrefs {
     }
 }
 
-/** How new tasks are entered on this device; not synced. */
+/** How new tasks are entered on this device; not synced. The default list itself is a shared setting (R40). */
 object EntryPrefs {
     private fun prefs(context: Context) = context.getSharedPreferences("entry", Context.MODE_PRIVATE)
 
-    /** `inbox`, `last` or a list id. */
-    fun newTaskList(context: Context) = prefs(context).getString("newTaskList", "inbox") ?: "inbox"
-    fun setNewTaskList(context: Context, value: String) = prefs(context).edit().putString("newTaskList", value).apply()
+    /** R40: the choice this device kept before it synced goes to the shared settings once. */
+    fun adoptNewTaskList(context: Context, store: Store) {
+        val kept = prefs(context).getString("newTaskList", null) ?: return
+        runCatching { store.adoptNewTaskList(kept) }
+            .onSuccess { prefs(context).edit().remove("newTaskList").apply() }
+            .onFailure { error -> store.log(LogLevel.ERROR, "app", "the default list for new tasks was not adopted: ${logged(error)}") }
+    }
+
     fun noteUsedList(context: Context, id: String) = prefs(context).edit().putString("lastUsedList", id).apply()
 
     /** Whether dates, priority, tags and a list are picked out of the typed title. */
@@ -361,12 +367,9 @@ object EntryPrefs {
     /** A longer text is left alone: it is not cut to fit. */
     private const val CLIPBOARD_NOTE_LIMIT = 2000
 
-    /** The list for a task entered where no list is implied. */
-    fun defaultListId(context: Context, lists: List<uniffi.lists_core.TaskList>): String {
-        val choice = newTaskList(context)
-        val id = if (choice == "last") prefs(context).getString("lastUsedList", "inbox") ?: "inbox" else choice
-        return if (lists.any { it.id == id && !it.archived }) id else "inbox"
-    }
+    /** The list for a task entered where no list is implied (R40, R121). */
+    fun defaultListId(context: Context): String =
+        runCatching { Repo.store.defaultListId(prefs(context).getString("lastUsedList", null)) }.getOrDefault("inbox")
 }
 
 /** Turns the core's notification plan into alarms that post a notification. */
