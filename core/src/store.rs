@@ -162,7 +162,47 @@ impl Inner {
     }
 }
 
-const TASK_COLUMNS: &str = "
+/// A date of the project the task belongs to, when it belongs to one (R30).
+macro_rules! project_date {
+    ($field:literal) => {
+        concat!(
+            "(SELECT p.",
+            $field,
+            " FROM tasks p WHERE p.id = t.eff_parent AND p.project = 1 AND p.eff_parent IS NULL)"
+        )
+    };
+}
+
+/// The due date the views go by: the task's own, or its project's when it has none (R125).
+macro_rules! eff_due {
+    () => {
+        concat!("coalesce(t.due, ", project_date!("due"), ")")
+    };
+}
+
+/// The start the views go by: a task with a date does not start before its project, and the start
+/// of the project gives no date to a task without one (R125).
+macro_rules! eff_start {
+    () => {
+        concat!(
+            "(CASE WHEN t.start IS NULL AND ",
+            eff_due!(),
+            " IS NULL THEN NULL ELSE max(coalesce(t.start, ",
+            project_date!("start"),
+            "), coalesce(",
+            project_date!("start"),
+            ", t.start)) END)"
+        )
+    };
+}
+
+const EFF_DUE: &str = eff_due!();
+const EFF_START: &str = eff_start!();
+/// The date a task is placed by: its effective due date, or its effective start without one.
+const EFF_DATE: &str = concat!("coalesce(", eff_due!(), ", ", eff_start!(), ")");
+
+const TASK_COLUMNS: &str = concat!(
+    "
     t.id, t.eff_list, t.eff_parent,
     (SELECT p.title FROM tasks p WHERE p.id = t.eff_parent),
     t.title, t.notes, t.start, t.due, t.priority, t.repeat, t.remind, t.done, t.deleted,
@@ -172,7 +212,11 @@ const TASK_COLUMNS: &str = "
     (SELECT count(*) FROM tasks c WHERE c.eff_parent = t.id AND c.deleted = 0 AND c.purged = 0 AND c.wont = 0 AND c.done IS NOT NULL),
     (SELECT count(*) FROM attachments a WHERE a.task_id = t.id AND a.deleted = 0),
     (SELECT group_concat(tag, char(31)) FROM (SELECT tag FROM task_tags WHERE task_id = t.id ORDER BY tag)),
-    t.wont";
+    t.wont, ",
+    eff_due!(),
+    ", ",
+    eff_start!()
+);
 
 /// Visible, not a completion record.
 const LIVE: &str = "t.eff_deleted = 0 AND t.log_of IS NULL";
@@ -396,6 +440,8 @@ fn task_from_row(r: &Row) -> rusqlite::Result<TaskItem> {
         tags: tags
             .map(|t| t.split('\u{1f}').map(str::to_string).collect())
             .unwrap_or_default(),
+        effective_due: r.get(20)?,
+        effective_start: r.get(21)?,
     })
 }
 
@@ -970,9 +1016,9 @@ impl Store {
                 conn,
                 &format!(
                     "WHERE {LIVE} AND {NOT_ARCHIVED} AND {NOT_PROJECT} AND {open}
-                       AND substr(coalesce(t.due, t.start), 1, 10) <= ?1
-                       AND (t.start IS NULL OR substr(t.start, 1, 10) <= ?1)
-                     ORDER BY coalesce(t.due, t.start), t.priority DESC, t.pos, t.id"
+                       AND substr({EFF_DATE}, 1, 10) <= ?1
+                       AND ({EFF_START} IS NULL OR substr({EFF_START}, 1, 10) <= ?1)
+                     ORDER BY {EFF_DATE}, t.priority DESC, t.pos, t.id"
                 ),
                 &[&today],
             ),
@@ -980,9 +1026,9 @@ impl Store {
                 conn,
                 &format!(
                     "WHERE {LIVE} AND {NOT_ARCHIVED} AND {NOT_PROJECT} AND {open}
-                       AND (substr(coalesce(t.due, t.start), 1, 10) > ?1
-                            OR (t.start IS NOT NULL AND substr(t.start, 1, 10) > ?1))
-                     ORDER BY coalesce(t.due, t.start), t.priority DESC, t.pos, t.id"
+                       AND (substr({EFF_DATE}, 1, 10) > ?1
+                            OR ({EFF_START} IS NOT NULL AND substr({EFF_START}, 1, 10) > ?1))
+                     ORDER BY {EFF_DATE}, t.priority DESC, t.pos, t.id"
                 ),
                 &[&today],
             ),
@@ -1006,7 +1052,7 @@ impl Store {
                 &format!(
                     "WHERE {LIVE} AND {NOT_ARCHIVED} AND {NOT_PROJECT} AND {open}
                        AND EXISTS (SELECT 1 FROM task_tags g WHERE g.task_id = t.id AND g.tag = ?1)
-                     ORDER BY t.priority DESC, coalesce(t.due, t.start) IS NULL, coalesce(t.due, t.start), t.pos, t.id"
+                     ORDER BY t.priority DESC, {EFF_DATE} IS NULL, {EFF_DATE}, t.pos, t.id"
                 ),
                 &[&clean_tag(&name)],
             ),
@@ -1030,7 +1076,7 @@ impl Store {
                 }
                 let all = query_tasks(
                     conn,
-                    &format!("WHERE {LIVE} ORDER BY t.done IS NOT NULL, coalesce(t.due, t.start) IS NULL, coalesce(t.due, t.start), t.title"),
+                    &format!("WHERE {LIVE} ORDER BY t.done IS NOT NULL, {EFF_DATE} IS NULL, {EFF_DATE}, t.title"),
                     &[],
                 )?;
                 // R22: a subtask found by its title is shown inside its task, so the task stands for it.
@@ -1134,14 +1180,15 @@ impl Store {
             let tasks = query_tasks(
                 &inner.conn,
                 &format!(
-                "WHERE {LIVE} AND {NOT_ARCHIVED} AND t.done IS NULL AND (t.remind IS NOT NULL OR t.due IS NOT NULL)"
+                "WHERE {LIVE} AND {NOT_ARCHIVED} AND t.done IS NULL AND (t.remind IS NOT NULL OR {EFF_DUE} IS NOT NULL)"
             ),
                 &[],
             )?;
             let mut out = Vec::new();
             for task in &tasks {
                 // (kind, moment, what tells notifications of one task apart)
-                let planned: Vec<(NotificationKind, NaiveDateTime, String)> = match (&task.remind, &task.due) {
+                let planned: Vec<(NotificationKind, NaiveDateTime, String)> = match (&task.remind, &task.effective_due)
+                {
                     // A reminder without a time of day follows the all-day setting, nine o'clock failing that.
                     (Some(remind), _) => moment(remind)
                         .or_else(|| {
@@ -1186,7 +1233,7 @@ impl Store {
                         at: at.format(MOMENT_FMT).to_string(),
                         task_id: Some(task.id.clone()),
                         title: task.title.clone(),
-                        due: task.due.clone(),
+                        due: task.effective_due.clone(),
                         count: 0,
                     });
                 }
@@ -1196,10 +1243,11 @@ impl Store {
                     let day = now.date() + chrono::Duration::days(offset);
                     let at = day.and_time(time);
                     let key = day.format(DATE_FMT).to_string();
-                    // Everything due by that day, as things stand now.
+                    // Everything due by that day, as things stand now; a project is counted in its tasks (R125).
                     let count = tasks
                         .iter()
-                        .filter(|t| t.due.as_deref().is_some_and(|d| d[..10] <= *key))
+                        .filter(|t| !(t.is_project && t.parent_id.is_none()))
+                        .filter(|t| t.effective_due.as_deref().is_some_and(|d| d[..10] <= *key))
                         .count() as u32;
                     if at > now && count > 0 {
                         out.push(PlannedNotification {
@@ -1254,12 +1302,12 @@ impl Store {
         Ok(Counts {
             inbox: count(&format!("{LIVE} AND t.done IS NULL AND t.eff_list = 'inbox' AND t.eff_parent IS NULL AND t.project = 0"), &[])?,
             today: count(
-                &format!("{open} AND substr(coalesce(t.due, t.start), 1, 10) <= ?1 AND (t.start IS NULL OR substr(t.start, 1, 10) <= ?1)"),
+                &format!("{open} AND substr({EFF_DATE}, 1, 10) <= ?1 AND ({EFF_START} IS NULL OR substr({EFF_START}, 1, 10) <= ?1)"),
                 &[&today],
             )?,
-            overdue: count(&format!("{open} AND substr(t.due, 1, 10) < ?1"), &[&today])?,
+            overdue: count(&format!("{open} AND substr({EFF_DUE}, 1, 10) < ?1"), &[&today])?,
             upcoming: count(
-                &format!("{open} AND (substr(coalesce(t.due, t.start), 1, 10) > ?1 OR (t.start IS NOT NULL AND substr(t.start, 1, 10) > ?1))"),
+                &format!("{open} AND (substr({EFF_DATE}, 1, 10) > ?1 OR ({EFF_START} IS NOT NULL AND substr({EFF_START}, 1, 10) > ?1))"),
                 &[&today],
             )?,
             trash: count("t.deleted = 1 AND t.purged = 0", &[])?,
@@ -2022,12 +2070,12 @@ fn filter_tasks(conn: &Connection, spec: &FilterSpec, today: &str, recent: &Rece
         FilterStatus::Wont => sql.push_str(" AND t.wont = 1"),
         FilterStatus::All => {}
     }
-    let date = "substr(coalesce(t.due, t.start), 1, 10)";
+    let date = format!("substr({EFF_DATE}, 1, 10)");
     match spec.due {
         DueWindow::Any => {}
-        DueWindow::NoDate => sql.push_str(" AND t.due IS NULL AND t.start IS NULL"),
+        DueWindow::NoDate => sql.push_str(&format!(" AND {EFF_DATE} IS NULL")),
         DueWindow::Overdue => sql.push_str(&format!(
-            " AND substr(t.due, 1, 10) < {}",
+            " AND substr({EFF_DUE}, 1, 10) < {}",
             arg(today.to_string(), &mut args)
         )),
         DueWindow::Today => sql.push_str(&format!(" AND {date} = {}", arg(today.to_string(), &mut args))),
@@ -2050,7 +2098,7 @@ fn filter_tasks(conn: &Connection, spec: &FilterSpec, today: &str, recent: &Rece
         sql.push_str(&format!(" AND t.priority >= {}", spec.min_priority.as_i64()));
     }
     sql.push_str(&format!(
-        " ORDER BY {}, {date} IS NULL, coalesce(t.due, t.start), t.priority DESC, t.pos, t.id",
+        " ORDER BY {}, {date} IS NULL, {EFF_DATE}, t.priority DESC, t.pos, t.id",
         recent.settled
     ));
     let refs: Vec<&str> = args.iter().map(String::as_str).collect();

@@ -157,6 +157,11 @@ pub struct TaskItem {
     pub subtasks_total: u32,
     pub subtasks_done: u32,
     pub attachments: u32,
+    /// The due date the views go by: `due`, or the project's when the task has none (R125).
+    /// Computed when the task is read; only `due` is stored.
+    pub effective_due: Option<String>,
+    /// The start the views go by: `start`, held back to the project's start (R125).
+    pub effective_start: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, uniffi::Record)]

@@ -2162,3 +2162,181 @@ fn r91_a_file_that_cannot_be_written_is_named_and_the_rest_are_saved() {
     let report = d.save_attachments(t.id, nowhere).unwrap();
     assert_eq!((report.saved.len(), report.failed.len()), (0, 2));
 }
+
+/// A project with tasks, all in Inbox: (project, tasks by title).
+fn project_with(d: &Device, dates: &[(&str, Option<&str>, Option<&str>)]) -> (TaskItem, Vec<TaskItem>) {
+    let project = add(d, "Ремонт");
+    d.set_project(project.id.clone(), true).unwrap();
+    let tasks = dates
+        .iter()
+        .map(|(title, start, due)| {
+            d.create_task(NewTask {
+                title: (*title).into(),
+                parent_id: Some(project.id.clone()),
+                start: start.map(str::to_string),
+                due: due.map(str::to_string),
+                ..NewTask::default()
+            })
+            .unwrap()
+        })
+        .collect();
+    (project, tasks)
+}
+
+fn task_named(d: &Device, scope: Scope, title: &str) -> TaskItem {
+    d.tasks(scope).unwrap().into_iter().find(|t| t.title == title).unwrap()
+}
+
+#[test]
+fn r125_a_task_without_a_due_date_takes_the_projects() {
+    let d = device(); // today is 2026-10-05
+    let (project, tasks) = project_with(&d, &[("а", None, None), ("б", None, Some("2026-10-20"))]);
+    d.set_due(project.id.clone(), Some("2026-10-10".into())).unwrap();
+
+    let upcoming = d.tasks(Scope::Upcoming).unwrap();
+    assert_eq!(titles(&upcoming), ["а", "б"], "ordered by the effective due date");
+    let a = &upcoming[0];
+    assert_eq!(
+        (a.due.as_deref(), a.effective_due.as_deref()),
+        (None, Some("2026-10-10")),
+        "the task keeps only its own date"
+    );
+    let b = &upcoming[1];
+    assert_eq!(
+        (b.due.as_deref(), b.effective_due.as_deref()),
+        (Some("2026-10-20"), Some("2026-10-20")),
+        "an own due date later than the project's is kept"
+    );
+    assert_eq!(d.counts().unwrap().upcoming, 2);
+
+    // Moving the project moves its task at once, and the data of the task stays as it was.
+    d.set_due(project.id.clone(), Some("2026-10-03".into())).unwrap();
+    assert_eq!(view(&d, Scope::Today), ["а"]);
+    let counts = d.counts().unwrap();
+    assert_eq!((counts.today, counts.overdue, counts.upcoming), (1, 1, 1));
+    assert_eq!(d.task(tasks[0].id.clone()).unwrap().due, None);
+    assert_eq!(
+        d.task(tasks[0].id.clone()).unwrap().effective_due.as_deref(),
+        Some("2026-10-03"),
+        "a single task is read with its effective dates too"
+    );
+
+    // A project without a due date gives none.
+    d.set_due(project.id.clone(), None).unwrap();
+    assert_eq!(view(&d, Scope::Upcoming), ["б"]);
+    assert_eq!(view(&d, Scope::Today), Vec::<String>::new());
+}
+
+#[test]
+fn r125_a_task_does_not_start_before_its_project() {
+    let d = device(); // today is 2026-10-05
+    let (project, _) = project_with(
+        &d,
+        &[
+            ("свой срок", None, Some("2026-10-05")),
+            ("своё начало", Some("2026-10-04"), None),
+            ("позже проекта", Some("2026-10-12"), None),
+            ("без дат", None, None),
+        ],
+    );
+    assert_eq!(view(&d, Scope::Today), ["своё начало", "свой срок"]);
+
+    d.set_start(project.id.clone(), Some("2026-10-08".into())).unwrap();
+    assert_eq!(
+        view(&d, Scope::Today),
+        Vec::<String>::new(),
+        "nothing starts before the project"
+    );
+    let upcoming = d.tasks(Scope::Upcoming).unwrap();
+    assert_eq!(titles(&upcoming), ["свой срок", "своё начало", "позже проекта"]);
+    let start = |title: &str| {
+        let t = upcoming.iter().find(|t| t.title == title).unwrap();
+        (t.start.clone(), t.effective_start.clone())
+    };
+    assert_eq!(start("свой срок"), (None, Some("2026-10-08".into())));
+    assert_eq!(
+        start("своё начало"),
+        (Some("2026-10-04".into()), Some("2026-10-08".into()))
+    );
+    assert_eq!(
+        start("позже проекта"),
+        (Some("2026-10-12".into()), Some("2026-10-12".into()))
+    );
+    assert_eq!(d.counts().unwrap().today, 0);
+
+    // The start of the project gives no dates to a task that has none.
+    let none = d.tasks(Scope::Project { id: project.id.clone() }).unwrap();
+    let none = none.iter().find(|t| t.title == "без дат").unwrap();
+    assert_eq!(
+        (none.effective_start.as_deref(), none.effective_due.as_deref()),
+        (None, None)
+    );
+
+    // With a due date the project dates every task, and its start holds them back.
+    d.set_due(project.id.clone(), Some("2026-10-09".into())).unwrap();
+    let t = task_named(&d, Scope::Upcoming, "без дат");
+    assert_eq!(
+        (t.effective_start.as_deref(), t.effective_due.as_deref()),
+        (Some("2026-10-08"), Some("2026-10-09"))
+    );
+
+    // A due date puts the task in Today by its day, as an own due date does (R21).
+    d.set_now_for_tests("2026-10-08T09:00");
+    assert_eq!(view(&d, Scope::Today), ["свой срок"]);
+    d.set_now_for_tests("2026-10-09T09:00");
+    assert_eq!(view(&d, Scope::Today), ["свой срок", "своё начало", "без дат"]);
+}
+
+#[test]
+fn r125_filters_select_a_task_by_its_effective_dates() {
+    let d = device(); // today is 2026-10-05
+    let (project, _) = project_with(&d, &[("а", None, None)]);
+    let by = |due: DueWindow| {
+        titles(&d.preview_filter(FilterSpec { due, ..spec() }).unwrap())
+            .into_iter()
+            .map(str::to_string)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(by(DueWindow::NoDate), ["а"]);
+
+    d.set_due(project.id.clone(), Some("2026-10-03".into())).unwrap();
+    assert_eq!(by(DueWindow::Overdue), ["а"]);
+    assert_eq!(by(DueWindow::NoDate), Vec::<String>::new());
+    assert_eq!(by(DueWindow::Next { days: 7 }), ["а"]);
+
+    d.set_due(project.id.clone(), Some("2026-10-05".into())).unwrap();
+    assert_eq!(by(DueWindow::Today), ["а"]);
+    assert_eq!(by(DueWindow::Overdue), Vec::<String>::new());
+}
+
+#[test]
+fn r125_reminders_fire_on_the_inherited_due_date() {
+    let d = device(); // now is 2026-10-05T10:00
+    let (project, tasks) = project_with(&d, &[("а", None, None)]);
+    d.set_due(project.id.clone(), Some("2026-10-07T18:00".into())).unwrap();
+
+    let plan = d
+        .planned_notifications(NotifySettings {
+            summary_at: Some("08:00".into()),
+            ..notify()
+        })
+        .unwrap();
+    let a = plan
+        .iter()
+        .find(|n| n.task_id.as_deref() == Some(tasks[0].id.as_str()))
+        .expect("the task of the project is reminded of");
+    assert_eq!(
+        (a.kind, a.at.as_str(), a.due.as_deref()),
+        (NotificationKind::Due, "2026-10-07T17:45", Some("2026-10-07T18:00"))
+    );
+    let summary: Vec<(String, u32)> = plan
+        .iter()
+        .filter(|n| n.kind == NotificationKind::Summary && n.at.starts_with("2026-10-07"))
+        .map(|n| (n.at.clone(), n.count))
+        .collect();
+    assert_eq!(
+        summary,
+        [("2026-10-07T08:00".to_string(), 1)],
+        "the summary counts the task, not the project"
+    );
+}
