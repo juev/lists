@@ -216,11 +216,12 @@ class MainViewModel : ViewModel() {
 
     private fun group(state: UiState, tasks: List<TaskItem>): List<TaskSection> = when (state.effectiveScope) {
         Scope.Today -> {
-            val (overdue, rest) = tasks.partition { dueDayPassed(it.due) }
+            // R125: a task of a project goes by the project's due date when it has none of its own.
+            val (overdue, rest) = tasks.partition { dueDayPassed(it.effectiveDue) }
             if (overdue.isEmpty()) listOf(TaskSection("today", null, rest))
             else listOf(TaskSection("overdue", str(R.string.overdue), overdue), TaskSection("today", str(R.string.today), rest)).filter { it.tasks.isNotEmpty() }
         }
-        Scope.Upcoming -> runs(tasks, { dayOf(it.due ?: it.start ?: "") }, ::dayHeading)
+        Scope.Upcoming -> runs(tasks, { dayOf(it.effectiveDue ?: it.effectiveStart ?: "") }, ::dayHeading)
         Scope.All -> runs(tasks, { it.listId }, { id -> state.list(id)?.displayName().orEmpty() })
         Scope.Completed, Scope.WontDo -> runs(tasks, { dayOf(it.done ?: "") }, ::dateLabel)
         else -> listOf(TaskSection("all", null, tasks))
