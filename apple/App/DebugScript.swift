@@ -375,7 +375,7 @@ enum DebugScript {
                 case "wont": AppModel.shared.selectedTask.map(AppModel.shared.wontDo)
                 case "task":
                     let task = AppModel.shared.selectedTask
-                    print("debug: task \(task?.title ?? "none"), due \(task?.due ?? "none"), priority \(task?.priority.title ?? "none"), tags \(task?.tags ?? []), repeat \(task?.repeat?.summary ?? "none"), state \(task.map { $0.wont ? "wont do" : $0.done != nil ? "completed" : "open" } ?? "none")")
+                    print("debug: task \(task?.title ?? "none"), due \(task?.due ?? "none"), effective due \(task?.effectiveDue ?? "none"), priority \(task?.priority.title ?? "none"), tags \(task?.tags ?? []), repeat \(task?.repeat?.summary ?? "none"), state \(task.map { $0.wont ? "wont do" : $0.done != nil ? "completed" : "open" } ?? "none")")
                 case "inbox": AppModel.shared.scope = .inbox
                 case "go":
                     let model = AppModel.shared

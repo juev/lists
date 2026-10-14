@@ -693,7 +693,8 @@ final class AppModel {
         case .today:
             let today = Moment.today()
             // R84: overdue is a due date that has passed. A start date in the past only makes the task available.
-            let isOverdue: (TaskItem) -> Bool = { task in task.due.map { Moment.day($0) < today } ?? false }
+            // R125: a task of a project goes by the project's due date when it has none of its own.
+            let isOverdue: (TaskItem) -> Bool = { task in task.effectiveDue.map { Moment.day($0) < today } ?? false }
             let overdue = tasks.filter(isOverdue)
             let rest = tasks.filter { !isOverdue($0) }
             if overdue.isEmpty { return [TaskSection(id: "today", title: nil, tasks: rest)] }
@@ -702,7 +703,7 @@ final class AppModel {
                 TaskSection(id: "today", title: L("Today"), tasks: rest),
             ].filter { !$0.tasks.isEmpty }
         case .upcoming:
-            return sectioned(tasks, key: { Moment.day($0.due ?? $0.start ?? "") }, title: Moment.heading)
+            return sectioned(tasks, key: { Moment.day($0.effectiveDue ?? $0.effectiveStart ?? "") }, title: Moment.heading)
         case .all:
             return sectioned(tasks, key: \.listId, title: { id in self.list(id).map(self.listName) ?? "" })
         case .completed, .wontDo:
