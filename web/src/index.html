@@ -60,6 +60,7 @@ header input { border: 1px solid var(--line); border-radius: 8px; padding: 6px 1
 .title .t.done { text-decoration: line-through; color: var(--muted); }
 .meta { color: var(--muted); font-size: 13px; display: flex; flex-wrap: wrap; gap: 4px 10px; }
 .meta .bad { color: var(--danger); }
+.meta .inherited { opacity: .7; }
 .prio { color: var(--warn); font-weight: 700; }
 /* R72: the mark stands in the middle of the row; the priority is a thin bar after it, and its place is kept. */
 .task > .row { align-items: center; }
@@ -289,10 +290,10 @@ function sections() {
   const tasks = state.tasks, s = state.search ? "search" : state.scope;
   const runs = (key, title) => { const out = []; for (const x of tasks) { const k = key(x); if (out.length && out.at(-1).key === k) out.at(-1).tasks.push(x); else out.push({ key: k, title: title(k), tasks: [x] }); } return out; };
   if (s === "today") {
-    const late = tasks.filter(x => dayOf(x.due || x.start || today()) < today()), rest = tasks.filter(x => !late.includes(x));
+    const late = tasks.filter(x => dayOf(x.effectiveDue || x.effectiveStart || today()) < today()), rest = tasks.filter(x => !late.includes(x));
     return late.length ? [{ key: "late", title: t("Overdue"), bad: true, tasks: late }, { key: "today", title: t("Today"), tasks: rest }].filter(x => x.tasks.length) : [{ key: "today", tasks: rest }];
   }
-  if (s === "upcoming") return runs(x => dayOf(x.due || x.start), k => { const d = parseDay(k).toLocaleDateString(locale, { weekday: "long", day: "numeric", month: "long" }); return k === plus(1) ? `${t("Tomorrow")} · ${d}` : d; });
+  if (s === "upcoming") return runs(x => dayOf(x.effectiveDue || x.effectiveStart), k => { const d = parseDay(k).toLocaleDateString(locale, { weekday: "long", day: "numeric", month: "long" }); return k === plus(1) ? `${t("Tomorrow")} · ${d}` : d; });
   if (s === "all") return runs(x => x.list, listName);
   if (s === "completed" || s === "wontdo") return runs(x => dayOf(x.done), dateLabel);
   return [{ key: "all", tasks }];
@@ -300,8 +301,11 @@ function sections() {
 
 function summary(x, origin) {
   const out = [];
-  if (x.due) out.push($("span", { class: !x.done && overdue(x.due) ? "bad" : "" }, dateLabel(x.due)));
-  else if (x.start) out.push($("span", {}, `${t("from")} ${dateLabel(x.start).toLowerCase()}`));
+  // R125: the dates the views go by; a due date taken from the project is muted, with the project's mark.
+  const due = x.effectiveDue, start = x.effectiveStart;
+  if (due && !x.due) out.push($("span", { class: !x.done && overdue(due) ? "bad" : "inherited", title: x.parentTitle || "" }, "▸ ", dateLabel(due)));
+  else if (due) out.push($("span", { class: !x.done && overdue(due) ? "bad" : "" }, dateLabel(due)));
+  else if (start) out.push($("span", {}, `${t("from")} ${dateLabel(start).toLowerCase()}`));
   if (x.repeat) out.push($("span", {}, "↻"));
   if (x.subtasks) out.push($("span", {}, `☑ ${x.subtasksDone}/${x.subtasks}`));
   if (x.attachments) out.push($("span", {}, `📎 ${x.attachments}`));

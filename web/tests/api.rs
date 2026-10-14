@@ -929,3 +929,28 @@ fn r118_a_batch_changes_every_task_it_applies_to_and_is_taken_back_in_one_step()
         3
     );
 }
+
+#[test]
+fn r125_a_task_of_a_project_comes_with_the_dates_it_goes_by() {
+    let web = web(None);
+    let project = call(&web, "", json!({ "op": "quickAdd", "text": "п", "scope": "inbox" }));
+    let id = project["id"].as_str().unwrap().to_string();
+    call(&web, "", json!({ "op": "setProject", "id": id, "value": true }));
+    call(&web, "", json!({ "op": "setDue", "id": id, "value": "2030-01-10" }));
+    call(&web, "", json!({ "op": "setStart", "id": id, "value": "2030-01-05" }));
+    let task = call(&web, "", json!({ "op": "addSubtask", "parent": id, "title": "т" }));
+    call(
+        &web,
+        "",
+        json!({ "op": "setStart", "id": task["id"], "value": "2030-01-01" }),
+    );
+
+    let upcoming = get(&web, "", "/api/tasks?scope=upcoming");
+    assert_eq!(upcoming.as_array().unwrap().len(), 1, "the project is not a row (R120)");
+    let row = &upcoming[0];
+    assert_eq!(row["title"], "т");
+    assert!(row["due"].is_null(), "only the task's own due date is stored");
+    assert_eq!(row["effectiveDue"], "2030-01-10");
+    assert_eq!(row["start"], "2030-01-01");
+    assert_eq!(row["effectiveStart"], "2030-01-05");
+}
