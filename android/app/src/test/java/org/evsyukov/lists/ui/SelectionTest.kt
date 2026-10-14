@@ -24,7 +24,7 @@ class SelectionTest {
         isLog: Boolean = false,
     ) = TaskItem(
         id, listId, parentId, null, id, "", start, due, priority, tags, repeat, null, done,
-        false, deleted, isLog, false, 0u, 0u, 0u,
+        false, deleted, isLog, false, 0u, 0u, 0u, due, start,
     )
 
     @Test

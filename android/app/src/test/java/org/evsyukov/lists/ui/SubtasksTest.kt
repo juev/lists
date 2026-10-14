@@ -19,7 +19,7 @@ class SubtasksTest {
         subtasksTotal: UInt = 0u,
     ) = TaskItem(
         "a", "inbox", parentId, null, "a", "", null, null, Priority.NONE, emptyList(), null, null, done,
-        wont, deleted, isLog, isProject, subtasksTotal, 0u, 0u,
+        wont, deleted, isLog, isProject, subtasksTotal, 0u, 0u, null, null,
     )
 
     @Test

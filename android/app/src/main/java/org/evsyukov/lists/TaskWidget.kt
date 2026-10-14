@@ -101,7 +101,7 @@ object TaskWidgets {
         // The view keeps completed tasks for a while (R68); the widget does not.
         val open = if (view is WidgetView.OfList && list == null) emptyList()
         else runCatching { Repo.store.tasks(view.scope) }.getOrElse { return }.filter { it.done == null }
-            .let { tasks -> if (view == WidgetView.Today) overdueFirst(tasks, { it.due }) else tasks }
+            .let { tasks -> if (view == WidgetView.Today) overdueFirst(tasks, { it.effectiveDue }) else tasks }
 
         // In portrait the widget is as high as the largest height the launcher reports.
         val height = manager.getAppWidgetOptions(id).getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT)

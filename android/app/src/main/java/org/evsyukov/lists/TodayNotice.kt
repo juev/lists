@@ -90,7 +90,7 @@ object TodayNotice {
         ) return
         // The view keeps completed tasks for a while (R68); the notification does not.
         val open = runCatching { Repo.store.tasks(Scope.Today) }.getOrElse { return }.filter { it.done == null }
-        val (overdue, rest) = open.partition { dueDayPassed(it.due) }
+        val (overdue, rest) = open.partition { dueDayPassed(it.effectiveDue) }
         val (titles, more) = listed((overdue + rest).map { it.title })
         // R106: the number of the icon, and the channel that goes with having one.
         val choice = IconCount.choice(context)

@@ -841,15 +841,19 @@ fun TaskRow(
         }
         }
         val scope = state.effectiveScope
-        val dayInHeading = scope == Scope.Upcoming || (scope == Scope.Today && task.due?.let(::dayOf) == today())
-        rowDate(task.due, open = !done, dayInHeading = dayInHeading)?.let { (text, late) ->
-            Text(
-                text,
-                style = MaterialTheme.typography.bodySmall,
-                color = if (late) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                modifier = Modifier.padding(start = 8.dp),
-            )
+        val dayInHeading = scope == Scope.Upcoming || (scope == Scope.Today && task.effectiveDue?.let(::dayOf) == today())
+        rowDate(task.effectiveDue, open = !done, dayInHeading = dayInHeading)?.let { (text, late) ->
+            // R125: a due date taken from the project is muted, with the project's mark before it.
+            val inherited = task.due == null
+            val color = when {
+                late -> MaterialTheme.colorScheme.error
+                inherited -> MaterialTheme.colorScheme.outline
+                else -> MaterialTheme.colorScheme.onSurfaceVariant
+            }
+            Row(Modifier.padding(start = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (inherited) Icon(Icons.Outlined.Folder, str(R.string.project), Modifier.padding(end = 3.dp).size(14.dp), tint = color)
+                Text(text, style = MaterialTheme.typography.bodySmall, color = color, maxLines = 1)
+            }
         }
         if (selected != null) SelectCircle(selected)
         Box {
