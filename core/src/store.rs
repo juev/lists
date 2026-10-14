@@ -179,6 +179,8 @@ const LIVE: &str = "t.eff_deleted = 0 AND t.log_of IS NULL";
 /// What the Completed view lists: finished top-level tasks and the records of finished repeats.
 const COMPLETED: &str = "t.eff_deleted = 0 AND t.done IS NOT NULL AND (t.eff_parent IS NULL OR t.log_of IS NOT NULL)";
 const NOT_ARCHIVED: &str = "t.eff_list NOT IN (SELECT id FROM lists WHERE archived = 1)";
+/// A project is shown in the sidebar, not as a row of the task views and their counters (R120).
+const NOT_PROJECT: &str = "NOT (t.project = 1 AND t.eff_parent IS NULL)";
 
 /// How long a completed task stays in its view when nothing else is set (R68).
 const KEEP_DONE_DEFAULT: KeepDone = KeepDone::Seconds { seconds: 5 };
@@ -366,7 +368,7 @@ fn list_from_row(r: &Row) -> rusqlite::Result<TaskList> {
 const LIST_COLUMNS: &str = "
     l.id, l.name, l.color, l.icon, l.sort, l.show_done, l.default_priority, l.default_due, l.archived,
     (SELECT count(*) FROM tasks t WHERE t.eff_list = l.id AND t.eff_parent IS NULL AND t.done IS NULL
-        AND t.eff_deleted = 0 AND t.log_of IS NULL)";
+        AND t.eff_deleted = 0 AND t.log_of IS NULL AND t.project = 0)";
 
 fn get_list(conn: &Connection, id: &str) -> Result<TaskList> {
     conn.query_row(
@@ -794,7 +796,7 @@ impl Store {
             Scope::Today => query_tasks(
                 conn,
                 &format!(
-                    "WHERE {LIVE} AND {NOT_ARCHIVED} AND {open}
+                    "WHERE {LIVE} AND {NOT_ARCHIVED} AND {NOT_PROJECT} AND {open}
                        AND substr(coalesce(t.due, t.start), 1, 10) <= ?1
                        AND (t.start IS NULL OR substr(t.start, 1, 10) <= ?1)
                      ORDER BY coalesce(t.due, t.start), t.priority DESC, t.pos, t.id"
@@ -804,7 +806,7 @@ impl Store {
             Scope::Upcoming => query_tasks(
                 conn,
                 &format!(
-                    "WHERE {LIVE} AND {NOT_ARCHIVED} AND {open}
+                    "WHERE {LIVE} AND {NOT_ARCHIVED} AND {NOT_PROJECT} AND {open}
                        AND (substr(coalesce(t.due, t.start), 1, 10) > ?1
                             OR (t.start IS NOT NULL AND substr(t.start, 1, 10) > ?1))
                      ORDER BY coalesce(t.due, t.start), t.priority DESC, t.pos, t.id"
@@ -814,7 +816,7 @@ impl Store {
             Scope::All => query_tasks(
                 conn,
                 &format!(
-                    "WHERE {LIVE} AND {NOT_ARCHIVED} AND {open} AND t.eff_parent IS NULL
+                    "WHERE {LIVE} AND {NOT_ARCHIVED} AND {open} AND t.eff_parent IS NULL AND t.project = 0
                      ORDER BY t.eff_list != 'inbox', (SELECT pos FROM lists WHERE id = t.eff_list), t.eff_list, t.pos, t.id"
                 ),
                 &[],
@@ -829,7 +831,7 @@ impl Store {
             Scope::Tag { name } => query_tasks(
                 conn,
                 &format!(
-                    "WHERE {LIVE} AND {NOT_ARCHIVED} AND {open}
+                    "WHERE {LIVE} AND {NOT_ARCHIVED} AND {NOT_PROJECT} AND {open}
                        AND EXISTS (SELECT 1 FROM task_tags g WHERE g.task_id = t.id AND g.tag = ?1)
                      ORDER BY t.priority DESC, coalesce(t.due, t.start) IS NULL, coalesce(t.due, t.start), t.pos, t.id"
                 ),
@@ -1054,7 +1056,7 @@ impl Store {
         let inner = self.lock();
         let mut stmt = inner.conn.prepare_cached(&format!(
             "SELECT g.tag, count(*) FROM task_tags g JOIN tasks t ON t.id = g.task_id
-             WHERE {LIVE} AND {NOT_ARCHIVED} AND t.done IS NULL GROUP BY g.tag ORDER BY g.tag"
+             WHERE {LIVE} AND {NOT_ARCHIVED} AND {NOT_PROJECT} AND t.done IS NULL GROUP BY g.tag ORDER BY g.tag"
         ))?;
         let rows = stmt.query_map([], |r| {
             Ok(TagCount {
@@ -1075,9 +1077,9 @@ impl Store {
                 |r| r.get(0),
             )?)
         };
-        let open = format!("{LIVE} AND {NOT_ARCHIVED} AND t.done IS NULL");
+        let open = format!("{LIVE} AND {NOT_ARCHIVED} AND {NOT_PROJECT} AND t.done IS NULL");
         Ok(Counts {
-            inbox: count(&format!("{LIVE} AND t.done IS NULL AND t.eff_list = 'inbox' AND t.eff_parent IS NULL"), &[])?,
+            inbox: count(&format!("{LIVE} AND t.done IS NULL AND t.eff_list = 'inbox' AND t.eff_parent IS NULL AND t.project = 0"), &[])?,
             today: count(
                 &format!("{open} AND substr(coalesce(t.due, t.start), 1, 10) <= ?1 AND (t.start IS NULL OR substr(t.start, 1, 10) <= ?1)"),
                 &[&today],
@@ -1828,14 +1830,14 @@ fn list_tasks(conn: &Connection, list_id: &str, recent: &Recent) -> Result<Vec<T
     };
     query_tasks(
         conn,
-        &format!("WHERE {LIVE} AND t.eff_list = ?1 AND t.eff_parent IS NULL {done} ORDER BY {settled}, {order}"),
+        &format!("WHERE {LIVE} AND t.eff_list = ?1 AND t.eff_parent IS NULL AND t.project = 0 {done} ORDER BY {settled}, {order}"),
         &[list_id],
     )
 }
 
 /// Tasks a filter selects, subtasks included, dated ones first.
 fn filter_tasks(conn: &Connection, spec: &FilterSpec, today: &str, recent: &Recent) -> Result<Vec<TaskItem>> {
-    let mut sql = format!("WHERE {LIVE} AND {NOT_ARCHIVED}");
+    let mut sql = format!("WHERE {LIVE} AND {NOT_ARCHIVED} AND {NOT_PROJECT}");
     let mut args: Vec<String> = Vec::new();
     let arg = |value: String, args: &mut Vec<String>| {
         args.push(value);

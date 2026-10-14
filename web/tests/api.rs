@@ -494,15 +494,16 @@ fn projects_and_saved_filters_over_the_api() {
         "Макеты"
     );
 
+    call(&web, "", json!({ "op": "quickAdd", "text": "Черновик" }));
     call(
         &web,
         "",
         json!({ "op": "updateFilter", "id": fid, "name": "Без даты", "spec": { "due": { "kind": "nodate" } } }),
     );
-    assert_eq!(
-        get(&web, "", &format!("/api/tasks?scope=filter%3A{fid}"))[0]["title"],
-        "Запуск сайта"
-    );
+    // The project has no date either, but it is not a row of a filter (R120).
+    let dateless = get(&web, "", &format!("/api/tasks?scope=filter%3A{fid}"));
+    assert_eq!(dateless.as_array().unwrap().len(), 1);
+    assert_eq!(dateless[0]["title"], "Черновик");
     let bad = ureq::post(&format!("{}/api/call", web.base))
         .set("X-Lists", "1")
         .send_json(json!({ "op": "createFilter", "name": "x", "spec": { "due": { "kind": "someday" } } }));

@@ -134,10 +134,13 @@ fn twodo_backup_brings_lists_tasks_subtasks_tags_and_attachments() {
     );
     assert!(home[1].repeat.is_none());
 
-    let inbox = d.tasks(Scope::Inbox).unwrap();
-    assert_eq!(titles(&inbox), ["Ремонт"]);
-    let project = &inbox[0];
+    // A project is not a row of the Inbox (R120), it is in the sidebar.
+    assert!(d.tasks(Scope::Inbox).unwrap().is_empty());
+    let projects = d.projects().unwrap();
+    assert_eq!(titles(&projects), ["Ремонт"]);
+    let project = &projects[0];
     assert!(project.is_project);
+    assert_eq!(project.list_id, INBOX_ID);
     assert_eq!(project.priority, Priority::High);
     assert_eq!(
         (project.due.as_deref(), project.start.as_deref()),
@@ -167,7 +170,8 @@ fn twodo_backup_brings_lists_tasks_subtasks_tags_and_attachments() {
 
     // Importing the same backup again changes nothing: no duplicates.
     d.import_file(twodo_backup(dir.path())).unwrap();
-    assert_eq!(d.tasks(Scope::Inbox).unwrap().len(), 1);
+    assert_eq!(d.projects().unwrap().len(), 1);
+    assert!(d.tasks(Scope::Inbox).unwrap().is_empty());
     assert_eq!(d.lists().unwrap().len(), 2);
     assert_eq!(d.attachments(project.id.clone()).unwrap().len(), 1);
 }
@@ -350,7 +354,8 @@ fn i8_twodo_attachment_gets_the_extension_kept_beside_its_name() {
     let d = device();
     let dir = tempfile::tempdir().unwrap();
     d.import_file(twodo_backup(dir.path())).unwrap();
-    let all = d.tasks(Scope::All).unwrap();
+    let mut all = d.tasks(Scope::All).unwrap();
+    all.extend(d.projects().unwrap());
     let files = |title: &str| {
         let task = all.iter().find(|t| t.title == title).unwrap();
         d.attachments(task.id.clone()).unwrap()
