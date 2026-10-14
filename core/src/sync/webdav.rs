@@ -99,6 +99,23 @@ impl WebDavRemote {
         }
         Ok(())
     }
+
+    /// Whether the server says the collection that would hold `path` is not there.
+    fn folder_missing(&self, path: &str) -> bool {
+        let folder = match path.rsplit_once('/') {
+            Some((dir, _)) => self.url(&format!("{dir}/")),
+            None => self.base.clone(),
+        };
+        matches!(self.answers(&folder), Ok(false))
+    }
+}
+
+fn finish_put(path: &str, code: u16) -> Result<()> {
+    if (200..300).contains(&code) {
+        Ok(())
+    } else {
+        Err(fail("PUT", path, code))
+    }
 }
 
 /// Collapses a response into its status code, turning transport failures into errors.
@@ -162,16 +179,16 @@ impl Remote for WebDavRemote {
 
     fn put(&self, path: &str, data: &[u8]) -> Result<()> {
         let send = || status(self.request("PUT", &self.url(path)).send_bytes(data), "PUT");
-        let mut code = send()?;
-        if matches!(code, 404 | 409) {
-            self.make_parents(path)?;
-            code = send()?;
+        match send() {
+            Ok(code) if !matches!(code, 404 | 409) => return finish_put(path, code),
+            Ok(_) => {}
+            // A server may refuse before reading the body and close the connection (#250):
+            // the client then sees a broken connection instead of the 409.
+            Err(e) if !self.folder_missing(path) => return Err(e),
+            Err(_) => {}
         }
-        if (200..300).contains(&code) {
-            Ok(())
-        } else {
-            Err(fail("PUT", path, code))
-        }
+        self.make_parents(path)?;
+        finish_put(path, send()?)
     }
 
     fn delete(&self, path: &str) -> Result<()> {

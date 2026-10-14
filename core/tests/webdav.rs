@@ -336,3 +336,130 @@ fn s17_snapshot_written_without_a_mark_is_found_by_listing() {
     assert!(seen.contains(&SNAP.to_string()), "{seen:?}");
     assert_eq!(view(&b, Scope::Inbox).len(), 2);
 }
+
+/// A WebDAV server that, like one written in Go, refuses a PUT into a missing
+/// collection without reading the body and closes the connection (#250). Go
+/// sends a 409 first, but the client is still writing and sees only the broken
+/// connection; this server sends nothing, so the client sees the same whatever
+/// the socket buffers hold. With `drop_puts` every PUT is closed that way.
+struct EarlyRefusal {
+    url: String,
+    requests: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+}
+
+fn early_refusal(folders: &[&str], drop_puts: bool) -> EarlyRefusal {
+    use std::io::{BufRead, BufReader, Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let requests = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let log = requests.clone();
+    let mut folders: std::collections::HashSet<String> = folders.iter().map(|f| f.to_string()).collect();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let mut stream = stream.unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut first = String::new();
+            reader.read_line(&mut first).unwrap();
+            let mut length = 0;
+            loop {
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                if line.trim().is_empty() {
+                    break;
+                }
+                if let Some((name, value)) = line.split_once(':') {
+                    if name.eq_ignore_ascii_case("content-length") {
+                        length = value.trim().parse().unwrap();
+                    }
+                }
+            }
+            let mut parts = first.split_whitespace();
+            let (method, path) = (parts.next().unwrap().to_string(), parts.next().unwrap().to_string());
+            log.lock().unwrap().push(format!("{method} {path}"));
+            let parent = format!("{}/", path.rsplit_once('/').unwrap().0);
+            let refuse_early = method == "PUT" && (drop_puts || !folders.contains(&parent));
+            if !refuse_early {
+                reader.by_ref().take(length).read_to_end(&mut Vec::new()).unwrap();
+            }
+            let answer = match method.as_str() {
+                "PUT" if refuse_early => None,
+                "PUT" => Some("201 Created"),
+                "MKCOL" if folders.contains(&path) => Some("405 Method Not Allowed"),
+                "MKCOL" => {
+                    folders.insert(path);
+                    Some("201 Created")
+                }
+                "PROPFIND" if folders.contains(&path) => Some("207 Multi-Status"),
+                _ => Some("404 Not Found"),
+            };
+            if let Some(answer) = answer {
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 {answer}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                );
+            }
+        }
+    });
+    EarlyRefusal {
+        url: format!("http://127.0.0.1:{port}/dav"),
+        requests,
+    }
+}
+
+impl EarlyRefusal {
+    fn remote(&self) -> lists_core::sync::webdav::WebDavRemote {
+        lists_core::sync::webdav::WebDavRemote::new(&self.url, "user", "secret").unwrap()
+    }
+
+    fn requests(&self) -> Vec<String> {
+        self.requests.lock().unwrap().clone()
+    }
+}
+
+/// The size of the attachment from #250, well above what a Go server drains unread.
+const BLOB: usize = 1_089_495;
+
+#[test]
+fn s43_put_creates_the_missing_folder_when_the_server_refuses_without_reading_the_body() {
+    use lists_core::sync::remote::Remote;
+    let server = early_refusal(&["/dav/", "/dav/blobs/"], false);
+    server.remote().put("blobs/c2/blob", &vec![7; BLOB]).unwrap();
+    assert_eq!(
+        server.requests(),
+        [
+            "PUT /dav/blobs/c2/blob",
+            "PROPFIND /dav/blobs/c2/",
+            "MKCOL /dav/",
+            "MKCOL /dav/blobs/",
+            "MKCOL /dav/blobs/c2/",
+            "PUT /dav/blobs/c2/blob",
+        ]
+    );
+}
+
+#[test]
+fn s43_a_broken_connection_into_an_existing_folder_stays_an_error() {
+    use lists_core::sync::remote::Remote;
+    let server = early_refusal(&["/dav/", "/dav/blobs/", "/dav/blobs/c2/"], true);
+    let error = server.remote().put("blobs/c2/blob", &vec![7; BLOB]).unwrap_err();
+    assert!(error.to_string().contains("PUT"), "{error}");
+    assert_eq!(server.requests(), ["PUT /dav/blobs/c2/blob", "PROPFIND /dav/blobs/c2/"]);
+}
+
+#[test]
+fn s43_put_creates_the_missing_folder_after_a_409_without_asking_for_it() {
+    use lists_core::sync::remote::Remote;
+    let dav = start();
+    let remote = lists_core::sync::webdav::WebDavRemote::new(&dav.url, "user", "secret").unwrap();
+    let seen = dav.requests(|| remote.put("blobs/c2/blob", &vec![7; BLOB]).unwrap());
+    assert_eq!(
+        seen,
+        [
+            "PUT /dav/user/blobs/c2/blob",
+            "MKCOL /dav/user/",
+            "MKCOL /dav/user/blobs/",
+            "MKCOL /dav/user/blobs/c2/",
+            "PUT /dav/user/blobs/c2/blob",
+        ]
+    );
+}
