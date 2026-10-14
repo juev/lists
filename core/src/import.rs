@@ -17,7 +17,7 @@ use uuid::Uuid;
 
 use crate::db::{KIND_ATTACHMENT, KIND_LIST, KIND_TASK};
 use crate::error::{AppError, Result};
-use crate::model::{Freq, Repeat};
+use crate::model::{Freq, Repeat, INBOX_ID};
 use crate::store::{self, hex, Store};
 use crate::LogLevel;
 use crate::{order, quickadd};
@@ -792,7 +792,11 @@ impl Store {
 
         self.write(|w| {
             // R121: while Inbox is hidden, tasks without a list go to the default list instead.
-            let no_list = store::default_list_id(w.tx, None)?;
+            let no_list = if store::inbox_hidden(w.tx)? {
+                store::default_list_id(w.tx, None)?
+            } else {
+                INBOX_ID.to_string()
+            };
             let mut last: Option<String> =
                 w.tx.query_row("SELECT max(pos) FROM lists WHERE id != 'inbox'", [], |r| r.get(0))?;
             for list in &parsed.lists {
