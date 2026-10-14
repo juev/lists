@@ -1267,6 +1267,34 @@ fn projects_and_saved_filters_sync_like_everything_else() {
 }
 
 #[test]
+fn s32_hidden_inbox_and_the_default_list_reach_the_other_device() {
+    let storage = tempfile::tempdir().unwrap();
+    let (a, b) = (device(), device());
+    let home = a.create_list("Дом".into()).unwrap();
+    let task = add(&a, "а");
+    settle(&a, &b, &storage);
+
+    a.hide_inbox(home.id.clone(), true).unwrap();
+    settle(&a, &b, &storage);
+    assert!(b.inbox_hidden().unwrap());
+    assert_eq!(b.new_task_list().unwrap(), "last");
+    assert_eq!(b.task(task.id).unwrap().list_id, home.id);
+    assert_eq!(b.default_list_id(None).unwrap(), home.id);
+
+    b.set_now_for_tests("2026-10-05T10:01");
+    b.set_new_task_list(home.id.clone()).unwrap();
+    settle(&a, &b, &storage);
+    assert_eq!(
+        (a.new_task_list().unwrap(), b.new_task_list().unwrap()),
+        (home.id.clone(), home.id.clone())
+    );
+
+    b.show_inbox().unwrap();
+    settle(&b, &a, &storage);
+    assert!(!a.inbox_hidden().unwrap());
+}
+
+#[test]
 fn s32_the_shared_setting_merges_like_any_field_and_reaches_a_new_device() {
     let storage = tempfile::tempdir().unwrap();
     let (a, b) = (device(), device());

@@ -281,6 +281,24 @@ fn trello_board_json() {
 }
 
 #[test]
+fn r121_tasks_without_a_list_go_to_the_default_list_while_inbox_is_hidden() {
+    let d = device();
+    let home = d.create_list("Дом".into()).unwrap();
+    d.hide_inbox(home.id.clone(), true).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("todo.json");
+    std::fs::write(
+        &file,
+        r#"[{"id":"L0","displayName":"Tasks","wellknownListName":"defaultList","tasks":[
+               {"id":"a","title":"Pay rent","importance":"normal","status":"notStarted"}]}]"#,
+    )
+    .unwrap();
+    d.import_file(file.to_string_lossy().into_owned()).unwrap();
+    assert!(view(&d, Scope::Inbox).is_empty());
+    assert_eq!(view(&d, Scope::List { id: home.id }), ["Pay rent"]);
+}
+
+#[test]
 fn microsoft_to_do_lists_json() {
     let d = device();
     let dir = tempfile::tempdir().unwrap();

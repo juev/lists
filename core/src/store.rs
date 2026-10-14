@@ -218,18 +218,80 @@ fn keep_done_to_value(keep: KeepDone) -> Value {
     }
 }
 
-fn keep_done(conn: &Connection) -> Result<KeepDone> {
+/// One field of the shared settings (S32); none when it is not there or does not parse.
+fn setting(conn: &Connection, field: &str) -> Result<Option<Value>> {
     let stored: Option<String> = conn
         .query_row(
-            "SELECT value FROM fields WHERE kind = ?1 AND id = ?2 AND field = 'keep_done'",
-            [KIND_SETTINGS, SETTINGS_ID],
+            "SELECT value FROM fields WHERE kind = ?1 AND id = ?2 AND field = ?3",
+            [KIND_SETTINGS, SETTINGS_ID, field],
             |r| r.get(0),
         )
         .optional()?;
-    Ok(stored
-        .and_then(|v| serde_json::from_str::<Value>(&v).ok())
+    Ok(stored.and_then(|v| serde_json::from_str::<Value>(&v).ok()))
+}
+
+fn keep_done(conn: &Connection) -> Result<KeepDone> {
+    Ok(setting(conn, "keep_done")?
         .and_then(|v| keep_done_from_value(&v))
         .unwrap_or(KEEP_DONE_DEFAULT))
+}
+
+/// R121: Inbox has no row while this is set.
+fn inbox_hidden(conn: &Connection) -> Result<bool> {
+    Ok(setting(conn, "inbox_hidden")?
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false))
+}
+
+/// R40: `inbox`, `last` or the id of a list; what is not a string reads as `inbox`.
+fn new_task_list(conn: &Connection) -> Result<String> {
+    Ok(setting(conn, "new_task_list")?
+        .and_then(|v| v.as_str().filter(|s| !s.is_empty()).map(str::to_string))
+        .unwrap_or_else(|| INBOX_ID.to_string()))
+}
+
+/// The list a task without a list goes to (R40, R121). `last_used` is what this device used last.
+pub(crate) fn default_list_id(conn: &Connection, last_used: Option<&str>) -> Result<String> {
+    let hidden = inbox_hidden(conn)?;
+    let choice = new_task_list(conn)?;
+    let wanted = if choice == "last" {
+        last_used
+    } else {
+        Some(choice.as_str())
+    };
+    let fits = |id: &str| -> Result<bool> {
+        if id == INBOX_ID {
+            return Ok(!hidden);
+        }
+        Ok(conn
+            .query_row(
+                "SELECT 1 FROM lists WHERE id = ?1 AND deleted = 0 AND archived = 0",
+                [id],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some())
+    };
+    if let Some(id) = wanted {
+        if fits(id)? {
+            return Ok(id.to_string());
+        }
+    }
+    if !hidden {
+        return Ok(INBOX_ID.to_string());
+    }
+    Ok(first_list(conn)?.unwrap_or_else(|| INBOX_ID.to_string()))
+}
+
+/// The first of the user's lists that is not archived, in their order.
+fn first_list(conn: &Connection) -> Result<Option<String>> {
+    Ok(conn
+        .query_row(
+            "SELECT id FROM lists WHERE deleted = 0 AND archived = 0 AND id != 'inbox' ORDER BY pos, id LIMIT 1",
+            [],
+            |r| r.get(0),
+        )
+        .optional()?)
 }
 
 /// R68 as SQL: a task completed a moment ago still counts as open.
@@ -728,6 +790,117 @@ impl Store {
     /// The setting is one for all devices and travels with sync.
     pub fn set_keep_done(&self, keep: KeepDone) -> Result<()> {
         self.write(|w| w.set(KIND_SETTINGS, SETTINGS_ID, "keep_done", keep_done_to_value(keep)))
+    }
+
+    /// Whether Inbox is hidden; one setting for all devices (R121).
+    pub fn inbox_hidden(&self) -> Result<bool> {
+        inbox_hidden(&self.lock().conn)
+    }
+
+    /// Hides Inbox (R121). With `move_tasks` its open top-level tasks and projects, with their
+    /// subtasks, go to the end of `list_id`. The default list for new tasks becomes the one used last.
+    pub fn hide_inbox(&self, list_id: String, move_tasks: bool) -> Result<InboxHiding> {
+        self.write(|w| {
+            let list = get_list(w.tx, &list_id)?;
+            if list.id == INBOX_ID || list.archived {
+                return Err(AppError::invalid(
+                    "Inbox is hidden in favour of a list that is not archived",
+                ));
+            }
+            let previous = new_task_list(w.tx)?;
+            let mut moved: Vec<String> = Vec::new();
+            if move_tasks {
+                heal_tree(w)?;
+                let mut stmt = w.tx.prepare(&format!(
+                    "SELECT t.id FROM tasks t WHERE {LIVE} AND t.eff_list = 'inbox' AND t.eff_parent IS NULL
+                       AND t.done IS NULL ORDER BY t.pos, t.id"
+                ))?;
+                moved = stmt.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
+                drop(stmt);
+                let mut last = last_pos(
+                    w.tx,
+                    "SELECT max(pos) FROM tasks WHERE eff_list = ?1 AND eff_parent IS NULL",
+                    &[&list_id],
+                )?;
+                for id in &moved {
+                    let pos = order::between(last.as_deref(), None);
+                    w.task(id, "list", json!(list_id))?;
+                    w.task(id, "pos", json!(pos))?;
+                    last = Some(pos);
+                }
+            }
+            w.set(KIND_SETTINGS, SETTINGS_ID, "inbox_hidden", json!(true))?;
+            w.set(KIND_SETTINGS, SETTINGS_ID, "new_task_list", json!("last"))?;
+            Ok(InboxHiding {
+                moved,
+                new_task_list: previous,
+            })
+        })
+    }
+
+    /// Takes hiding back: Inbox shows again, the moved tasks still at the top level go back to it,
+    /// and the default list for new tasks is the one before (R121).
+    pub fn undo_hide_inbox(&self, hiding: InboxHiding) -> Result<()> {
+        self.write(|w| {
+            let mut last = last_pos(
+                w.tx,
+                "SELECT max(pos) FROM tasks WHERE eff_list = 'inbox' AND eff_parent IS NULL",
+                &[],
+            )?;
+            for id in &hiding.moved {
+                let top: Option<i64> =
+                    w.tx.query_row(
+                        "SELECT 1 FROM tasks WHERE id = ?1 AND eff_parent IS NULL AND deleted = 0",
+                        [id],
+                        |r| r.get(0),
+                    )
+                    .optional()?;
+                if top.is_none() {
+                    continue;
+                }
+                let pos = order::between(last.as_deref(), None);
+                w.task(id, "list", json!(INBOX_ID))?;
+                w.task(id, "pos", json!(pos))?;
+                last = Some(pos);
+            }
+            w.set(KIND_SETTINGS, SETTINGS_ID, "inbox_hidden", json!(false))?;
+            w.set(KIND_SETTINGS, SETTINGS_ID, "new_task_list", json!(hiding.new_task_list))
+        })
+    }
+
+    /// Shows Inbox again; the default list for new tasks stays as it is (R121).
+    pub fn show_inbox(&self) -> Result<()> {
+        self.write(|w| w.set(KIND_SETTINGS, SETTINGS_ID, "inbox_hidden", json!(false)))
+    }
+
+    /// The default list for new tasks as chosen: `inbox`, `last` or the id of a list (R40).
+    pub fn new_task_list(&self) -> Result<String> {
+        new_task_list(&self.lock().conn)
+    }
+
+    /// The choice is one for all devices and travels with sync (R40, S32).
+    pub fn set_new_task_list(&self, choice: String) -> Result<()> {
+        self.write(|w| w.set(KIND_SETTINGS, SETTINGS_ID, "new_task_list", json!(choice)))
+    }
+
+    /// The choice a version before #255 kept on the device: written only while the shared
+    /// setting is empty and the choice is not Inbox, which is what an empty setting means (R40).
+    pub fn adopt_new_task_list(&self, choice: String) -> Result<()> {
+        if choice.is_empty() || choice == INBOX_ID {
+            return Ok(());
+        }
+        self.write(|w| {
+            if setting(w.tx, "new_task_list")?.is_none() {
+                w.set(KIND_SETTINGS, SETTINGS_ID, "new_task_list", json!(choice))?;
+            }
+            Ok(())
+        })
+    }
+
+    /// The list a new task goes to when neither the text nor the view names one (R40, R121).
+    /// `last_used` is the list this device used last.
+    pub fn default_list_id(&self, last_used: Option<String>) -> Result<String> {
+        default_list_id(&self.lock().conn, last_used.as_deref())
     }
 
     pub fn set_list_defaults(&self, id: String, priority: Priority, due_today: bool) -> Result<()> {

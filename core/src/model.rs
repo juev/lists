@@ -68,6 +68,15 @@ impl SortMode {
     }
 }
 
+/// What hiding Inbox changed, so that one undo takes it back (R121).
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct InboxHiding {
+    /// The tasks moved out of Inbox.
+    pub moved: Vec<String>,
+    /// The default list for new tasks before hiding (R40).
+    pub new_task_list: String,
+}
+
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct TaskList {
     pub id: String,
