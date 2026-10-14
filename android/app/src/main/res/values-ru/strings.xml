@@ -249,6 +249,8 @@
     <string name="projects">Проекты</string>
     <string name="filters">Фильтры</string>
     <string name="project_off">Сделать обычной задачей</string>
+    <string name="complete_project">Выполнить проект</string>
+    <string name="project_done_notice">Проект выполнен</string>
     <string name="project_on">Сделать проектом</string>
     <string name="new_filter">Новый фильтр</string>
     <string name="delete_filter">Удалить фильтр</string>

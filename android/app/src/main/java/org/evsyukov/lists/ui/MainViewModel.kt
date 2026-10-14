@@ -316,6 +316,15 @@ class MainViewModel : ViewModel() {
         act(notice) { it.completeTask(task.id) }
     }
 
+    /**
+     * R126: completes the project whatever the state of its tasks; its open tasks close with it (R11).
+     * The project leaves the drawer at once, so the bar is always the way back, whatever R68 says.
+     */
+    fun completeProject(project: TaskItem) {
+        if (project.done != null) return
+        act(Notice(str(R.string.project_done_notice)) { it.undoCloseTask(project.id) }) { it.completeTask(project.id) }
+    }
+
     /** Closes the task as "won't do" (R69); what follows is the same as after completing it. */
     fun wontDo(task: TaskItem) {
         if (task.done != null) return
