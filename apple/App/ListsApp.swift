@@ -37,6 +37,7 @@ struct ListsApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         KeyboardShortcuts.onKeyUp(for: .quickEntry) { QuickEntryPanel.shared.toggle() }
+        KeyboardShortcuts.onKeyUp(for: .showLists) { MainActor.assumeIsolated { Self.showOrHideLists() } }
         MainActor.assumeIsolated { QuickEntryPanel.shared.watchHiding() }
         LoginItems.takeKeyBackFromHelper()
         NSApp.servicesProvider = self
@@ -61,6 +62,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     static func startsHidden(atLogin: Bool, windowAtLogin: Bool) -> Bool { atLogin && !windowAtLogin }
+
+    /// R124: the main window, open, minimised or put away with the hidden app; off screen once it is closed.
+    @MainActor static var mainWindow: NSWindow? { NSApp.windows.first { $0.identifier?.rawValue == "main" } }
+    /// Opens the main window after it was closed; set by the window when it is first shown.
+    @MainActor static var openMainWindow: (() -> Void)?
+
+    /// R124: the key hides Lists only when it is active with the main window in front.
+    static func hidesOnShowKey(active: Bool, mainInFront: Bool) -> Bool { active && mainInFront }
+
+    /// R124: what the key that shows Lists does. Without `activate` the app is not brought to the front:
+    /// the window is shown behind the app that has the keyboard, the way a check run hidden wants it.
+    @MainActor static func showOrHideLists(activate: Bool = true) {
+        let window = mainWindow
+        let key = NSApp.keyWindow
+        let inFront = window.map { window in window.isVisible && !window.isMiniaturized && (key === window || key?.sheetParent === window) } ?? false
+        if hidesOnShowKey(active: NSApp.isActive, mainInFront: inFront) { return NSApp.hide(nil) }
+        // The hidden app is shown first: until then its windows are not on screen, the closed one no more than the others.
+        NSApp.unhideWithoutActivation()
+        if activate { NSApp.activate(ignoringOtherApps: true) }
+        if let window, window.isMiniaturized { window.deminiaturize(nil) }
+        // A closed window stays in the list of windows, off screen: SwiftUI is the one to open it again.
+        guard let window, window.isVisible || window.isMiniaturized else { return openMainWindow?() ?? () }
+        if activate { window.makeKeyAndOrderFront(nil) } else { window.orderFront(nil) }
+    }
 
     /// The window can be closed while the menu bar item and the hotkey keep working.
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
@@ -401,6 +426,10 @@ struct SettingsView: View {
                 }
                 Section(L("Quick Entry")) {
                     KeyboardShortcuts.Recorder(L("Shortcut:"), name: .quickEntry)
+                }
+                // R124: no key until one is recorded.
+                Section(L("Show Lists")) {
+                    KeyboardShortcuts.Recorder(L("Shortcut:"), name: .showLists)
                 }
                 Section(L("Calendar events")) {
                     @Bindable var model = model

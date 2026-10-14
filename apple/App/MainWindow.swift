@@ -20,6 +20,7 @@ extension TaskList {
 struct MainWindow: View {
     @Environment(AppModel.self) private var model
     @Environment(\.undoManager) private var undoManager
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         @Bindable var model = model
@@ -53,7 +54,11 @@ struct MainWindow: View {
                     }
                 }
         }
-        .onAppear { model.undoManager = undoManager }
+        .onAppear {
+            model.undoManager = undoManager
+            // R124: the key that shows Lists opens the window again after it is closed.
+            AppDelegate.openMainWindow = { openWindow(id: "main") }
+        }
         .onChange(of: undoManager) { _, new in model.undoManager = new }
         .alert(model.alertIsError ? L("That did not work") : "Lists", isPresented: Binding(get: { model.alert != nil }, set: { if !$0 { model.alert = nil } })) {
             Button("OK", role: .cancel) {}
