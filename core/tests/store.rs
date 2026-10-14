@@ -210,7 +210,11 @@ fn r9_trash_restore_and_purge() {
     assert_eq!(d.counts().unwrap().trash, 1);
 
     d.restore_task(t.id.clone()).unwrap();
-    assert_eq!(view(&d, Scope::Inbox), ["мусор"]);
+    assert_eq!(
+        titles(&d.projects().unwrap()),
+        ["мусор"],
+        "a project is restored to the sidebar (R120)"
+    );
     assert_eq!(view(&d, Scope::Today), ["часть"]);
 
     d.delete_task(t.id.clone()).unwrap();
@@ -508,7 +512,7 @@ fn r112_data_from_before_the_rule_is_brought_to_it() {
     // R12: a subtask does not stand on its own; the task of a project does, as before.
     assert_eq!(view(&d, Scope::Today), ["т"]);
     assert_eq!(view(&d, Scope::Tag { name: "дом".into() }), ["т"]);
-    assert_eq!(view(&d, Scope::Inbox), ["а", "п"]);
+    assert_eq!(view(&d, Scope::Inbox), ["а"], "the project is in the sidebar (R120)");
     assert!(d
         .planned_notifications(notify_all())
         .unwrap()
@@ -935,6 +939,82 @@ fn projects_are_tasks_with_a_view_of_their_own() {
     // A completed project leaves the sidebar.
     d.complete_task(launch.id).unwrap();
     assert!(d.projects().unwrap().is_empty());
+}
+
+#[test]
+fn r120_a_project_is_not_a_row_of_the_task_views() {
+    let d = device();
+    add(&d, "а");
+    let b = add(&d, "б");
+    assert_eq!(d.counts().unwrap().inbox, 2);
+
+    d.set_project(b.id.clone(), true).unwrap();
+    assert_eq!(view(&d, Scope::Inbox), ["а"], "the project leaves its list");
+    assert_eq!(d.counts().unwrap().inbox, 1);
+    assert_eq!(titles(&d.projects().unwrap()), ["б"], "it stays in the sidebar");
+
+    // Its own date, tag and priority do not bring it back.
+    d.set_due(b.id.clone(), Some("2026-10-05".into())).unwrap();
+    d.add_tag(b.id.clone(), "дом".into()).unwrap();
+    d.set_priority(b.id.clone(), Priority::High).unwrap();
+    let wide = d
+        .create_filter(
+            "всё".into(),
+            FilterSpec {
+                status: FilterStatus::All,
+                ..spec()
+            },
+        )
+        .unwrap();
+    for scope in [
+        Scope::Today,
+        Scope::Upcoming,
+        Scope::All,
+        Scope::Tag { name: "дом".into() },
+        Scope::Filter { id: wide.id.clone() },
+    ] {
+        assert!(!view(&d, scope.clone()).contains(&"б".to_string()), "{scope:?}");
+    }
+    let counts = d.counts().unwrap();
+    assert_eq!((counts.today, counts.overdue, counts.all), (0, 0, 1));
+    assert!(d.tags().unwrap().iter().all(|t| t.name != "дом" || t.open_count == 0));
+    assert_eq!(d.filters().unwrap()[0].open_count, 1, "only «а»");
+    assert_eq!(
+        view(&d, Scope::Search { text: "б".into() }),
+        ["б"],
+        "search finds the project"
+    );
+
+    // The trash shows it, so it can be restored.
+    d.delete_task(b.id.clone()).unwrap();
+    assert_eq!(view(&d, Scope::Trash), ["б"]);
+    d.restore_task(b.id.clone()).unwrap();
+
+    // An empty project turned back into a task returns to its place.
+    d.set_project(b.id.clone(), false).unwrap();
+    assert_eq!(view(&d, Scope::Inbox), ["а", "б"]);
+    assert_eq!(d.counts().unwrap().inbox, 2);
+
+    // A project with a dated task: the task is in Today, the project is not.
+    let p = add(&d, "п");
+    d.set_project(p.id.clone(), true).unwrap();
+    let t = add_sub(&d, &p, "т");
+    d.set_due(t.id.clone(), Some("2026-10-05".into())).unwrap();
+    d.set_due(p.id.clone(), Some("2026-10-05".into())).unwrap();
+    assert_eq!(
+        view(&d, Scope::Today),
+        ["б", "т"],
+        "«б» is a task again, «п» is not a row"
+    );
+    assert_eq!(d.counts().unwrap().today, 2);
+
+    // A completed project is not a row of its list, even with completed tasks shown, but is in Completed.
+    d.complete_task(t.id).unwrap();
+    d.complete_task(p.id.clone()).unwrap();
+    d.set_now_for_tests("2026-10-05T10:30");
+    d.set_list_show_done(INBOX_ID.into(), true).unwrap();
+    assert_eq!(view(&d, Scope::Inbox), ["а", "б"]);
+    assert!(view(&d, Scope::Completed).contains(&"п".to_string()));
 }
 
 fn spec() -> FilterSpec {
