@@ -453,15 +453,23 @@ final class AppModel {
         if let hold = ProcessInfo.processInfo.environment["LISTS_DEBUG_HOLD_START"].flatMap(UInt32.init) { sleep(hold) }
         #endif
         do {
-            store = try Storage.openStore()
+            let opened = try Storage.openStore()
+            store = opened
+            // R102: a setting that is not read leaves its secret out of the core, and sync or push fails later.
+            func read<T>(_ source: String, _ what: String, _ value: () throws -> T) -> T? {
+                do { return try value() } catch {
+                    opened.log(level: .error, source: source, message: "the \(what) were not read at launch: \(logged(error))")
+                    return nil
+                }
+            }
             // The helper does not sync (R115): the passwords stay with Lists.
-            switch LoginItems.isHelper ? nil : try? store?.syncConfig() {
+            switch LoginItems.isHelper ? nil : read("sync", "sync settings", opened.syncConfig) {
             case .webDav(let url, let user)?, .calDav(let url, let user)?:
-                store?.setSyncPassword(password: Keychain.load(account: Keychain.account(url: url, user: user)))
+                opened.setSyncPassword(password: Keychain.load(account: Keychain.account(url: url, user: user)))
             default: break
             }
-            if !LoginItems.isHelper, let server = try? store?.pushServer() {
-                store?.setPushToken(token: Keychain.load(account: Keychain.pushAccount(server: server)))
+            if !LoginItems.isHelper, let server = read("push", "push settings", opened.pushServer) ?? nil {
+                opened.setPushToken(token: Keychain.load(account: Keychain.pushAccount(server: server)))
             }
             // R102: where a log of events begins for this run.
             let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"

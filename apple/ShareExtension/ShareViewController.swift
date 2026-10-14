@@ -7,6 +7,8 @@ struct SharedContent {
     var title = ""
     var notes = ""
     var files: [URL] = []
+    /// R102: why an item that was shared did not arrive, for the log.
+    var failures: [String] = []
 }
 
 /// Share sheet entry: shows the task about to be created and saves it straight
@@ -20,9 +22,13 @@ final class ShareViewController: NSViewController {
         super.viewDidLoad()
         collect { [weak self] content in
             guard let self else { return }
+            let store = try? Storage.openStore()
+            for failure in content.failures {
+                store?.log(level: .error, source: "attachments", message: "a shared item was not received: \(failure)")
+            }
             let form = ShareForm(
                 content: content,
-                lists: (try? Storage.openStore().lists())?.filter { !$0.archived } ?? [],
+                lists: (try? store?.lists())?.filter { !$0.archived } ?? [],
                 onCancel: { [weak self] in
                     self?.extensionContext?.cancelRequest(withError: NSError(domain: NSCocoaErrorDomain, code: NSUserCancelledError))
                 },
@@ -60,9 +66,11 @@ final class ShareViewController: NSViewController {
             for provider in item.attachments ?? [] {
                 if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
                     group.enter()
-                    provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier) { value, _ in
+                    provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier) { value, error in
                         if let url = Self.url(from: value) {
                             lock.withLock { content.files.append(url) }
+                        } else {
+                            lock.withLock { content.failures.append("file: \(error.map(logged) ?? "no address")") }
                         }
                         group.leave()
                     }
@@ -76,14 +84,19 @@ final class ShareViewController: NSViewController {
                     }
                 } else if provider.hasItemConformingToTypeIdentifier(UTType.image.identifier) {
                     group.enter()
-                    provider.loadFileRepresentation(forTypeIdentifier: UTType.image.identifier) { url, _ in
+                    provider.loadFileRepresentation(forTypeIdentifier: UTType.image.identifier) { url, error in
                         // The file is removed when this block returns: keep a copy.
                         if let url {
                             let copy = FileManager.default.temporaryDirectory.appendingPathComponent(url.lastPathComponent)
                             try? FileManager.default.removeItem(at: copy)
-                            if (try? FileManager.default.copyItem(at: url, to: copy)) != nil {
+                            do {
+                                try FileManager.default.copyItem(at: url, to: copy)
                                 lock.withLock { content.files.append(copy) }
+                            } catch {
+                                lock.withLock { content.failures.append("image not copied: \(logged(error))") }
                             }
+                        } else {
+                            lock.withLock { content.failures.append("image: \(error.map(logged) ?? "no file")") }
                         }
                         group.leave()
                     }
