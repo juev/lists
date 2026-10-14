@@ -145,6 +145,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import org.evsyukov.lists.DayEvent
+import org.evsyukov.lists.LookPrefs
 import org.evsyukov.lists.SystemCalendars
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
@@ -780,6 +781,8 @@ fun TaskRow(
 ) {
     var menu by remember { mutableStateOf(false) }
     val done = task.done != null
+    // R122: the spacing chosen in the settings; a subtask in a card keeps its own.
+    val padding = if (subtask) 6.dp else LookPrefs.rowPadding(LookPrefs.rowSpacing(LocalContext.current)).dp
     Row(
         Modifier
             .fillMaxWidth()
@@ -789,7 +792,7 @@ fun TaskRow(
                     .background(if (selected) viewTint(ViewTint.Blue).copy(alpha = 0.12f) else Color.Transparent)
                     .toggleable(value = selected, role = Role.Checkbox, onValueChange = { onSelect() })
             )
-            .padding(start = 4.dp, end = 16.dp, top = 6.dp, bottom = 6.dp),
+            .padding(start = 4.dp, end = 16.dp, top = padding, bottom = padding),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         IconButton(onClick = if (selected == null) onToggle else onSelect, enabled = selected != null || (!task.deleted && !task.isLog)) {

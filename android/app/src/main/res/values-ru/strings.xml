@@ -317,6 +317,10 @@
     <string name="text_size_large">Крупный</string>
     <string name="text_size_larger">Крупнее</string>
     <string name="text_size_largest">Самый крупный</string>
+    <string name="row_spacing">Интервал между задачами</string>
+    <string name="row_spacing_compact">Плотно</string>
+    <string name="row_spacing_normal">Обычно</string>
+    <string name="row_spacing_relaxed">Свободно</string>
     <string name="completed_leave">Выполненные пропадают</string>
     <string name="leave_at_once">сразу</string>
     <string name="leave_after_minutes">через %1$d мин</string>

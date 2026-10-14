@@ -1017,6 +1017,7 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
         str(R.string.text_size_small), str(R.string.text_size_default), str(R.string.text_size_large),
         str(R.string.text_size_larger), str(R.string.text_size_largest),
     )
+    val spacingLabels = listOf(str(R.string.row_spacing_compact), str(R.string.row_spacing_normal), str(R.string.row_spacing_relaxed))
     var allDay by remember { mutableStateOf(NotifyPrefs.allDay(context)) }
     var summary by remember { mutableStateOf(NotifyPrefs.summary(context)) }
     var choosing by remember { mutableStateOf<String?>(null) }
@@ -1103,6 +1104,7 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
                         "general" -> {
                             SettingRow(str(R.string.appearance), lookLabels[LookPrefs.choices.indexOf(LookPrefs.appearance(context))]) { choosing = "appearance" }
                             SettingRow(str(R.string.text_size), sizeLabels[LookPrefs.textScales.indexOf(LookPrefs.textScale(context))]) { choosing = "textSize" }
+                            SettingRow(str(R.string.row_spacing), spacingLabels[LookPrefs.rowSpacings.indexOf(LookPrefs.rowSpacing(context))]) { choosing = "rowSpacing" }
                             SettingRow(str(R.string.completed_leave), keepDoneLabel(state.keepDone)) { choosing = "keepDone" }
                             // R121: one switch for all devices; turning it off asks where the tasks of Inbox go.
                             SwitchRow(str(R.string.show_inbox), !state.inboxHidden) { on ->
@@ -1358,6 +1360,9 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
             LookPrefs.setTextScale(context, LookPrefs.textScales[it])
             // The size is part of the configuration of the activity: it is rebuilt, and the settings stay open.
             (context as? Activity)?.recreate()
+        }
+        "rowSpacing" -> ChoiceDialog(str(R.string.row_spacing), spacingLabels, LookPrefs.rowSpacings.indexOf(LookPrefs.rowSpacing(context)), { choosing = null }) {
+            LookPrefs.setRowSpacing(context, LookPrefs.rowSpacings[it])
         }
         "lead" -> MultiChoiceDialog(str(R.string.due_at_time_setting), NotifyPrefs.leads.map(::leadLabel), NotifyPrefs.leads.map { it in leads }, { choosing = null }) { index, on ->
             leads = if (on) (leads + NotifyPrefs.leads[index]).distinct().sorted() else leads - NotifyPrefs.leads[index]
