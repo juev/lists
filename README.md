@@ -177,7 +177,7 @@ LISTS_CALDAV_URL=https://example.org/dav/calendars/me/ LISTS_CALDAV_USER=me LIST
 
 ## Status
 
-Version 0.3.3-rc.2. What is implemented and how each part was checked is listed at the end of [docs/specs/product.md](docs/specs/product.md).
+Version 0.4.0-rc.1. What is implemented and how each part was checked is listed at the end of [docs/specs/product.md](docs/specs/product.md).
 
 Known gaps:
 

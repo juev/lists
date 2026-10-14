@@ -20,8 +20,8 @@ android {
         applicationId = "org.evsyukov.lists"
         minSdk = 26
         targetSdk = 36
-        versionCode = 18
-        versionName = "0.3.3-rc.2"
+        versionCode = 19
+        versionName = "0.4.0-rc.1"
     }
 
     signingConfigs {
