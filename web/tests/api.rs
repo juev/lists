@@ -498,6 +498,53 @@ fn r126_a_project_is_completed_from_the_sidebar_and_comes_back_on_undo() {
 }
 
 #[test]
+fn r127_a_project_is_created_in_the_list_of_the_view() {
+    let web = web(None);
+    let work = call(&web, "", json!({ "op": "createList", "name": "Работа" }));
+    let work_id = work["id"].as_str().unwrap().to_string();
+    let made = call(
+        &web,
+        "",
+        json!({ "op": "createProject", "title": "Отпуск", "scope": format!("list:{work_id}") }),
+    );
+    assert_eq!(made["project"], true);
+    assert_eq!(made["list"], work_id.as_str());
+    let id = made["id"].as_str().unwrap().to_string();
+
+    // In the view of a project the new one goes to the list of that project.
+    let inner = call(
+        &web,
+        "",
+        json!({ "op": "createProject", "title": "Билеты", "scope": format!("project:{id}") }),
+    );
+    assert_eq!(inner["list"], work_id.as_str());
+    assert!(
+        inner["parent"].is_null(),
+        "a project is top-level, not a task of the open one"
+    );
+
+    // A view without a list of its own: the default list for new tasks (R40).
+    let today = call(
+        &web,
+        "",
+        json!({ "op": "createProject", "title": "Ремонт", "scope": "today" }),
+    );
+    assert_eq!(today["list"], "inbox");
+
+    let overview = get(&web, "", "/api/overview");
+    let titles: Vec<&str> = overview["projects"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["title"].as_str().unwrap())
+        .collect();
+    assert_eq!(titles.len(), 3);
+    for title in ["Отпуск", "Билеты", "Ремонт"] {
+        assert!(titles.contains(&title), "{title} is in the sidebar");
+    }
+}
+
+#[test]
 fn projects_and_saved_filters_over_the_api() {
     let web = web(None);
     let project = call(&web, "", json!({ "op": "quickAdd", "text": "Запуск сайта" }));

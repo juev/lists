@@ -573,6 +573,17 @@ impl App {
                 "setProject" => s
                     .set_project(id()?, a.get("value").and_then(Value::as_bool).unwrap_or(false))
                     .map(|_| done)?,
+                // R127: the list of the view, of the open project, or the default one (R40).
+                "createProject" => {
+                    let scope = optional(a, "scope").unwrap_or_default();
+                    let list = match scope.split_once(':') {
+                        Some(("list", list)) => Some(list.to_string()),
+                        Some(("project", project)) => Some(s.task(project.to_string())?.list_id),
+                        _ if scope == "inbox" => Some("inbox".to_string()),
+                        _ => None,
+                    };
+                    task_json(&s.create_project(text_arg(a, "title")?, list)?)
+                }
                 "createFilter" | "updateFilter" => {
                     let spec: FilterSpec = serde_json::from_value(a.get("spec").cloned().unwrap_or(Value::Null))
                         .map_err(|e| AppError::Invalid {

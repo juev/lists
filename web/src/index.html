@@ -135,7 +135,7 @@ try { const look = localStorage.getItem("appearance"); if (look === "light" || l
 "use strict";
 const RU = {
   "Inbox": "Входящие", "Today": "Сегодня", "Upcoming": "Предстоящие", "All": "Все", "Completed": "Выполненные", "Won't do": "Не буду делать", "Trash": "Корзина",
-  "Lists": "Списки", "Tags": "Теги", "New list": "Новый список", "List name": "Название списка", "Search": "Поиск", "New task": "Новая задача",
+  "Lists": "Списки", "Tags": "Теги", "New list": "Новый список", "List name": "Название списка", "New project": "Новый проект", "Project name": "Название проекта", "Search": "Поиск", "New task": "Новая задача",
   "Overdue": "Просрочено", "Tomorrow": "Завтра", "Yesterday": "Вчера", "Title": "Название", "Notes": "Заметка", "Due": "Срок", "Start": "Начало",
   "Reminder": "Напоминание", "Priority": "Приоритет", "No priority": "Без приоритета", "Low": "Низкий", "Medium": "Средний", "High": "Высокий",
   "Repeat": "Повтор", "Does not repeat": "Не повторяется", "Every day": "Каждый день", "On weekdays": "По будням", "Every week": "Каждую неделю",
@@ -627,8 +627,10 @@ function render() {
       $("div", { class: "side-title" }, t("Lists")),
       o.lists.filter(l => l.id !== "inbox" && !l.archived).map(l => nav("list:" + l.id, l.name, l.open, { color: l.color })),
       $("button", { class: "nav", style: "color:var(--muted)", onclick: () => { const name = prompt(t("List name")); if (name && name.trim()) call("createList", { name: name.trim() }).then(l => { state.scope = "list:" + l.id; load(); }); } }, "+ " + t("New list")),
-      o.projects.length ? $("div", { class: "side-title" }, t("Projects")) : null,
+      // R127: the section is shown without projects as well, since a project is made from it.
+      $("div", { class: "side-title" }, t("Projects")),
       o.projects.map(projectNav),
+      $("button", { class: "nav", style: "color:var(--muted)", onclick: () => { const title = prompt(t("Project name")); if (title && title.trim()) call("createProject", { title: title.trim(), scope: state.scope }).then(p => { state.scope = "project:" + p.id; load(); }); } }, "+ " + t("New project")),
       $("div", { class: "side-title" }, t("Filters")), o.filters.map(f => nav("filter:" + f.id, f.name, f.open)),
       $("button", { class: "nav", style: "color:var(--muted)", onclick: () => { state.filterEdit = {}; state.drawer = false; render(); } }, "+ " + t("New filter")),
       o.tags.length ? $("div", { class: "side-title" }, t("Tags")) : null, o.tags.map(g => nav("tag:" + g.name, "#" + g.name, g.open)),
