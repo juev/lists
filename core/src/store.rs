@@ -46,6 +46,7 @@ pub struct Store {
     pub(crate) log_level: std::sync::atomic::AtomicU8,
     /// One writer of the log file at a time.
     pub(crate) log_lock: Mutex<()>,
+    /// S45: own log files that make a snapshot whatever they weigh.
     pub(crate) compact_after: Mutex<u32>,
     pub(crate) sync_password: Mutex<Option<String>>,
     /// The storage this process has already checked the format of and listed the snapshots of.
@@ -735,7 +736,7 @@ impl Store {
             dir,
             log_level: std::sync::atomic::AtomicU8::new(crate::log::LogLevel::Error.code()),
             log_lock: Mutex::new(()),
-            compact_after: Mutex::new(64),
+            compact_after: Mutex::new(256),
             sync_password: Mutex::new(None),
             storage_seen: Mutex::new(None),
             folder_seen: Mutex::new(None),

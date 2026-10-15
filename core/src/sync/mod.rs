@@ -36,6 +36,12 @@ use webdav::WebDavRemote;
 const ROOT: &str = "lists/v1";
 const FORMAT: u32 = 1;
 
+/// S45: bytes of this device's log files uploaded since its last snapshot, and the size of that snapshot.
+const LOG_BYTES: &str = "log_bytes";
+const SNAP_BYTES: &str = "snap_bytes";
+/// S45: what a snapshot is taken to weigh before the device has written one.
+const SNAP_FLOOR: u64 = 16 * 1024;
+
 /// Set while this device is to put its data over the storage's (S38).
 const REPLACE: &str = "replace_remote";
 /// What the registers looked like when `kept` was filled (S39).
@@ -390,7 +396,14 @@ impl Store {
                 break;
             };
             remote.put(&format!("{ROOT}/log/{}", file_name(me, seq as u64)), &body)?;
-            self.lock().conn.execute("DELETE FROM outbox WHERE seq = ?1", [seq])?;
+            {
+                let mut inner = self.lock();
+                let tx = inner.conn.transaction()?;
+                tx.execute("DELETE FROM outbox WHERE seq = ?1", [seq])?;
+                let bytes = meta_u64(&tx, LOG_BYTES)? + body.len() as u64;
+                db::meta_set(&tx, LOG_BYTES, &bytes.to_string())?;
+                tx.commit()?;
+            }
             pushed += changes;
         }
         Ok(pushed)
@@ -495,6 +508,9 @@ impl Store {
         for old in old_snaps.iter().filter(|s| **s < seq) {
             remote.delete(&format!("{ROOT}/snap/{}", file_name(me, *old)))?;
         }
+        let inner = self.lock();
+        db::meta_set(&inner.conn, SNAP_BYTES, &body.len().to_string())?;
+        db::meta_set(&inner.conn, LOG_BYTES, "0")?;
         Ok(())
     }
 
@@ -735,9 +751,19 @@ impl Store {
         if report.pushed > 0 {
             own_logs.insert(seq);
         }
+        // S45: a snapshot once the log since the last one outweighs it, or once the files are too many.
         let limit = *self.compact_after.lock().unwrap_or_else(|p| p.into_inner());
-        let forced = db::meta_get(&self.lock().conn, "force_snapshot")?.is_some();
-        if forced || own_logs.len() as u32 > limit {
+        let (forced, outweighs) = {
+            let conn = &self.lock().conn;
+            let snapshot = db::meta_get(conn, SNAP_BYTES)?
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(SNAP_FLOOR);
+            (
+                db::meta_get(conn, "force_snapshot")?.is_some(),
+                meta_u64(conn, LOG_BYTES)? > snapshot,
+            )
+        };
+        if forced || outweighs || own_logs.len() as u32 > limit {
             self.compact(remote, &me, &own_logs, &own_marks)?;
             db::meta_del(&self.lock().conn, "force_snapshot")?;
         }
@@ -958,7 +984,8 @@ impl Store {
              DELETE FROM peers; DELETE FROM outbox; DELETE FROM blobs_uploaded;
              DELETE FROM caldav_calendars; DELETE FROM caldav_items;
              DELETE FROM meta WHERE key IN ('sync_ok', 'sync_error', 'caldav_filters_sent', 'caldav_home', 'push_published',
-                                            'own_seq', 'force_snapshot', 'replace_remote', 'replace_kept_at');",
+                                            'own_seq', 'force_snapshot', 'replace_remote', 'replace_kept_at',
+                                            'log_bytes', 'snap_bytes');",
         )?;
         if restore {
             // The file comes from outside: only registers this version would accept from a peer get in.
@@ -1027,7 +1054,7 @@ impl Store {
             "DELETE FROM peers; DELETE FROM outbox; DELETE FROM blobs_uploaded;
              DELETE FROM caldav_calendars; DELETE FROM caldav_items; DELETE FROM kept;
              DELETE FROM meta WHERE key IN ('sync_ok', 'sync_error', 'caldav_filters_sent', 'caldav_home', 'push_published',
-                                            'replace_remote', 'replace_kept_at');
+                                            'replace_remote', 'replace_kept_at', 'log_bytes', 'snap_bytes');
              UPDATE fields SET dirty = 1;",
         )?;
         db::meta_set(&tx, "force_snapshot", "1")?;
@@ -1036,8 +1063,12 @@ impl Store {
     }
 }
 
+fn meta_u64(conn: &rusqlite::Connection, key: &str) -> Result<u64> {
+    Ok(db::meta_get(conn, key)?.and_then(|s| s.parse().ok()).unwrap_or(0))
+}
+
 fn own_seq(conn: &rusqlite::Connection) -> Result<u64> {
-    Ok(db::meta_get(conn, "own_seq")?.and_then(|s| s.parse().ok()).unwrap_or(0))
+    meta_u64(conn, "own_seq")
 }
 
 fn change_from_row(r: &rusqlite::Row) -> rusqlite::Result<Change> {

@@ -622,6 +622,80 @@ fn s11_device_whose_logs_are_all_compacted_is_still_readable() {
     assert_eq!(view(&c, Scope::Inbox), ["единственная"]);
 }
 
+/// Files of one device in a folder of the storage, with their sizes in bytes.
+fn own_files(storage: &TempDir, dir: &str, device: &str, suffix: &str) -> Vec<(String, u64)> {
+    files(storage, dir)
+        .into_iter()
+        .filter(|f| f.starts_with(device) && f.ends_with(suffix))
+        .map(|f| {
+            let size = std::fs::metadata(storage.path().join("lists/v1").join(dir).join(&f))
+                .unwrap()
+                .len();
+            (f, size)
+        })
+        .collect()
+}
+
+#[test]
+fn s45_a_snapshot_follows_the_weight_of_the_log() {
+    let storage = tempfile::tempdir().unwrap();
+    let (a, b) = (device(), device());
+    let me = a.device_id();
+    let log = || {
+        own_files(&storage, "log", &me, ".jsonl")
+            .iter()
+            .map(|(_, n)| n)
+            .sum::<u64>()
+    };
+    let snaps = || own_files(&storage, "snap", &me, ".jsonl");
+    let task = add(&a, "задача");
+    sync(&a, &storage);
+
+    // Before its first snapshot the device takes one to weigh 16 KB.
+    let big = 5000; // bytes of notes in one edit
+    let mut runs = 0;
+    while snaps().is_empty() {
+        let before = log();
+        assert!(before <= 16 * 1024, "the log grew to {before} bytes without a snapshot");
+        runs += 1;
+        a.set_notes(task.id.clone(), format!("{runs}{}", "з".repeat(big / 2)))
+            .unwrap();
+        sync(&a, &storage);
+        if !snaps().is_empty() {
+            assert!(
+                before + big as u64 > 16 * 1024,
+                "a snapshot came at {before} bytes of log"
+            );
+        }
+    }
+    assert!(runs > 1);
+    let [(first, weight)] = &snaps()[..] else {
+        panic!("{:?}", snaps())
+    };
+
+    // Small edits do not make a new one while the log since the snapshot is lighter than it.
+    for i in 0..10 {
+        a.set_title(task.id.clone(), format!("задача {i}")).unwrap();
+        sync(&a, &storage);
+    }
+    assert!(log() < *weight, "{} bytes of log against a snapshot of {weight}", log());
+    assert_eq!(own_files(&storage, "log", &me, ".jsonl").len(), 10);
+    assert_eq!(&snaps()[0].0, first);
+
+    // One upload heavier than the snapshot makes one in the same run.
+    a.set_notes(task.id.clone(), "ж".repeat(*weight as usize)).unwrap();
+    sync(&a, &storage);
+    assert_ne!(&snaps()[0].0, first);
+    assert!(own_files(&storage, "log", &me, ".jsonl").is_empty());
+
+    sync(&b, &storage);
+    let got = b.task(task.id).unwrap();
+    assert_eq!(
+        (got.title.as_str(), got.notes.len()),
+        ("задача 9", "ж".len() * *weight as usize)
+    );
+}
+
 #[test]
 fn s12_joining_a_used_storage_merges_instead_of_replacing() {
     let storage = tempfile::tempdir().unwrap();
