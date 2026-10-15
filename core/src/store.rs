@@ -1476,6 +1476,30 @@ impl Store {
         self.write(|w| create_task(w, new))
     }
 
+    /// Creates an empty project with only a title (R127). Without a list it goes to the default
+    /// list for new tasks (R40). The defaults of the list are not applied: the due date of a
+    /// project becomes that of its tasks (R125).
+    pub fn create_project(&self, title: String, list_id: Option<String>) -> Result<TaskItem> {
+        self.write(|w| {
+            let title = title.trim().to_string();
+            if title.is_empty() {
+                return Err(AppError::invalid("title is empty"));
+            }
+            let list_id = match list_id {
+                Some(id) => id,
+                None => default_list_id(w.tx, None)?,
+            };
+            get_list(w.tx, &list_id)?;
+            let id = new_id();
+            w.task(&id, "list", json!(list_id))?;
+            w.task(&id, "pos", json!(append_pos_in_list(w.tx, &list_id)?))?;
+            w.task(&id, "title", json!(title))?;
+            w.task(&id, "project", json!(true))?;
+            w.flush()?;
+            get_task(w.tx, &id)
+        })
+    }
+
     pub fn parse_quick(&self, text: String) -> QuickParse {
         let today = self.lock().now().date();
         quickadd::parse(&text, today)
