@@ -46,11 +46,15 @@ fun isOverdue(value: String): Boolean {
     return at < LocalDateTime.now()
 }
 
+/** How many days the day of [value] lies after [now]: 0 for today, 1 for tomorrow, -1 for yesterday. */
+fun daysAhead(value: String, now: LocalDate = LocalDate.now()): Long? =
+    runCatching { LocalDate.parse(dayOf(value)) }.getOrNull()?.let { ChronoUnit.DAYS.between(now, it) }
+
 /** "Сегодня", "Завтра, 18:30", "пт, 9 окт". */
 fun dateLabel(value: String): String {
     val date = runCatching { LocalDate.parse(dayOf(value)) }.getOrNull() ?: return value
     val now = LocalDate.now()
-    val text = when (ChronoUnit.DAYS.between(now, date)) {
+    val text = when (daysAhead(value, now)) {
         0L -> str(R.string.today)
         1L -> str(R.string.tomorrow)
         -1L -> str(R.string.yesterday)

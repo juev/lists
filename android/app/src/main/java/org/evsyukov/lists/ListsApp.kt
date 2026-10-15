@@ -39,6 +39,7 @@ import uniffi.lists_core.LogLevel
 import uniffi.lists_core.finishPushes
 import uniffi.lists_core.NotificationKind
 import uniffi.lists_core.NotifySettings
+import uniffi.lists_core.PlannedNotification
 import uniffi.lists_core.Store
 import uniffi.lists_core.SyncConfig
 import uniffi.lists_core.SyncReport
@@ -464,13 +465,10 @@ object Reminders {
         val scheduled = mutableSetOf<String>()
         for (item in plan) {
             val at = parseMoment(item.at)?.atZone(ZoneId.systemDefault())?.toInstant()?.toEpochMilli() ?: continue
-            val (title, body) = when (item.kind) {
-                NotificationKind.SUMMARY -> context.getString(R.string.app_name) to str(R.string.summary_body, item.count.toString())
-                else -> item.title to item.due?.let { str(R.string.due_at, dateLabel(it).lowercase()) }.orEmpty()
-            }
+            val (title, body, due) = content(item)
             // R36: one alarm for each planned moment. A task with several reminders has several, and an alarm
             // named after the task alone would replace the one before it.
-            val alarm = pending(context, item.key, item.taskId ?: item.key, title, body)
+            val alarm = pending(context, item.key, item.taskId ?: item.key, title, body, due)
             // Without the permission the system may deliver the alarm late, within a window of up to an hour.
             // Some firmware does the same to exact alarms and leaves only an alarm of the person alone (R119).
             when (way) {
@@ -484,12 +482,25 @@ object Reminders {
     }
 
     /** `key` tells the alarms apart; `id` is the task the notification opens, and a later notification of the same task replaces the earlier one. */
-    private fun pending(context: Context, key: String, id: String, title: String, body: String): PendingIntent {
+    private fun pending(context: Context, key: String, id: String, title: String, body: String, due: String? = null): PendingIntent {
         val intent = Intent(context, ReminderReceiver::class.java)
             .setAction("org.evsyukov.lists.REMIND.$key")
-            .putExtra("id", id).putExtra("title", title).putExtra("body", body)
+            .putExtra("id", id).putExtra("title", title).putExtra("body", body).putExtra("due", due)
         return PendingIntent.getBroadcast(context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
     }
+
+    /**
+     * R36: the title, the ready body and the due date an alarm carries. The day of the due date is named
+     * by the receiver when the notification appears: a text written at planning would say "tomorrow"
+     * on the due day itself (#280).
+     */
+    fun content(item: PlannedNotification): Triple<String, String, String?> = when (item.kind) {
+        NotificationKind.SUMMARY -> Triple(str(R.string.app_name), str(R.string.summary_body, item.count.toString()), null)
+        else -> Triple(item.title, "", item.due)
+    }
+
+    /** "Due: today, 10:00", with the day named as it is when the notification appears. */
+    fun dueBody(due: String): String = str(R.string.due_at, dateLabel(due).lowercase())
 
     /** Creating a channel that exists changes nothing in it: its sound stays the one the user chose. */
     private fun ensureChannel(context: Context) {
@@ -537,7 +548,7 @@ class ReminderReceiver : BroadcastReceiver() {
             context,
             intent.getStringExtra("id") ?: return,
             intent.getStringExtra("title").orEmpty(),
-            intent.getStringExtra("body").orEmpty(),
+            intent.getStringExtra("due")?.let { Reminders.dueBody(it) } ?: intent.getStringExtra("body").orEmpty(),
         )
     }
 }
