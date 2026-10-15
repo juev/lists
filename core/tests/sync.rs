@@ -636,6 +636,19 @@ fn own_files(storage: &TempDir, dir: &str, device: &str, suffix: &str) -> Vec<(S
         .collect()
 }
 
+/// Letters that do not compress: a snapshot holding them weighs about what they do.
+fn noise(len: usize, seed: u64) -> String {
+    let mut x = seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1;
+    (0..len)
+        .map(|_| {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            (b'a' + (x % 26) as u8) as char
+        })
+        .collect()
+}
+
 #[test]
 fn s45_a_snapshot_follows_the_weight_of_the_log() {
     let storage = tempfile::tempdir().unwrap();
@@ -652,14 +665,13 @@ fn s45_a_snapshot_follows_the_weight_of_the_log() {
     sync(&a, &storage);
 
     // Before its first snapshot the device takes one to weigh 16 KB.
-    let big = 5000; // bytes of notes in one edit
+    let big = 8000; // bytes of notes in one edit
     let mut runs = 0;
     while snaps().is_empty() {
         let before = log();
         assert!(before <= 16 * 1024, "the log grew to {before} bytes without a snapshot");
         runs += 1;
-        a.set_notes(task.id.clone(), format!("{runs}{}", "з".repeat(big / 2)))
-            .unwrap();
+        a.set_notes(task.id.clone(), noise(big, runs)).unwrap();
         sync(&a, &storage);
         if !snaps().is_empty() {
             assert!(
@@ -674,12 +686,12 @@ fn s45_a_snapshot_follows_the_weight_of_the_log() {
     };
 
     // Small edits do not make a new one while the log since the snapshot is lighter than it.
-    for i in 0..10 {
+    for i in 0..5 {
         a.set_title(task.id.clone(), format!("задача {i}")).unwrap();
         sync(&a, &storage);
     }
     assert!(log() < *weight, "{} bytes of log against a snapshot of {weight}", log());
-    assert_eq!(own_files(&storage, "log", &me, ".jsonl").len(), 10);
+    assert_eq!(own_files(&storage, "log", &me, ".jsonl").len(), 5);
     assert_eq!(&snaps()[0].0, first);
 
     // One upload heavier than the snapshot makes one in the same run.
@@ -692,8 +704,79 @@ fn s45_a_snapshot_follows_the_weight_of_the_log() {
     let got = b.task(task.id).unwrap();
     assert_eq!(
         (got.title.as_str(), got.notes.len()),
-        ("задача 9", "ж".len() * *weight as usize)
+        ("задача 4", "ж".len() * *weight as usize)
     );
+}
+
+/// Rewrites a storage the way a version of format 1 would have left it:
+/// plain snapshots, `"v":1` in every header, format 1 in `vault.json`.
+fn to_format_1(storage: &TempDir) -> String {
+    use std::io::Read;
+    let root = storage.path().join("lists/v1");
+    for dir in ["log", "snap"] {
+        for name in files(storage, dir).iter().filter(|n| n.ends_with(".jsonl")) {
+            let path = root.join(dir).join(name);
+            let data = std::fs::read(&path).unwrap();
+            let mut text = String::new();
+            if data.starts_with(&[0x1f, 0x8b]) {
+                flate2::read::GzDecoder::new(&data[..])
+                    .read_to_string(&mut text)
+                    .unwrap();
+            } else {
+                text = String::from_utf8(data).unwrap();
+            }
+            std::fs::write(&path, text.replacen("{\"v\":2,", "{\"v\":1,", 1)).unwrap();
+        }
+    }
+    let vault: serde_json::Value = serde_json::from_slice(&std::fs::read(root.join("vault.json")).unwrap()).unwrap();
+    let id = vault["vault"].as_str().unwrap().to_string();
+    std::fs::write(root.join("vault.json"), format!("{{\"format\":1,\"vault\":\"{id}\"}}")).unwrap();
+    id
+}
+
+#[test]
+fn s46_a_storage_of_format_1_moves_to_format_2() {
+    let storage = tempfile::tempdir().unwrap();
+    let root = storage.path().join("lists/v1");
+    let (a, b, c) = (device(), device(), device());
+    a.set_compact_after_for_tests(0);
+    add(&a, "из снимка");
+    sync(&a, &storage);
+    a.set_compact_after_for_tests(256);
+    add(&a, "из журнала");
+    sync(&a, &storage);
+    let vault = to_format_1(&storage);
+    let a_snap = own_files(&storage, "snap", &a.device_id(), ".jsonl");
+    assert!(!std::fs::read(root.join("snap").join(&a_snap[0].0))
+        .unwrap()
+        .starts_with(&[0x1f, 0x8b]));
+
+    b.set_compact_after_for_tests(0);
+    add(&b, "с B");
+    sync(&b, &storage);
+    let mut got = view(&b, Scope::Inbox);
+    got.sort();
+    assert_eq!(got, ["из журнала", "из снимка", "с B"]);
+    assert_eq!(
+        std::fs::read_to_string(root.join("vault.json")).unwrap(),
+        format!("{{\"format\":2,\"vault\":\"{vault}\"}}")
+    );
+    let b_snap = own_files(&storage, "snap", &b.device_id(), ".jsonl");
+    let data = std::fs::read(root.join("snap").join(&b_snap[0].0)).unwrap();
+    assert!(data.starts_with(&[0x1f, 0x8b]), "the snapshot is compressed");
+
+    // C has no snapshot yet, so its log file stays to be looked at.
+    add(&c, "с C");
+    sync(&c, &storage);
+    let c_log = own_files(&storage, "log", &c.device_id(), ".jsonl");
+    let text = std::fs::read_to_string(root.join("log").join(&c_log[0].0)).unwrap();
+    assert!(text.starts_with("{\"v\":2,"), "{text}");
+
+    let d = device();
+    sync(&d, &storage);
+    let mut got = view(&d, Scope::Inbox);
+    got.sort();
+    assert_eq!(got, ["из журнала", "из снимка", "с B", "с C"]);
 }
 
 #[test]
@@ -1108,12 +1191,12 @@ fn s14_newer_storage_format_stops_sync_but_not_local_work() {
     std::fs::create_dir_all(storage.path().join("lists/v1")).unwrap();
     std::fs::write(
         storage.path().join("lists/v1/vault.json"),
-        br#"{"format":2,"vault":"x"}"#,
+        br#"{"format":3,"vault":"x"}"#,
     )
     .unwrap();
 
     let err = a.sync_with(&DirRemote::new(storage.path())).unwrap_err();
-    assert!(err.to_string().contains("format 2"), "{err}");
+    assert!(err.to_string().contains("format 3"), "{err}");
     add(&a, "локально");
     assert_eq!(view(&a, Scope::Inbox), ["локально"]);
 }
@@ -1127,15 +1210,15 @@ fn s14_format_raised_while_the_app_runs_is_noticed_at_the_first_unreadable_file(
 
     // Another device moved the storage on and wrote a file this version cannot read.
     let root = storage.path().join("lists/v1");
-    std::fs::write(root.join("vault.json"), br#"{"format":2,"vault":"x"}"#).unwrap();
+    std::fs::write(root.join("vault.json"), br#"{"format":3,"vault":"x"}"#).unwrap();
     let next = format!("{}-{:010}.jsonl", a.device_id(), 2);
     std::fs::write(
         root.join("log").join(next),
-        format!("{{\"v\":2,\"device\":\"{}\",\"seq\":2,\"count\":0}}\n", a.device_id()),
+        format!("{{\"v\":3,\"device\":\"{}\",\"seq\":2,\"count\":0}}\n", a.device_id()),
     )
     .unwrap();
     let err = b.sync_with(&DirRemote::new(storage.path())).unwrap_err();
-    assert!(err.to_string().contains("format 2"), "{err}");
+    assert!(err.to_string().contains("format 3"), "{err}");
 }
 
 #[test]

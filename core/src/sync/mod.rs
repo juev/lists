@@ -34,7 +34,12 @@ use remote::{DirRemote, Remote};
 use webdav::WebDavRemote;
 
 const ROOT: &str = "lists/v1";
-const FORMAT: u32 = 1;
+/// S46: the storage format this version writes; it reads format 1 as well.
+const FORMAT: u32 = 2;
+/// `push/<device>.json` keeps its own number: the storage format does not change it.
+const PUSH_FORMAT: u32 = 1;
+/// The first bytes of a gzip stream: how a reader tells a compressed snapshot (S46).
+const GZIP_MAGIC: [u8; 2] = [0x1f, 0x8b];
 
 /// S45: bytes of this device's log files uploaded since its last snapshot, and the size of that snapshot.
 const LOG_BYTES: &str = "log_bytes";
@@ -86,13 +91,31 @@ fn encode(header: &Header, changes: &[Change]) -> Result<Vec<u8>> {
     Ok(out)
 }
 
+/// S46: a snapshot goes to the storage compressed.
+fn compress(data: &[u8]) -> Result<Vec<u8>> {
+    use std::io::Write;
+    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    encoder.write_all(data)?;
+    Ok(encoder.finish()?)
+}
+
 /// `None` for a file that is truncated or otherwise unreadable: the caller
 /// leaves its cursor where it is and tries again on the next run.
 fn decode(data: &[u8]) -> Option<Batch> {
+    let unpacked;
+    let data = if data.starts_with(&GZIP_MAGIC) {
+        use std::io::Read;
+        let mut out = Vec::new();
+        flate2::read::GzDecoder::new(data).read_to_end(&mut out).ok()?;
+        unpacked = out;
+        &unpacked[..]
+    } else {
+        data
+    };
     let text = std::str::from_utf8(data).ok()?;
     let mut lines = text.lines();
     let header: Header = serde_json::from_str(lines.next()?).ok()?;
-    if header.v != FORMAT {
+    if header.v == 0 || header.v > FORMAT {
         return None;
     }
     let mut changes = Vec::with_capacity(header.count);
@@ -259,13 +282,20 @@ impl Store {
             Some(data) => {
                 let vault: Vault = serde_json::from_slice(&data)
                     .map_err(|_| AppError::sync("vault.json in the storage is not readable"))?;
-                if vault.format != FORMAT {
-                    return Err(AppError::sync(format!(
-                        "the storage uses format {}, this version understands format {FORMAT}; update the app",
-                        vault.format
-                    )));
+                match vault.format {
+                    FORMAT => Ok(()),
+                    // S46: the storage moves on; its files of format 1 stay readable.
+                    1 => remote.put(
+                        &path,
+                        &serde_json::to_vec(&Vault {
+                            format: FORMAT,
+                            vault: vault.vault,
+                        })?,
+                    ),
+                    other => Err(AppError::sync(format!(
+                        "the storage uses format {other}, this version understands format {FORMAT}; update the app"
+                    ))),
                 }
-                Ok(())
             }
             None => {
                 let vault = Vault {
@@ -421,7 +451,7 @@ impl Store {
                 remote.put(
                     &path,
                     &serde_json::to_vec(&PushRecord {
-                        v: FORMAT,
+                        v: PUSH_FORMAT,
                         url: url.clone(),
                     })?,
                 )?;
@@ -491,7 +521,7 @@ impl Store {
                 count: changes.len(),
                 covers,
             };
-            (encode(&header, &changes)?, seq)
+            (compress(&encode(&header, &changes)?)?, seq)
         };
         let old_snaps = index(&remote.list(&format!("{ROOT}/snap"))?, DATA)
             .remove(me)
