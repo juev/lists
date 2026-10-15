@@ -404,6 +404,8 @@ struct Sidebar: View {
                 Spacer()
             }
             .padding(10)
+            // The rows of the sidebar scroll under the bar: without a background of its own they show through it (#278).
+            .background(.bar)
         }
         .sheet(item: $editing) { ListEditor(list: $0) }
         .sheet(isPresented: $model.creatingList) { ListEditor(list: nil) }
