@@ -97,6 +97,10 @@ data class UiState(
             is Scope.Filter -> filters.firstOrNull { it.id == s.id }?.name ?: str(R.string.filter)
         }
 
+    /** R127: the list a new project goes to: that of the open project, otherwise the one a new task would take. */
+    fun newProjectListId(): String? =
+        (scope as? Scope.Project)?.let { open -> projects.firstOrNull { it.id == open.id }?.listId } ?: newTaskListId()
+
     /** The list a task added in the current view goes to; null under a project, where the parent decides. */
     fun newTaskListId(): String? = when (val s = scope) {
         is Scope.Project -> null
@@ -323,6 +327,20 @@ class MainViewModel : ViewModel() {
     fun completeProject(project: TaskItem) {
         if (project.done != null) return
         act(Notice(str(R.string.project_done_notice)) { it.undoCloseTask(project.id) }) { it.completeTask(project.id) }
+    }
+
+    /**
+     * R127: creates an empty project and opens its view. It goes to the list on screen, to the list of the
+     * open project, or where the view has no list, to the default one (R40).
+     */
+    fun createProject(title: String) {
+        val list = _state.value.newProjectListId()
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) { runCatching { Repo.store.createProject(title, list) } }
+            result.exceptionOrNull()?.let { e -> _state.update { it.copy(notice = Notice(describe(e))) } }
+            Repo.changed()
+            result.getOrNull()?.let { select(Scope.Project(it.id)) }
+        }
     }
 
     /** Closes the task as "won't do" (R69); what follows is the same as after completing it. */

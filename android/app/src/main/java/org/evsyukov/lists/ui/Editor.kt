@@ -946,6 +946,23 @@ fun ListDialog(list: TaskList?, model: MainViewModel, onDismiss: () -> Unit) {
     )
 }
 
+/** R127: a new project, its title only; the list is taken from the view. */
+@Composable
+fun ProjectDialog(onDismiss: () -> Unit, onCreate: (String) -> Unit) {
+    var title by remember { mutableStateOf("") }
+    FormDialog(
+        title = str(R.string.new_project),
+        onDismiss = onDismiss,
+        content = {
+            OutlinedTextField(title, { title = it }, singleLine = true, label = { Text(str(R.string.title)) }, keyboardOptions = SentenceKeyboard)
+        },
+        confirmButton = {
+            TextButton(enabled = title.isNotBlank(), onClick = { onDismiss(); onCreate(title) }) { Text(str(R.string.create)) }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(str(R.string.cancel)) } },
+    )
+}
+
 /** The activity a composable is shown in, when there is one. */
 private tailrec fun Context.activity(): Activity? = when (this) {
     is Activity -> this

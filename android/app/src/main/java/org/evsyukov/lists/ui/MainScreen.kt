@@ -200,6 +200,7 @@ fun MainScreen(model: MainViewModel, onReminderSet: () -> Unit) {
     var creatingList by remember { mutableStateOf(false) }
     var editingFilter by remember { mutableStateOf<SavedFilter?>(null) }
     var creatingFilter by remember { mutableStateOf(false) }
+    var creatingProject by remember { mutableStateOf(false) }
     // Saved: choosing a text size rebuilds the activity, and the settings stay open over it (R100).
     var settings by rememberSaveable { mutableStateOf(false) }
     var confirmEmptyTrash by remember { mutableStateOf(false) }
@@ -240,6 +241,7 @@ fun MainScreen(model: MainViewModel, onReminderSet: () -> Unit) {
                 onNewList = { creatingList = true },
                 onEditFilter = { editingFilter = it },
                 onNewFilter = { creatingFilter = true },
+                onNewProject = { creatingProject = true },
                 onProjectOff = { project -> model.act { it.setProject(project.id, false) } },
                 // The drawer closes so that the bar with Undo is in reach (R126).
                 onProjectDone = { project -> model.completeProject(project); scope.launch { drawer.close() } },
@@ -434,6 +436,8 @@ fun MainScreen(model: MainViewModel, onReminderSet: () -> Unit) {
     if (creatingList) ListDialog(null, model) { creatingList = false }
     editingFilter?.let { FilterDialog(it, state, model) { editingFilter = null } }
     if (creatingFilter) FilterDialog(null, state, model) { creatingFilter = false }
+    // R127: the view of the new project opens, so the drawer makes way for it.
+    if (creatingProject) ProjectDialog({ creatingProject = false }) { model.createProject(it); scope.launch { drawer.close() } }
     if (settings) SettingsDialog(model, onReminderSet) { settings = false }
     if (confirmEmptyTrash) {
         AlertDialog(
@@ -1062,6 +1066,7 @@ private fun Drawer(
     onNewList: () -> Unit,
     onEditFilter: (SavedFilter) -> Unit,
     onNewFilter: () -> Unit,
+    onNewProject: () -> Unit,
     onProjectOff: (TaskItem) -> Unit,
     onProjectDone: (TaskItem) -> Unit,
     onSettings: () -> Unit,
@@ -1088,32 +1093,32 @@ private fun Drawer(
             }
             DrawerItem(str(R.string.new_list), Icons.Outlined.Add, 0u, false, onClick = onNewList)
 
-            if (state.projects.isNotEmpty()) {
-                DrawerHeading(str(R.string.projects))
-                for (project in state.projects) {
-                    val scope = Scope.Project(project.id)
-                    var menu by remember(project.id) { mutableStateOf(false) }
-                    Box {
-                        // R126: the row is a large task, its mark completes the project. A project is not a row of its list (R120).
-                        DrawerItem(
-                            project.title, Icons.Outlined.Folder, project.subtasksTotal - project.subtasksDone, state.scope == scope,
-                            onLong = { menu = true },
-                            leading = {
-                                ProjectMark(project.subtasksDone, project.subtasksTotal, state.list(project.listId)?.tint() ?: MaterialTheme.colorScheme.primary) {
-                                    onProjectDone(project)
-                                }
-                            },
-                        ) { onSelect(scope) }
-                        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                            DropdownMenuItem(text = { Text(str(R.string.complete_project)) }, onClick = { menu = false; onProjectDone(project) })
-                            // R32: only an empty project turns back into a task.
-                            if (project.offersProjectSwitch()) {
-                                DropdownMenuItem(text = { Text(str(R.string.project_off)) }, onClick = { menu = false; onProjectOff(project) })
+            // R127: shown without projects as well, since a project is made here.
+            DrawerHeading(str(R.string.projects))
+            for (project in state.projects) {
+                val scope = Scope.Project(project.id)
+                var menu by remember(project.id) { mutableStateOf(false) }
+                Box {
+                    // R126: the row is a large task, its mark completes the project. A project is not a row of its list (R120).
+                    DrawerItem(
+                        project.title, Icons.Outlined.Folder, project.subtasksTotal - project.subtasksDone, state.scope == scope,
+                        onLong = { menu = true },
+                        leading = {
+                            ProjectMark(project.subtasksDone, project.subtasksTotal, state.list(project.listId)?.tint() ?: MaterialTheme.colorScheme.primary) {
+                                onProjectDone(project)
                             }
+                        },
+                    ) { onSelect(scope) }
+                    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                        DropdownMenuItem(text = { Text(str(R.string.complete_project)) }, onClick = { menu = false; onProjectDone(project) })
+                        // R32: only an empty project turns back into a task.
+                        if (project.offersProjectSwitch()) {
+                            DropdownMenuItem(text = { Text(str(R.string.project_off)) }, onClick = { menu = false; onProjectOff(project) })
                         }
                     }
                 }
             }
+            DrawerItem(str(R.string.new_project), Icons.Outlined.Add, 0u, false, onClick = onNewProject)
             DrawerHeading(str(R.string.filters))
             for (filter in state.filters) {
                 val scope = Scope.Filter(filter.id)
