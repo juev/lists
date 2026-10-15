@@ -309,11 +309,14 @@ class MainViewModel : ViewModel() {
 
     fun toggleDone(task: TaskItem) {
         if (task.done != null) return act { it.reopenTask(task.id) }
+        val atOnce = _state.value.keepDone == KeepDone.Seconds(0u)
         val notice = when {
-            // A repeating task moves on instead of closing; reopening would not bring the date back.
+            // A repeating task moves on and says so; with its record kept in view, the mark of the record
+            // takes the completion back, and the bar does only when nothing is kept (R68, R128).
+            task.repeat != null && atOnce -> Notice(str(R.string.moved_to_next)) { it.undoCloseTask(task.id) }
             task.repeat != null -> Notice(str(R.string.moved_to_next))
             // The task leaves at once, so the bar is the way back: for it and for the subtasks closed with it.
-            _state.value.keepDone == KeepDone.Seconds(0u) -> Notice(str(R.string.done_notice)) { it.undoCloseTask(task.id) }
+            atOnce -> Notice(str(R.string.done_notice)) { it.undoCloseTask(task.id) }
             // It stays in view, and its mark takes it back (R68).
             else -> null
         }
@@ -346,9 +349,11 @@ class MainViewModel : ViewModel() {
     /** Closes the task as "won't do" (R69); what follows is the same as after completing it. */
     fun wontDo(task: TaskItem) {
         if (task.done != null) return
+        val atOnce = _state.value.keepDone == KeepDone.Seconds(0u)
         val notice = when {
+            task.repeat != null && atOnce -> Notice(str(R.string.moved_to_next)) { it.undoCloseTask(task.id) }
             task.repeat != null -> Notice(str(R.string.moved_to_next))
-            _state.value.keepDone == KeepDone.Seconds(0u) -> Notice(str(R.string.wont_do_notice)) { it.undoCloseTask(task.id) }
+            atOnce -> Notice(str(R.string.wont_do_notice)) { it.undoCloseTask(task.id) }
             else -> null
         }
         act(notice) { it.wontDoTask(task.id) }
