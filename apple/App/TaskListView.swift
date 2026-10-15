@@ -557,7 +557,8 @@ struct TaskMark: View {
         // The mark is taller than a capital of the title: on the baseline it stands too high.
         // Its middle goes to the middle of a capital of the first line instead.
         .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + AppFont.native(.body).capHeight / 2 }
-        .disabled(task.isLog || task.deleted)
+        // The record of a repeat kept in a view of tasks takes its completion back (R128); in the journal it is history.
+        .disabled(task.deleted || (task.isLog && (model.scope == .completed || model.scope == .wontDo)))
         .accessibilityLabel(task.done != nil ? L("Reopen") : L("Complete"))
     }
 }
