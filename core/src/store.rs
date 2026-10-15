@@ -220,6 +220,10 @@ const TASK_COLUMNS: &str = concat!(
 
 /// Visible, not a completion record.
 const LIVE: &str = "t.eff_deleted = 0 AND t.log_of IS NULL";
+/// A task, or the record of a repeat of a task that is not in a project: views of top-level tasks show the
+/// record of a project's task no more than they show the task.
+const OF_TOP_TASK: &str =
+    "(t.log_of IS NULL OR NOT EXISTS (SELECT 1 FROM tasks o WHERE o.id = t.log_of AND o.eff_parent IS NOT NULL))";
 /// What the Completed view lists: finished top-level tasks and the records of finished repeats.
 const COMPLETED: &str = "t.eff_deleted = 0 AND t.done IS NOT NULL AND (t.eff_parent IS NULL OR t.log_of IS NOT NULL)";
 const NOT_ARCHIVED: &str = "t.eff_list NOT IN (SELECT id FROM lists WHERE archived = 1)";
@@ -344,6 +348,11 @@ struct Recent {
     open: String,
     /// Completed long enough ago to go where the completed ones go.
     settled: String,
+    /// What a task view may show: the live tasks, and the records of repeats completed within
+    /// the time, which stand where their task stood (R68, #287).
+    live: String,
+    /// Records of the repeats of a project's tasks still kept; `?1` is the project.
+    project_records: String,
 }
 
 impl Recent {
@@ -352,11 +361,17 @@ impl Recent {
             return Ok(Recent {
                 open: "t.done IS NULL".into(),
                 settled: "t.done IS NOT NULL".into(),
+                live: LIVE.into(),
+                project_records: "0".into(),
             });
         };
         Ok(Recent {
             open: format!("(t.done IS NULL OR {window})"),
             settled: format!("(t.done IS NOT NULL AND NOT {window})"),
+            live: format!("t.eff_deleted = 0 AND (t.log_of IS NULL OR {window})"),
+            project_records: format!(
+                "(t.eff_deleted = 0 AND {window} AND t.log_of IN (SELECT id FROM tasks WHERE eff_parent = ?1))"
+            ),
         })
     }
 }
@@ -821,7 +836,7 @@ impl Store {
             return Ok(None);
         };
         let first: Option<String> = inner.conn.query_row(
-            &format!("SELECT min(substr(t.done_stamp, 1, 12)) FROM tasks t WHERE {LIVE} AND {window}"),
+            &format!("SELECT min(substr(t.done_stamp, 1, 12)) FROM tasks t WHERE t.eff_deleted = 0 AND {window}"),
             [],
             |r| r.get(0),
         )?;
@@ -1008,14 +1023,14 @@ impl Store {
         let today = inner.now().date().format(DATE_FMT).to_string();
         let conn = &inner.conn;
         let recent = Recent::at(&inner)?;
-        let (open, settled) = (&recent.open, &recent.settled);
+        let (open, settled, live) = (&recent.open, &recent.settled, &recent.live);
         match view {
             Scope::Inbox => list_tasks(conn, INBOX_ID, &recent),
             Scope::List { id } => list_tasks(conn, &id, &recent),
             Scope::Today => query_tasks(
                 conn,
                 &format!(
-                    "WHERE {LIVE} AND {NOT_ARCHIVED} AND {NOT_PROJECT} AND {open}
+                    "WHERE {live} AND {NOT_ARCHIVED} AND {NOT_PROJECT} AND {open}
                        AND substr({EFF_DATE}, 1, 10) <= ?1
                        AND ({EFF_START} IS NULL OR substr({EFF_START}, 1, 10) <= ?1)
                      ORDER BY {EFF_DATE}, t.priority DESC, t.pos, t.id"
@@ -1025,7 +1040,7 @@ impl Store {
             Scope::Upcoming => query_tasks(
                 conn,
                 &format!(
-                    "WHERE {LIVE} AND {NOT_ARCHIVED} AND {NOT_PROJECT} AND {open}
+                    "WHERE {live} AND {NOT_ARCHIVED} AND {NOT_PROJECT} AND {open}
                        AND (substr({EFF_DATE}, 1, 10) > ?1
                             OR ({EFF_START} IS NOT NULL AND substr({EFF_START}, 1, 10) > ?1))
                      ORDER BY {EFF_DATE}, t.priority DESC, t.pos, t.id"
@@ -1035,7 +1050,7 @@ impl Store {
             Scope::All => query_tasks(
                 conn,
                 &format!(
-                    "WHERE {LIVE} AND {NOT_ARCHIVED} AND {open} AND t.eff_parent IS NULL AND t.project = 0
+                    "WHERE {live} AND {OF_TOP_TASK} AND {NOT_ARCHIVED} AND {open} AND t.eff_parent IS NULL AND t.project = 0
                      ORDER BY t.eff_list != 'inbox', (SELECT pos FROM lists WHERE id = t.eff_list), t.eff_list, t.pos, t.id"
                 ),
                 &[],
@@ -1050,7 +1065,7 @@ impl Store {
             Scope::Tag { name } => query_tasks(
                 conn,
                 &format!(
-                    "WHERE {LIVE} AND {NOT_ARCHIVED} AND {NOT_PROJECT} AND {open}
+                    "WHERE {live} AND {NOT_ARCHIVED} AND {NOT_PROJECT} AND {open}
                        AND EXISTS (SELECT 1 FROM task_tags g WHERE g.task_id = t.id AND g.tag = ?1)
                      ORDER BY t.priority DESC, {EFF_DATE} IS NULL, {EFF_DATE}, t.pos, t.id"
                 ),
@@ -1058,7 +1073,10 @@ impl Store {
             ),
             Scope::Project { id } => query_tasks(
                 conn,
-                &format!("WHERE t.eff_parent = ?1 AND t.deleted = 0 AND t.purged = 0 ORDER BY {settled}, t.pos, t.id"),
+                &format!(
+                    "WHERE ((t.eff_parent = ?1 AND t.deleted = 0 AND t.purged = 0) OR {}) ORDER BY {settled}, t.pos, t.id",
+                    recent.project_records
+                ),
                 &[&id],
             ),
             Scope::Filter { id } => {
@@ -1619,10 +1637,11 @@ impl Store {
         self.write(|w| complete_in(w, &id, true))
     }
 
+    /// The mark of a record of a completed repeat takes the completion back (R128).
     pub fn reopen_task(&self, id: String) -> Result<()> {
         self.write(|w| {
             if get_task(w.tx, &id)?.is_log {
-                return Err(AppError::invalid("a completed occurrence cannot be reopened"));
+                return undo_repeat_in(w, &id);
             }
             reopen_in(w, &id)
         })
@@ -1631,15 +1650,19 @@ impl Store {
     /// Takes a completion or a "won't do" back: reopens the task and the subtasks that were
     /// closed with it. Those carry its closing moment, written in the same millisecond: the
     /// moment alone is exact to the minute and would take a subtask closed by hand just before.
-    /// Subtasks closed earlier stay closed.
+    /// Subtasks closed earlier stay closed. A repeating task that moved on gets back what its last
+    /// completion changed (R128); so does the task of a record given here.
     pub fn undo_close_task(&self, id: String) -> Result<()> {
         self.write(|w| {
             let task = get_task(w.tx, &id)?;
             if task.is_log {
-                return Err(AppError::invalid("a completed occurrence cannot be reopened"));
+                return undo_repeat_in(w, &id);
             }
             if task.done.is_none() {
-                return Ok(());
+                return match last_record(w.tx, &id)? {
+                    Some(log_id) => undo_repeat_in(w, &log_id),
+                    None => Ok(()),
+                };
             }
             let together: Vec<String> = {
                 let mut stmt = w.tx.prepare_cached(
@@ -1988,6 +2011,76 @@ pub(crate) fn reopen_in(w: &mut Writer, id: &str) -> Result<()> {
     Ok(())
 }
 
+/// The newest record of a completed repeat of the task, if it is still completed and keeps what undo needs.
+fn last_record(conn: &Connection, task_id: &str) -> Result<Option<String>> {
+    Ok(conn
+        .query_row(
+            "SELECT id FROM tasks t WHERE log_of = ?1 AND done IS NOT NULL AND purged = 0
+               AND EXISTS (SELECT 1 FROM fields f WHERE f.kind = 'task' AND f.id = t.id AND f.field = 'undo' AND f.value LIKE '{%')
+             ORDER BY done_stamp DESC, id LIMIT 1",
+            [task_id],
+            |r| r.get(0),
+        )
+        .optional()?)
+}
+
+/// Takes back the completion of a repeat (R128, S44): the record is no longer completed, and the task
+/// and its subtasks get back what the completion changed. Nothing changes once the task has left
+/// the date that completion moved it to. Err for a record that keeps nothing to give back.
+fn undo_repeat_in(w: &mut Writer, log_id: &str) -> Result<()> {
+    let record = get_task(w.tx, log_id)?;
+    if record.done.is_none() {
+        return Ok(());
+    }
+    let undo: Option<Value> =
+        w.tx.query_row(
+            "SELECT value FROM fields WHERE kind = ?1 AND id = ?2 AND field = 'undo'",
+            params![KIND_TASK, log_id],
+            |r| r.get::<_, String>(0),
+        )
+        .optional()?
+        .and_then(|v| serde_json::from_str::<Value>(&v).ok())
+        .filter(Value::is_object);
+    let (Some(undo), Some(task_id)) = (undo, log_of(w.tx, log_id)?) else {
+        return Err(AppError::invalid("a completed occurrence cannot be reopened"));
+    };
+    let text = |field: &str| undo.get(field).and_then(Value::as_str).map(str::to_string);
+    let Ok(task) = get_task(w.tx, &task_id) else {
+        return Ok(());
+    };
+    if task.done.is_some() || task.due != text("next_due") || task.start != text("next_start") {
+        return Ok(());
+    }
+    reopen_in(w, log_id)?;
+    w.task(&task_id, "due", opt(text("due")))?;
+    w.task(&task_id, "start", opt(text("start")))?;
+    w.task(&task_id, "remind", opt(text("remind")))?;
+    if let Some(rule) = undo.get("repeat").filter(|v| v.is_object()) {
+        if task.repeat.as_ref().map(serde_json::to_value).transpose()?.as_ref() != Some(rule) {
+            w.task(&task_id, "repeat", rule.clone())?;
+        }
+    }
+    if let Some(closed) = undo.get("subtasks").and_then(Value::as_object) {
+        for (sub, state) in closed {
+            let Some(done) = state.get("done").and_then(Value::as_str) else {
+                continue;
+            };
+            let wont = state.get("wont").and_then(Value::as_bool).unwrap_or(false);
+            close(w, sub, done, wont)?;
+        }
+    }
+    w.flush()
+}
+
+fn log_of(conn: &Connection, id: &str) -> Result<Option<String>> {
+    Ok(conn
+        .query_row("SELECT log_of FROM tasks WHERE id = ?1", [id], |r| {
+            r.get::<_, Option<String>>(0)
+        })
+        .optional()?
+        .flatten())
+}
+
 /// Closes a task inside a write transaction, as completed or as "won't do":
 /// see `Store::complete_task` and `Store::wont_do_task`.
 pub(crate) fn complete_in(w: &mut Writer, id: &str, wont: bool) -> Result<TaskItem> {
@@ -2015,9 +2108,34 @@ pub(crate) fn complete_in(w: &mut Writer, id: &str, wont: bool) -> Result<TaskIt
             w.task(&log_id, "list", json!(task.list_id))?;
             w.task(&log_id, "priority", json!(task.priority.as_i64()))?;
             w.task(&log_id, "due", opt(task.due.clone()))?;
+            // The record stands where the task stood while the setting keeps it (R17, R68).
+            w.task(&log_id, "start", opt(task.start.clone()))?;
+            let pos: String =
+                w.tx.query_row("SELECT pos FROM tasks WHERE id = ?1", [id], |r| r.get(0))?;
+            w.task(&log_id, "pos", json!(pos))?;
+            let had: Vec<String> = {
+                let mut stmt = w.tx.prepare_cached("SELECT tag FROM task_tags WHERE task_id = ?1")?;
+                let rows = stmt.query_map([&log_id], |r| r.get(0))?;
+                rows.collect::<rusqlite::Result<_>>()?
+            };
+            // Tags the record kept from an earlier completion of the same occurrence go (S7).
+            for tag in had.iter().filter(|t| !task.tags.contains(t)) {
+                w.task(&log_id, &format!("tag:{tag}"), json!(false))?;
+            }
+            for tag in &task.tags {
+                w.task(&log_id, &format!("tag:{tag}"), json!(true))?;
+            }
             let moment = w.moment();
             close(w, &log_id, &moment, wont)?;
             w.task(&log_id, "log_of", json!(id))?;
+            // What undo gives back (R128, S44): the subtasks closed before, with their moment.
+            let mut closed = serde_json::Map::new();
+            for sub in &subtree {
+                let s = get_task(w.tx, sub)?;
+                if let Some(done) = s.done {
+                    closed.insert(sub.clone(), json!({ "done": done, "wont": s.wont }));
+                }
+            }
 
             let delta = (next - from).num_days();
             match (&task.due, &task.start) {
@@ -2042,6 +2160,18 @@ pub(crate) fn complete_in(w: &mut Writer, id: &str, wont: bool) -> Result<TaskIt
             for sub in subtree {
                 reopen_in(w, &sub)?;
             }
+            w.flush()?;
+            let moved = get_task(w.tx, id)?;
+            let undo = json!({
+                "due": task.due,
+                "start": task.start,
+                "remind": task.remind,
+                "repeat": task.repeat.as_ref().map(serde_json::to_value).transpose()?,
+                "next_due": moved.due,
+                "next_start": moved.start,
+                "subtasks": closed,
+            });
+            w.task(&log_id, "undo", undo)?;
         }
         _ => {
             let moment = w.moment();
@@ -2075,14 +2205,17 @@ fn list_tasks(conn: &Connection, list_id: &str, recent: &Recent) -> Result<Vec<T
     };
     query_tasks(
         conn,
-        &format!("WHERE {LIVE} AND t.eff_list = ?1 AND t.eff_parent IS NULL AND t.project = 0 {done} ORDER BY {settled}, {order}"),
+        &format!(
+            "WHERE {} AND {OF_TOP_TASK} AND t.eff_list = ?1 AND t.eff_parent IS NULL AND t.project = 0 {done} ORDER BY {settled}, {order}",
+            recent.live
+        ),
         &[list_id],
     )
 }
 
 /// Tasks a filter selects, subtasks included, dated ones first.
 fn filter_tasks(conn: &Connection, spec: &FilterSpec, today: &str, recent: &Recent) -> Result<Vec<TaskItem>> {
-    let mut sql = format!("WHERE {LIVE} AND {NOT_ARCHIVED} AND {NOT_PROJECT}");
+    let mut sql = format!("WHERE {} AND {NOT_ARCHIVED} AND {NOT_PROJECT}", recent.live);
     let mut args: Vec<String> = Vec::new();
     let arg = |value: String, args: &mut Vec<String>| {
         args.push(value);

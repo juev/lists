@@ -700,7 +700,12 @@ fn r17_completing_a_repeating_task_moves_it_forward() {
     assert_eq!(titles(&log), ["полить цветы"]);
     assert!(log[0].is_log);
     assert_eq!(log[0].due.as_deref(), Some("2026-10-05T19:00"));
-    assert!(d.reopen_task(log[0].id.clone()).is_err());
+    assert_eq!(
+        log[0].start.as_deref(),
+        Some("2026-10-03"),
+        "the record keeps the start too"
+    );
+    d.set_now_for_tests("2026-10-05T10:01");
     assert_eq!(
         view(&d, Scope::Inbox),
         ["полить цветы"],
@@ -732,6 +737,113 @@ fn r17_last_occurrence_completes_the_task() {
     let second = d.complete_task(t.id).unwrap();
     assert!(second.done.is_some());
     assert_eq!(d.tasks(Scope::Completed).unwrap().len(), 2);
+}
+
+/// The repeating task of the R128 scenario, with subtask "а" completed at 9:00 and "б" open.
+fn weekly_with_subtasks(d: &Device) -> (TaskItem, TaskItem, TaskItem) {
+    let t = add(d, "каждую неделю");
+    d.set_start(t.id.clone(), Some("2026-10-03".into())).unwrap();
+    d.set_due(t.id.clone(), Some("2026-10-05T19:00".into())).unwrap();
+    d.set_remind(t.id.clone(), Some("2026-10-05T18:45".into())).unwrap();
+    d.set_repeat(
+        t.id.clone(),
+        Some(Repeat {
+            count: Some(3),
+            ..weekly()
+        }),
+    )
+    .unwrap();
+    let a = add_sub(d, &t, "а");
+    let b = add_sub(d, &t, "б");
+    d.set_now_for_tests("2026-10-05T09:00");
+    d.complete_task(a.id.clone()).unwrap();
+    d.set_now_for_tests(NOW);
+    (t, a, b)
+}
+
+#[test]
+fn r128_undo_gives_back_what_the_completion_of_a_repeat_changed() {
+    let d = device();
+    let (t, a, b) = weekly_with_subtasks(&d);
+    d.complete_task(t.id.clone()).unwrap();
+    d.undo_close_task(t.id.clone()).unwrap();
+
+    let back = d.task(t.id.clone()).unwrap();
+    assert!(back.done.is_none());
+    assert_eq!(back.due.as_deref(), Some("2026-10-05T19:00"));
+    assert_eq!(back.start.as_deref(), Some("2026-10-03"));
+    assert_eq!(back.remind.as_deref(), Some("2026-10-05T18:45"));
+    assert_eq!(
+        back.repeat.unwrap().count,
+        Some(3),
+        "the repeat that was used is given back"
+    );
+    assert_eq!(
+        d.task(a.id).unwrap().done.as_deref(),
+        Some("2026-10-05T09:00"),
+        "completed before, with its moment"
+    );
+    assert!(d.task(b.id).unwrap().done.is_none());
+    assert!(view(&d, Scope::Completed).is_empty(), "the record has gone");
+    assert_eq!(view(&d, Scope::Inbox), ["каждую неделю"]);
+
+    // The same occurrence completed again comes back as the same record (S7).
+    d.complete_task(t.id.clone()).unwrap();
+    assert_eq!(view(&d, Scope::Completed), ["каждую неделю"]);
+    assert_eq!(d.task(t.id).unwrap().due.as_deref(), Some("2026-10-12T19:00"));
+}
+
+#[test]
+fn r128_the_mark_of_the_record_is_undo() {
+    let d = device();
+    let (t, a, _) = weekly_with_subtasks(&d);
+    d.wont_do_task(t.id.clone()).unwrap();
+    d.set_now_for_tests("2026-10-05T10:00:03");
+    let record = d.tasks(Scope::Inbox).unwrap().into_iter().find(|r| r.is_log).unwrap();
+    assert!(record.wont, "closed as won't do");
+    d.reopen_task(record.id).unwrap();
+    assert_eq!(d.task(t.id).unwrap().due.as_deref(), Some("2026-10-05T19:00"));
+    assert_eq!(d.task(a.id).unwrap().done.as_deref(), Some("2026-10-05T09:00"));
+    assert!(view(&d, Scope::WontDo).is_empty());
+    assert_eq!(view(&d, Scope::Inbox), ["каждую неделю"]);
+}
+
+#[test]
+fn r128_undo_changes_nothing_once_the_task_has_left_that_date() {
+    let d = device();
+    let (t, _, _) = weekly_with_subtasks(&d);
+    d.complete_task(t.id.clone()).unwrap();
+    d.set_due(t.id.clone(), Some("2026-10-20".into())).unwrap();
+    d.undo_close_task(t.id.clone()).unwrap();
+    assert_eq!(d.task(t.id.clone()).unwrap().due.as_deref(), Some("2026-10-20"));
+    assert_eq!(view(&d, Scope::Completed), ["каждую неделю"]);
+
+    // Completed once more: the first completion can no longer be taken back, the second can.
+    let first = d.tasks(Scope::Completed).unwrap().remove(0);
+    d.set_now_for_tests("2026-10-05T10:01");
+    d.complete_task(t.id.clone()).unwrap();
+    d.reopen_task(first.id).unwrap();
+    assert_eq!(d.tasks(Scope::Completed).unwrap().len(), 2, "the first record stays");
+    d.undo_close_task(t.id.clone()).unwrap();
+    assert_eq!(d.task(t.id).unwrap().due.as_deref(), Some("2026-10-20"));
+    assert_eq!(view(&d, Scope::Completed), ["каждую неделю"]);
+}
+
+#[test]
+fn r128_a_record_written_before_undo_existed_cannot_be_reopened() {
+    let d = device();
+    let t = due_today(&d, "старый повтор");
+    d.set_repeat(t.id.clone(), Some(weekly())).unwrap();
+    d.complete_task(t.id.clone()).unwrap();
+    let record = d.tasks(Scope::Completed).unwrap().remove(0);
+    let d = plant(d, &[("task", record.id.as_str(), "undo", serde_json::Value::Null)]);
+    assert!(d.reopen_task(record.id).is_err());
+    d.undo_close_task(t.id.clone()).unwrap();
+    assert_eq!(
+        d.task(t.id).unwrap().due.as_deref(),
+        Some("2026-10-12"),
+        "nothing to give back"
+    );
 }
 
 #[test]
@@ -1747,18 +1859,101 @@ fn r68_where_completed_tasks_are_shown_a_kept_one_joins_them_later() {
 }
 
 #[test]
-fn r68_a_repeating_task_moves_on_and_a_far_clock_does_not_keep_a_task() {
+fn r68_a_repeating_task_moves_on_and_its_record_stays_in_place_for_the_time() {
     let d = device();
-    let weekly_task = due_today(&d, "каждую неделю");
-    d.set_repeat(weekly_task.id.clone(), Some(weekly())).unwrap();
-    let next = d.complete_task(weekly_task.id).unwrap();
+    due_today(&d, "а");
+    let daily = due_today(&d, "каждый день");
+    due_today(&d, "в");
+    d.set_repeat(
+        daily.id.clone(),
+        Some(Repeat {
+            freq: Freq::Daily,
+            ..weekly()
+        }),
+    )
+    .unwrap();
+    d.add_tag(daily.id.clone(), "дом".into()).unwrap();
+    let next = d.complete_task(daily.id.clone()).unwrap();
     assert!(next.done.is_none());
-    assert!(
-        view(&d, Scope::Today).is_empty(),
-        "the record of the repeat is not a row of the view"
-    );
-    assert_eq!(view(&d, Scope::Upcoming), ["каждую неделю"]);
+    assert_eq!(next.due.as_deref(), Some("2026-10-06"));
 
+    d.set_now_for_tests("2026-10-05T10:00:04");
+    let today = d.tasks(Scope::Today).unwrap();
+    assert_eq!(
+        titles(&today),
+        ["а", "каждый день", "в"],
+        "the record stands where the task stood"
+    );
+    assert!(today[1].is_log && today[1].done.is_some(), "shown as completed");
+    assert_eq!(
+        view(&d, Scope::Upcoming),
+        ["каждый день"],
+        "the task is at its next date at once"
+    );
+    let inbox = d.tasks(Scope::Inbox).unwrap();
+    assert_eq!(
+        titles(&inbox),
+        ["а", "каждый день", "каждый день", "в"],
+        "the task and its record"
+    );
+    assert_eq!(inbox.iter().filter(|t| t.is_log).count(), 1);
+    assert_eq!(
+        view(&d, Scope::Tag { name: "дом".into() }),
+        ["каждый день", "каждый день"]
+    );
+    assert_eq!(d.counts().unwrap().today, 2, "the record is not counted as open");
+    assert_eq!(d.seconds_until_kept_leaves().unwrap(), Some(2));
+
+    d.set_now_for_tests("2026-10-05T10:00:06");
+    assert_eq!(view(&d, Scope::Today), ["а", "в"]);
+    assert_eq!(view(&d, Scope::Inbox), ["а", "каждый день", "в"]);
+    assert_eq!(view(&d, Scope::Completed), ["каждый день"]);
+    assert_eq!(d.seconds_until_kept_leaves().unwrap(), None);
+
+    d.set_keep_done(KeepDone::Seconds { seconds: 0 }).unwrap();
+    d.set_now_for_tests("2026-10-06T10:00");
+    d.complete_task(daily.id).unwrap();
+    assert_eq!(view(&d, Scope::Today), ["а", "в"], "at once: the record is not shown");
+}
+
+#[test]
+fn r68_the_record_of_a_project_task_stands_in_the_project_only() {
+    let d = device();
+    let project = add(&d, "ремонт");
+    d.set_project(project.id.clone(), true).unwrap();
+    let t = d
+        .create_task(NewTask {
+            title: "проветрить".into(),
+            parent_id: Some(project.id.clone()),
+            due: Some("2026-10-05".into()),
+            ..NewTask::default()
+        })
+        .unwrap();
+    d.set_repeat(t.id.clone(), Some(weekly())).unwrap();
+    d.complete_task(t.id).unwrap();
+    assert_eq!(
+        view(&d, Scope::Project { id: project.id.clone() }),
+        ["проветрить", "проветрить"]
+    );
+    assert_eq!(
+        view(&d, Scope::Today),
+        ["проветрить"],
+        "the record, as the task was there"
+    );
+    assert!(view(&d, Scope::Inbox).is_empty(), "not a top-level row of the list");
+    let p = d.task(project.id.clone()).unwrap();
+    assert_eq!(
+        (p.subtasks_total, p.subtasks_done),
+        (1, 0),
+        "the record is not a task of the project"
+    );
+    d.set_now_for_tests("2026-10-05T10:00:06");
+    assert_eq!(view(&d, Scope::Project { id: project.id }), ["проветрить"]);
+}
+
+#[test]
+fn r68_a_far_clock_does_not_keep_a_task() {
+    let d = device();
     // Completed where the clock is three hours ahead: `done` carries no time zone.
     let far = due_today(&d, "издалека");
     d.set_now_for_tests("2026-10-05T13:00");

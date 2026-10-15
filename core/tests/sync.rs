@@ -442,6 +442,51 @@ fn s7_same_occurrence_completed_on_two_devices_is_recorded_once() {
 }
 
 #[test]
+fn s44_undo_of_a_completed_repeat_reaches_the_other_device() {
+    let storage = tempfile::tempdir().unwrap();
+    let (a, b) = (device(), device());
+    let t = add(&a, "зарядка");
+    a.set_due(t.id.clone(), Some("2026-10-05".into())).unwrap();
+    a.set_repeat(
+        t.id.clone(),
+        Some(Repeat {
+            freq: Freq::Daily,
+            interval: 1,
+            weekdays: vec![],
+            monthday: None,
+            nth: None,
+            nth_weekday: None,
+            from_done: false,
+            count: None,
+            until: None,
+        }),
+    )
+    .unwrap();
+    let sub = a
+        .create_task(NewTask {
+            title: "разминка".into(),
+            parent_id: Some(t.id.clone()),
+            ..NewTask::default()
+        })
+        .unwrap();
+    a.complete_task(sub.id.clone()).unwrap();
+    a.complete_task(t.id.clone()).unwrap();
+    settle(&a, &b, &storage);
+    assert_eq!(view(&b, Scope::Completed), ["зарядка"]);
+
+    a.undo_close_task(t.id.clone()).unwrap();
+    settle(&a, &b, &storage);
+    for d in [&a, &b] {
+        assert_eq!(d.task(t.id.clone()).unwrap().due.as_deref(), Some("2026-10-05"));
+        assert!(
+            d.task(sub.id.clone()).unwrap().done.is_some(),
+            "the subtask is completed again"
+        );
+        assert!(view(d, Scope::Completed).is_empty());
+    }
+}
+
+#[test]
 fn s25_clearing_completed_reaches_the_other_device_and_outlives_a_reopen() {
     let storage = tempfile::tempdir().unwrap();
     let (a, b) = (device(), device());
