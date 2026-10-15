@@ -253,6 +253,7 @@
 "Make it a project" = "Сделать проектом";
 "Delete filter" = "Удалить фильтр";
 "New filter" = "Новый фильтр";
+"New project" = "Новый проект";
 "Start from" = "Заготовки";
 "Next 7 days" = "Ближайшие 7 дней";
 "High priority" = "Высокий приоритет";
@@ -333,6 +334,7 @@
 "Due date" = "Срок";
 "New List…" = "Новый список…";
 "New Filter…" = "Новый фильтр…";
+"New Project…" = "Новый проект…";
 "Press ⌘N to add a task." = "Нажмите ⌘N, чтобы добавить задачу.";
 "Recognize dates, priority, tags and lists in the title" = "Распознавать в названии даты, приоритет, теги и список";
 "Start the note with the clipboard in quick entry" = "Заметка из буфера обмена в быстром вводе";

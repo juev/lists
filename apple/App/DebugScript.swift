@@ -37,6 +37,7 @@ import UserNotifications
 /// `mklist:Name` (creates a list whose defaults for new tasks are the high priority and "due today"), `draftlist:Name` (chooses that list in the card, `draftlist:inbox` the Inbox), `start:2026-10-05` (gives the card a start date); `draft` also prints the due date, the priority, the tags and the list the card shows,
 /// `task` (prints the due date, the priority, the tags and the repeat of the selected task), `done` (completes it), `project` (makes it a project, or a task again, the way its menu does),
 /// `projects` (prints the projects of the sidebar with their "done/total"), `completeproject:Title` (completes that project the way its mark in the sidebar does, R126),
+/// `newproject:Title` (creates a project the way Create in the sheet of a new project does, R127),
 /// `cards` (prints the open cards and the selected row), `rows` (prints the rows in the order they are drawn), `panel` (prints whether quick entry is on screen and what runs modally),
 /// `windows` (prints the windows of the app),
 /// `notes` (prints the note of the open card as it is drawn: what is hidden, what is replaced and which fonts differ),
@@ -375,6 +376,7 @@ enum DebugScript {
                 case "done": AppModel.shared.selectedTask.map(AppModel.shared.toggleDone)
                 case "projects": print("debug: projects \(AppModel.shared.projects.map { "\($0.title) \($0.subtasksDone)/\($0.subtasksTotal)" })")
                 case "completeproject": AppModel.shared.projects.first { $0.title == argument }.map(AppModel.shared.completeProject)
+                case "newproject": AppModel.shared.createProject(title: argument)
                 case "wont": AppModel.shared.selectedTask.map(AppModel.shared.wontDo)
                 case "task":
                     let task = AppModel.shared.selectedTask

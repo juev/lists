@@ -146,6 +146,10 @@ struct AppCommands: Commands {
                 openWindow(id: "main")
                 model.creatingList = true
             }
+            Button(L("New Project…")) {
+                openWindow(id: "main")
+                model.creatingProject = true
+            }
             Button(L("New Filter…")) {
                 openWindow(id: "main")
                 model.creatingFilter = true

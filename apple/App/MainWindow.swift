@@ -311,8 +311,9 @@ struct Sidebar: View {
                     }
                 }
             }
-            if !model.projects.isEmpty {
-                Section(L("Projects")) {
+            // Shown even when empty, as Filters is: the header is where a project is made (R127).
+            do {
+                Section {
                     ForEach(model.projects, id: \.id) { project in
                         Label {
                             HStack {
@@ -339,6 +340,8 @@ struct Sidebar: View {
                             }
                         }
                     }
+                } header: {
+                    header(L("Projects"), help: L("New project")) { model.creatingProject = true }
                 }
             }
             // Shown even when empty: the header is where a filter is made.
@@ -392,6 +395,7 @@ struct Sidebar: View {
             HStack {
                 Menu {
                     Button(L("New list")) { model.creatingList = true }
+                    Button(L("New project")) { model.creatingProject = true }
                     Button(L("New filter")) { model.creatingFilter = true }
                 } label: {
                     Label(L("New list"), systemImage: "plus")
@@ -411,6 +415,7 @@ struct Sidebar: View {
         .sheet(isPresented: $model.creatingList) { ListEditor(list: nil) }
         .sheet(item: $editingFilter) { FilterEditor(filter: $0) }
         .sheet(isPresented: $model.creatingFilter) { FilterEditor(filter: nil) }
+        .sheet(isPresented: $model.creatingProject) { ProjectEditor() }
     }
 
     /// A section title with the button that adds to the section.
@@ -559,6 +564,35 @@ struct ListEditor: View {
             return id
         }
         if list == nil, let created { model.scope = .list(id: created) }
+        dismiss()
+    }
+}
+
+/// A new project: its title only, the list is taken from the view (R127).
+struct ProjectEditor: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+    @State private var title = ""
+
+    var body: some View {
+        Form {
+            TextField(L("Title"), text: $title)
+                .onSubmit(save)
+        }
+        .formStyle(.grouped)
+        .frame(width: 360)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) { Button(L("Cancel")) { dismiss() } }
+            ToolbarItem(placement: .confirmationAction) {
+                Button(L("Create"), action: save)
+                    .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+    }
+
+    private func save() {
+        guard !title.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        model.createProject(title: title)
         dismiss()
     }
 }

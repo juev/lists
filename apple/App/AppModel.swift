@@ -81,6 +81,7 @@ final class AppModel {
     // Sheets of the sidebar; here so that the menu bar can open them too.
     var creatingList = false
     var creatingFilter = false
+    var creatingProject = false
 
     var syncStatus = SyncStatus(configured: false, pending: 0, attachmentsWaiting: 0, lastOk: nil, lastError: nil)
     /// Moves when attachment content has arrived: an open card reads its files again (R76).
@@ -625,6 +626,14 @@ final class AppModel {
         case .list(let id): return id
         default: return defaultListId
         }
+    }
+
+    /// Creates an empty project and opens its view (R127). It goes to the list on screen,
+    /// to the list of the open project, or where the view has no list, to the default one (R40).
+    func createProject(title: String) {
+        var listId = targetListId
+        if case .project(let id) = scope, let project = projects.first(where: { $0.id == id }) { listId = project.listId }
+        if let project = perform({ try $0.createProject(title: title, listId: listId) }) { scope = .project(id: project.id) }
     }
 
     /// Manual reordering makes sense only where the order shown is the stored one.
