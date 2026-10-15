@@ -763,6 +763,53 @@ fn r69_r11_undo_brings_back_the_subtasks_closed_with_the_task() {
     assert!(inbox[0]["done"].is_null());
 }
 
+#[test]
+fn r128_the_completion_of_a_repeat_is_taken_back() {
+    let web = web(Some("secret"));
+    let cookie = login(&web, "secret").unwrap();
+    let t = call(
+        &web,
+        &cookie,
+        json!({ "op": "quickAdd", "text": "зарядка", "scope": "inbox" }),
+    );
+    let id = t["id"].as_str().unwrap().to_string();
+    call(
+        &web,
+        &cookie,
+        json!({ "op": "setDue", "id": id, "value": "2031-01-02" }),
+    );
+    call(
+        &web,
+        &cookie,
+        json!({ "op": "setRepeat", "id": id, "value": { "freq": "daily", "interval": 1 } }),
+    );
+    let due = || get(&web, &cookie, &format!("/api/task?id={id}"))["task"]["due"].clone();
+    let records = || {
+        get(&web, &cookie, "/api/tasks?scope=completed")
+            .as_array()
+            .unwrap()
+            .clone()
+    };
+
+    // The batch gives a step back for a repeating task as well.
+    let closed = call(
+        &web,
+        &cookie,
+        json!({ "op": "batch", "action": "complete", "ids": [id] }),
+    );
+    assert_eq!(due(), "2031-01-03");
+    call(&web, &cookie, json!({ "op": "batchBack", "steps": closed["backs"] }));
+    assert_eq!(due(), "2031-01-02");
+    assert!(records().is_empty());
+
+    // The mark of the record does the same.
+    call(&web, &cookie, json!({ "op": "complete", "id": id }));
+    let record = records()[0]["id"].clone();
+    call(&web, &cookie, json!({ "op": "reopen", "id": record }));
+    assert_eq!(due(), "2031-01-02");
+    assert!(records().is_empty());
+}
+
 /// A call the server is expected to refuse: the status of the answer.
 fn refused(web: &Web, body: Value) -> u16 {
     status(

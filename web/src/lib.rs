@@ -398,8 +398,8 @@ impl App {
                         } else {
                             s.wont_do_task(id.clone())?;
                         }
-                        // A repeating task moves on instead of closing; reopening would not bring the date back.
-                        task.repeat.is_none().then(|| json!({ "op": "undoClose", "id": id }))
+                        // A repeating task that moved on gets its dates back the same way (R128).
+                        Some(json!({ "op": "undoClose", "id": id }))
                     }
                     "delete" => {
                         s.delete_task(id.clone())?;
