@@ -102,7 +102,7 @@ The [user guide](docs/usage.md) describes lists, tasks and attachments, subtasks
 
 With CalDAV what the app knows about a task travels in a custom property next to the standard ones (the shared settings and attachments over 5 MB do not travel), edits made by other clients are picked up, and their own properties are preserved. Servers that strip unknown properties reduce it to the standard fields. Details: [docs/specs/caldav.md](docs/specs/caldav.md).
 
-Releases after 0.4.0 move a WebDAV or folder storage to format 2, with compressed snapshots; earlier versions stop syncing with such a storage and say so. Update every device and the web server together. CalDAV is not affected.
+Lists 0.5.0 moves a WebDAV or folder storage to format 2, with compressed snapshots; earlier versions stop syncing with such a storage and say so. Update every device and the web server together. CalDAV is not affected.
 
 The data in the storage is not encrypted by the app. The storage password is kept in the macOS keychain and, on Android, encrypted with a key from the Android Keystore; it is never written to the database.
 
@@ -179,7 +179,7 @@ LISTS_CALDAV_URL=https://example.org/dav/calendars/me/ LISTS_CALDAV_USER=me LIST
 
 ## Status
 
-Version 0.4.0. What is implemented and how each part was checked is listed at the end of [docs/specs/product.md](docs/specs/product.md).
+Version 0.5.0. What is implemented and how each part was checked is listed at the end of [docs/specs/product.md](docs/specs/product.md).
 
 Known gaps:
 
