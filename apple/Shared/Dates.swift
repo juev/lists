@@ -47,9 +47,12 @@ enum Moment {
     }
 
     /// "Сегодня", "Завтра, 18:30", "пт, 9 окт".
-    static func label(_ value: String) -> String {
+    static func label(_ value: String) -> String { label(value, today: today()) }
+
+    /// The same, with the day named as seen from `today`.
+    static func label(_ value: String, today: String) -> String {
         guard let date = date(value) else { return value }
-        let days = daysBetween(from: today(), to: day(value)) ?? 0
+        let days = daysBetween(from: today, to: day(value)) ?? 0
         var text: String
         switch days {
         case 0: text = L("Today")
