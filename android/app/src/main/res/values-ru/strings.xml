@@ -253,6 +253,7 @@
     <string name="project_done_notice">Проект выполнен</string>
     <string name="project_on">Сделать проектом</string>
     <string name="new_filter">Новый фильтр</string>
+    <string name="new_project">Новый проект</string>
     <string name="delete_filter">Удалить фильтр</string>
     <string name="next_7_days">Ближайшие 7 дней</string>
     <string name="high_priority">Высокий приоритет</string>

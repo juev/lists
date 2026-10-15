@@ -254,6 +254,7 @@
     <string name="project_done_notice">Project completed</string>
     <string name="project_on">Make it a project</string>
     <string name="new_filter">New filter</string>
+    <string name="new_project">New project</string>
     <string name="delete_filter">Delete filter</string>
     <string name="next_7_days">Next 7 days</string>
     <string name="high_priority">High priority</string>
