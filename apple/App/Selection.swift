@@ -31,8 +31,8 @@ enum BatchAction {
         switch self {
         case .complete, .wontDo:
             if task.done != nil { return nil }
-            // A repeating task moves on instead of closing; reopening would not bring the date back.
-            return Step(back: task.repeat != nil ? nil : .reopen)
+            // A repeating task that moved on gets its dates back the same way (R128).
+            return Step(back: .reopen)
         case .delete: return Step(back: .restore)
         case .restore: return nil
         case .due(let value): return subtask || task.due == value ? nil : Step(back: .due(task.due))

@@ -1007,14 +1007,12 @@ final class AppModel {
             return
         }
         perform { _ = try $0.completeTask(id: task.id) }
-        // A repeating task moves on instead of closing; there is nothing to undo by reopening.
-        if task.repeat == nil {
-            // The subtasks closed with the task come back with it; reopening by the mark leaves them (R11).
-            undoManager?.registerUndo(withTarget: self) { model in
-                model.perform { try $0.undoCloseTask(id: task.id) }
-            }
-            undoManager?.setActionName(L("Complete Task"))
+        // The subtasks closed with the task come back with it; reopening by the mark leaves them (R11).
+        // A repeating task gets back its dates and the state of its subtasks (R128).
+        undoManager?.registerUndo(withTarget: self) { model in
+            model.perform { try $0.undoCloseTask(id: task.id) }
         }
+        undoManager?.setActionName(L("Complete Task"))
     }
 
     /// R126: completes the project whatever the state of its tasks; its open tasks close with it (R11)
@@ -1032,12 +1030,10 @@ final class AppModel {
     func wontDo(_ task: TaskItem) {
         guard task.done == nil else { return }
         perform { _ = try $0.wontDoTask(id: task.id) }
-        if task.repeat == nil {
-            undoManager?.registerUndo(withTarget: self) { model in
-                model.perform { try $0.undoCloseTask(id: task.id) }
-            }
-            undoManager?.setActionName(L("Won't do"))
+        undoManager?.registerUndo(withTarget: self) { model in
+            model.perform { try $0.undoCloseTask(id: task.id) }
         }
+        undoManager?.setActionName(L("Won't do"))
     }
 
     func delete(_ task: TaskItem) {
