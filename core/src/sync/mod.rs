@@ -4,7 +4,7 @@
 //! lists/v1/vault.json
 //! lists/v1/log/<device>-<seq>.jsonl     immutable batch of field changes
 //! lists/v1/log/<device>-<seq>.snap      empty: the device has a snapshot as of <seq>
-//! lists/v1/snap/<device>-<seq>.jsonl    full state of a device as of its log <seq>
+//! lists/v1/snap/<device>-<seq>.jsonl    full state of a device as of its log <seq>, gzip
 //! lists/v1/blobs/<aa>/<sha256>          attachment content
 //! ```
 //!
