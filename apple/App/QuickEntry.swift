@@ -262,7 +262,7 @@ final class Reminders {
     static let shared = Reminders()
     private var scheduled: [String] = []
     #if DEBUG
-    /// The plan of a check, which is not handed to the system: the key and the moment of each notification.
+    /// The plan of a check, which is not handed to the system: the key, the moment and the text of each notification.
     private(set) var withheld: [String] = []
     #endif
 
@@ -291,18 +291,28 @@ final class Reminders {
         NSWorkspace.shared.open(url)
     }
 
+    /// R36: the text of a notification. It is fixed when the plan is handed over and shown later, so the day
+    /// of the due date is named as seen from the day the notification appears: counted from the day of
+    /// planning, a task due tomorrow would read "tomorrow" on its own day (#280).
+    static func body(_ item: PlannedNotification) -> String {
+        switch item.kind {
+        case .summary: L("Tasks due today or overdue: %@", "\(item.count)")
+        case .reminder, .due: item.due.map { L("Due: %@", Moment.label($0, today: Moment.day(item.at)).lowercased()) } ?? ""
+        }
+    }
+
     /// Takes the store as an argument: it is called while `AppModel.shared` is still being built.
     /// `sound` is the name of a system sound, empty for the standard one and nil for silence.
     func refresh(_ store: Store?, settings: NotifySettings, sound: String?) {
         guard let store, let plan = try? store.plannedNotifications(settings: settings) else { return }
-        let signature = plan.map { "\($0.key)|\($0.at)|\($0.title)|\($0.count)|\(sound ?? "-")" }
+        let signature = plan.map { "\($0.key)|\($0.at)|\($0.title)|\($0.due ?? "-")|\($0.count)|\(sound ?? "-")" }
         guard signature != scheduled else { return }
         scheduled = signature
         #if DEBUG
         // The requests the system holds belong to the installed copy, which has the same identifier:
         // a check against a throwaway directory keeps its plan to itself (#209).
         if Storage.debugDirectory != nil {
-            withheld = plan.map { "\($0.key) \($0.at)" }
+            withheld = plan.map { "\($0.key) \($0.at) \(Self.body($0))" }
             return
         }
         #endif
@@ -312,14 +322,8 @@ final class Reminders {
         let requests: [UNNotificationRequest] = plan.compactMap { item in
             guard let date = Moment.date(item.at) else { return nil }
             let content = UNMutableNotificationContent()
-            switch item.kind {
-            case .summary:
-                content.title = "Lists"
-                content.body = L("Tasks due today or overdue: %@", "\(item.count)")
-            case .reminder, .due:
-                content.title = item.title
-                if let due = item.due { content.body = L("Due: %@", Moment.label(due).lowercased()) }
-            }
+            content.title = item.kind == .summary ? "Lists" : item.title
+            content.body = Self.body(item)
             if let sound { content.sound = NotifySound.notification(sound) }
             if let task = item.taskId { content.userInfo = ["task": task] }
             let parts = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: date)
