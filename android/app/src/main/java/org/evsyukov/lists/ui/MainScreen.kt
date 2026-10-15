@@ -805,7 +805,9 @@ fun TaskRow(
             .padding(start = 4.dp, end = 16.dp, top = padding, bottom = padding),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        IconButton(onClick = if (selected == null) onToggle else onSelect, enabled = selected != null || (!task.deleted && !task.isLog)) {
+        // The record of a repeat kept in a view of tasks takes its completion back (R128); in the journal it is history.
+        val journal = state.effectiveScope == Scope.Completed || state.effectiveScope == Scope.WontDo
+        IconButton(onClick = if (selected == null) onToggle else onSelect, enabled = selected != null || (!task.deleted && (!task.isLog || !journal))) {
             // In the selection mode the mark selects like the rest of the row, and says nothing else.
             Mark(task.markState(), if (selected != null) null else if (done) str(R.string.reopen) else str(R.string.complete), round = subtask)
         }

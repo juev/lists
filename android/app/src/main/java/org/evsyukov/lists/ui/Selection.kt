@@ -58,8 +58,7 @@ fun BatchAction.on(task: TaskItem): Step? {
         BatchAction.Restore -> null
         BatchAction.Complete, BatchAction.WontDo -> when {
             task.done != null -> null
-            // A repeating task moves on instead of closing; reopening would not bring the date back.
-            task.repeat != null -> Step(null)
+            // A repeating task that moved on gets its dates back the same way (R128).
             else -> Step(Back.Reopen)
         }
         BatchAction.Delete -> Step(Back.Restore)

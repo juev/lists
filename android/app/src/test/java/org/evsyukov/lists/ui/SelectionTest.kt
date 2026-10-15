@@ -5,6 +5,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import uniffi.lists_core.Freq
 import uniffi.lists_core.Priority
 import uniffi.lists_core.Repeat
 import uniffi.lists_core.TaskItem
@@ -52,6 +53,13 @@ class SelectionTest {
     fun r109_completing_is_taken_back_by_reopening() {
         assertEquals(Step(Back.Reopen), BatchAction.Complete.on(task()))
         assertEquals(Step(Back.Reopen), BatchAction.WontDo.on(task()))
+    }
+
+    @Test
+    fun r128_completing_a_repeating_task_is_taken_back_too() {
+        val daily = Repeat(Freq.DAILY, 1u, emptyList(), null, null, null, false, null, null)
+        assertEquals(Step(Back.Reopen), BatchAction.Complete.on(task(repeat = daily)))
+        assertEquals(Step(Back.Reopen), BatchAction.WontDo.on(task(repeat = daily)))
     }
 
     @Test
