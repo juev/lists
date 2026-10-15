@@ -107,6 +107,18 @@ private extension View {
     func withoutToolbarTitle() -> some View {
         if #available(macOS 15.0, *) { toolbar(removing: .title) } else { self }
     }
+
+    /// Puts a bar at the bottom of a scrolling view; the rows that scroll under it are hidden, not shown through it (#278).
+    /// On macOS 26 the system bar hides them with the edge effect of the glass sidebar, so the bar takes no background
+    /// that would stand out from the sidebar; earlier systems get the background of a bar.
+    @ViewBuilder
+    func bottomBar(@ViewBuilder _ content: () -> some View) -> some View {
+        if #available(macOS 26.0, *) {
+            safeAreaBar(edge: .bottom, content: content)
+        } else {
+            safeAreaInset(edge: .bottom) { content().background(.bar) }
+        }
+    }
 }
 
 /// The large title the content of the window begins with: the icon of the view and its name (R80).
@@ -391,7 +403,7 @@ struct Sidebar: View {
             guard Keyboard.text == nil, model.clearPicked() || model.closeSelectedCard() else { return .ignored }
             return .handled
         }
-        .safeAreaInset(edge: .bottom) {
+        .bottomBar {
             HStack {
                 Menu {
                     Button(L("New list")) { model.creatingList = true }
@@ -408,8 +420,6 @@ struct Sidebar: View {
                 Spacer()
             }
             .padding(10)
-            // The rows of the sidebar scroll under the bar: without a background of its own they show through it (#278).
-            .background(.bar)
         }
         .sheet(item: $editing) { ListEditor(list: $0) }
         .sheet(isPresented: $model.creatingList) { ListEditor(list: nil) }
