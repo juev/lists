@@ -470,6 +470,38 @@ fn r126_a_project_is_completed_whatever_the_state_of_its_tasks() {
 }
 
 #[test]
+fn r127_a_project_is_created_with_a_title_and_no_defaults_of_its_list() {
+    let d = device();
+    let work = d.create_list("Работа".into()).unwrap();
+    d.set_list_defaults(work.id.clone(), Priority::High, true).unwrap();
+
+    let project = d.create_project("  Отпуск ".into(), Some(work.id.clone())).unwrap();
+    assert!(project.is_project);
+    assert_eq!(project.title, "Отпуск");
+    assert_eq!(project.list_id, work.id);
+    assert_eq!(project.due, None, "a due date would become that of every task (R125)");
+    assert_eq!(project.start, None);
+    assert_eq!(project.priority, Priority::None);
+    assert_eq!(titles(&d.projects().unwrap()), ["Отпуск"]);
+    assert!(
+        view(&d, Scope::List { id: work.id }).is_empty(),
+        "not a row of its list (R120)"
+    );
+
+    assert!(d.create_project("  ".into(), None).is_err());
+    assert_eq!(d.projects().unwrap().len(), 1);
+}
+
+#[test]
+fn r127_a_project_without_a_list_goes_to_the_default_one() {
+    let d = device();
+    let home = d.create_list("Дом".into()).unwrap();
+    d.set_new_task_list(home.id.clone()).unwrap();
+    let project = d.create_project("Ремонт".into(), None).unwrap();
+    assert_eq!(project.list_id, home.id);
+}
+
+#[test]
 fn r10_the_copy_of_a_project_keeps_the_fields_of_its_tasks() {
     let d = device();
     let project = add(&d, "п");
