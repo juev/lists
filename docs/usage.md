@@ -151,6 +151,8 @@ On macOS and Android, Test connection asks the server with the address, user nam
 
 Use the same kind and the same address on every device. After that sync needs no attention: a small icon shows the state, and an error does not block work. With WebDAV and a folder the content of attachments moves after the tasks themselves; the icon on macOS and Settings → Sync on both apps show how many attachments still wait, and a file that the storage refuses does not stop the rest. On Android sync also runs in the background every 15 minutes, and a change made on the phone is sent even if the app is closed right after.
 
+The content of an attachment stays while its task is in the Trash, so a restored task gets its files back. Once the task is deleted for good (Empty Trash, clearing Completed) or the attachment is removed from a task, the file is deleted from the device. With WebDAV and a folder it is deleted from the storage and from the other devices too; with CalDAV, whose Trash is not shared, each device deletes it when the task is deleted for good there.
+
 A phone that restricts background work puts these runs off. Settings → Sync → Background work shows whether Lists is restricted; tap it to let Lists run without battery restrictions. The app asks once by itself: when sync is turned on, or when it is opened with sync already on. Do the same for the ntfy app if you use it, and on phones that have an "autostart" setting allow it for both.
 
 ### Faster delivery
