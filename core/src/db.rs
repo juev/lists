@@ -18,6 +18,8 @@ pub const KIND_LIST: &str = "list";
 pub const KIND_TASK: &str = "task";
 pub const KIND_ATTACHMENT: &str = "attachment";
 pub const KIND_FILTER: &str = "filter";
+/// S48: attachment content that a device removed from the storage; the id is its hash.
+pub const KIND_BLOB: &str = "blob";
 /// Settings shared by every device: one entity, `SETTINGS_ID`, read straight from `fields`.
 pub const KIND_SETTINGS: &str = "settings";
 pub const SETTINGS_ID: &str = "app";
@@ -297,6 +299,10 @@ pub fn settle(conn: &Connection, touched: &Touched) -> Result<()> {
             KIND_TASK => materialize_task(conn, id)?,
             KIND_ATTACHMENT => materialize_attachment(conn, id)?,
             KIND_FILTER => materialize_filter(conn, id)?,
+            // S48: the storage may no longer hold it, so this device checks again before it counts on it.
+            KIND_BLOB => {
+                conn.execute("DELETE FROM blobs_uploaded WHERE sha256 = ?1", [id])?;
+            }
             // Written by a newer version: kept in `fields`, ignored here.
             _ => {}
         }

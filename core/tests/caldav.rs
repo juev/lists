@@ -663,6 +663,39 @@ fn c5_attachment_reaches_the_other_device() {
     assert!(a.attachments(t.id).unwrap().is_empty());
 }
 
+#[test]
+fn c30_content_deleted_for_good_leaves_the_device() {
+    let dav = start();
+    let (a, b) = pair(&dav);
+    let (trashed, purged) = (add(&a, "в корзину"), add(&a, "навсегда"));
+    let src = tempfile::tempdir().unwrap();
+    let mut hashes = vec![];
+    for (task, text) in [(&trashed, "в корзине"), (&purged, "очищено")] {
+        let file = src.path().join("f.txt");
+        std::fs::write(&file, text).unwrap();
+        let att = a
+            .add_attachment(task.id.clone(), file.to_string_lossy().into_owned(), None)
+            .unwrap();
+        hashes.push(att.sha256);
+    }
+    settle(&a, &b);
+    let on = |d: &Device, h: &str| d.dir().join("blobs").join(h).exists();
+    assert!(hashes.iter().all(|h| on(&b, h)));
+
+    a.delete_task(purged.id.clone()).unwrap();
+    a.empty_trash().unwrap();
+    a.delete_task(trashed.id.clone()).unwrap();
+    settle(&a, &b);
+    assert!(on(&a, &hashes[0]), "a task in the trash keeps its content");
+    assert!(!on(&a, &hashes[1]), "content of a task deleted for good is removed");
+    // The trash is not shared over CalDAV: on B both tasks are in it, and both keep their content.
+    assert_eq!(view(&b, Scope::Trash).len(), 2);
+    assert!(hashes.iter().all(|h| on(&b, h)));
+    b.empty_trash().unwrap();
+    b.sync_now().unwrap();
+    assert!(hashes.iter().all(|h| !on(&b, h)));
+}
+
 /// A task with `count` attachments of `size` bytes each, synced from A.
 fn with_attachments(a: &Device, count: u8, size: usize) -> TaskItem {
     let t = add(a, "с файлами");

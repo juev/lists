@@ -1024,6 +1024,8 @@ fn sync(store: &Store, client: &Client, calendars: Vec<Calendar>) -> Result<Sync
     }
     // C29: every object was read; what the run brings to the rule of subtasks goes up with the next one.
     store.tidy_whole()?;
+    // C30: content no attachment needs leaves this device; the server keeps it inside the objects.
+    store.drop_unneeded_blobs()?;
     Ok(report)
 }
 

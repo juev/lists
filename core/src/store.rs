@@ -762,6 +762,10 @@ impl Store {
         // R112: data written before the rule of R10, by this device or by an earlier version.
         // Not while a sync run was cut short: the run that comes to its end does it.
         store.tidy_if_whole()?;
+        // S47: with no storage there is nothing to arrive, so the state on the device is whole.
+        if matches!(store.sync_config()?, crate::model::SyncConfig::Off) {
+            store.drop_unneeded_blobs()?;
+        }
         Ok(store)
     }
 
