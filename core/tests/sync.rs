@@ -1848,3 +1848,194 @@ fn s36_joining_a_storage_and_choosing_a_side_is_one_step() {
     c.sync_now().unwrap();
     assert_eq!(view(&c, Scope::All), ["г"]);
 }
+
+/// Where a device keeps attachment content, and where the storage does.
+fn on_device(d: &Device, sha256: &str) -> bool {
+    d.dir().join("blobs").join(sha256).exists()
+}
+
+fn in_storage(storage: &TempDir, sha256: &str) -> bool {
+    storage
+        .path()
+        .join("lists/v1/blobs")
+        .join(&sha256[..2])
+        .join(sha256)
+        .exists()
+}
+
+/// Both passes, the way the apps run them (S34).
+fn sync_all(d: &Device, storage: &TempDir) {
+    sync(d, storage);
+    sync_files(d, storage);
+}
+
+#[test]
+fn s47_content_stays_while_its_task_can_come_back_and_goes_after() {
+    let storage = tempfile::tempdir().unwrap();
+    let (a, b) = (device(), device());
+    let trashed = add(&a, "в корзину");
+    let purged = attach(&a, &trashed, "1.txt", b"one");
+    let kept = add(&a, "живая");
+    let removed = attach(&a, &kept, "2.txt", b"two");
+    let (v, w) = (add(&a, "v"), add(&a, "w"));
+    let shared = attach(&a, &v, "3.txt", b"three");
+    attach(&a, &w, "3.txt", b"three");
+    sync_all(&a, &storage);
+    sync_all(&b, &storage);
+    let all = [&purged.sha256, &removed.sha256, &shared.sha256];
+    assert!(all.iter().all(|h| on_device(&b, h) && in_storage(&storage, h)));
+
+    // A task in the trash keeps its content everywhere.
+    a.delete_task(trashed.id.clone()).unwrap();
+    sync_all(&a, &storage);
+    sync_all(&b, &storage);
+    assert!(all
+        .iter()
+        .all(|h| on_device(&a, h) && on_device(&b, h) && in_storage(&storage, h)));
+
+    // Deleted for good, or taken off a task: gone; content another attachment refers to stays.
+    a.empty_trash().unwrap();
+    a.remove_attachment(removed.id.clone()).unwrap();
+    a.remove_attachment(shared.id.clone()).unwrap();
+    sync_all(&a, &storage);
+    sync_all(&b, &storage);
+    for gone in [&purged.sha256, &removed.sha256] {
+        assert!(!on_device(&a, gone) && !on_device(&b, gone) && !in_storage(&storage, gone));
+    }
+    assert!(on_device(&a, &shared.sha256) && on_device(&b, &shared.sha256) && in_storage(&storage, &shared.sha256));
+}
+
+#[test]
+fn s47_a_run_that_did_not_read_everything_removes_nothing() {
+    let storage = tempfile::tempdir().unwrap();
+    let (a, b) = (device(), device());
+    let t = add(&a, "с файлом");
+    let att = attach(&a, &t, "1.txt", b"one");
+    sync_all(&a, &storage);
+    sync_all(&b, &storage);
+
+    // A file of A's log that B cannot read yet.
+    add(&a, "ещё");
+    sync(&a, &storage);
+    let name = files(&storage, "log")
+        .into_iter()
+        .rfind(|n| n.starts_with(&a.device_id()))
+        .unwrap();
+    let path = storage.path().join("lists/v1/log").join(&name);
+    let whole = std::fs::read(&path).unwrap();
+    std::fs::write(&path, &whole[..whole.len() / 2]).unwrap();
+
+    b.remove_attachment(att.id.clone()).unwrap();
+    sync_all(&b, &storage);
+    assert!(on_device(&b, &att.sha256) && in_storage(&storage, &att.sha256));
+
+    std::fs::write(&path, &whole).unwrap();
+    sync_all(&b, &storage);
+    assert!(!on_device(&b, &att.sha256) && !in_storage(&storage, &att.sha256));
+}
+
+#[test]
+fn s47_a_device_without_sync_removes_unneeded_content_when_it_starts() {
+    let a = device();
+    let t = add(&a, "с файлом");
+    let att = attach(&a, &t, "1.txt", b"one");
+    a.remove_attachment(att.id).unwrap();
+    assert!(on_device(&a, &att.sha256));
+    Store::open(a.dir().to_string_lossy().into_owned()).unwrap();
+    assert!(!on_device(&a, &att.sha256));
+}
+
+/// A storage that counts what is deleted from `blobs/`.
+struct Counting {
+    inner: DirRemote,
+    deleted: Mutex<Vec<String>>,
+}
+
+impl Remote for Counting {
+    fn id(&self) -> String {
+        self.inner.id()
+    }
+    fn list(&self, dir: &str) -> Result<Vec<String>> {
+        self.inner.list(dir)
+    }
+    fn get(&self, path: &str) -> Result<Option<Vec<u8>>> {
+        self.inner.get(path)
+    }
+    fn put(&self, path: &str, data: &[u8]) -> Result<()> {
+        self.inner.put(path, data)
+    }
+    fn delete(&self, path: &str) -> Result<()> {
+        if path.contains("/blobs/") {
+            self.deleted.lock().unwrap().push(path.into());
+        }
+        self.inner.delete(path)
+    }
+    fn exists(&self, path: &str) -> Result<bool> {
+        self.inner.exists(path)
+    }
+}
+
+#[test]
+fn s48_content_attached_again_without_a_connection_comes_back_to_the_storage() {
+    let storage = tempfile::tempdir().unwrap();
+    let (a, b, c) = (device(), device(), device());
+    let t = add(&a, "у A");
+    let att = attach(&a, &t, "1.txt", b"one");
+    sync_all(&a, &storage);
+    sync_all(&b, &storage); // B downloads the content and counts it as in the storage.
+
+    // Without a connection B attaches the same file to a task of its own.
+    let u = add(&b, "у B");
+    attach(&b, &u, "1.txt", b"one");
+
+    // A deletes its task for good and removes the content from the storage.
+    a.delete_task(t.id.clone()).unwrap();
+    a.empty_trash().unwrap();
+    sync_all(&a, &storage);
+    assert!(!in_storage(&storage, &att.sha256));
+
+    // B uploads its task but still counts the content as in the storage.
+    sync_all(&b, &storage);
+    assert!(!in_storage(&storage, &att.sha256));
+    sync(&c, &storage);
+    assert_eq!(sync_files(&c, &storage).waiting, 1);
+
+    // A sends the record of the removal and does not remove it again now that B needs it.
+    let counting = Counting {
+        inner: DirRemote::new(storage.path()),
+        deleted: Mutex::new(vec![]),
+    };
+    a.sync_with(&counting).unwrap();
+    a.sync_attachments_with(&counting).unwrap();
+    assert!(counting.deleted.lock().unwrap().is_empty());
+
+    // B reads the record and uploads the content again; C gets it.
+    sync(&b, &storage);
+    assert_eq!(sync_files(&b, &storage).uploaded, 1);
+    assert!(in_storage(&storage, &att.sha256));
+    sync(&c, &storage);
+    assert_eq!(sync_files(&c, &storage).downloaded, 1);
+}
+
+#[test]
+fn s48_a_device_that_reads_the_removal_does_not_remove_it_again() {
+    let storage = tempfile::tempdir().unwrap();
+    let (a, b) = (device(), device());
+    let t = add(&a, "с файлом");
+    let att = attach(&a, &t, "1.txt", b"one");
+    sync_all(&a, &storage);
+    sync_all(&b, &storage);
+
+    a.remove_attachment(att.id.clone()).unwrap();
+    sync_all(&a, &storage);
+    sync(&a, &storage); // the record of the removal goes out
+
+    let counting = Counting {
+        inner: DirRemote::new(storage.path()),
+        deleted: Mutex::new(vec![]),
+    };
+    b.sync_with(&counting).unwrap();
+    b.sync_attachments_with(&counting).unwrap();
+    assert!(counting.deleted.lock().unwrap().is_empty());
+    assert!(!on_device(&b, &att.sha256));
+}

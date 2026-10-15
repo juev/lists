@@ -23,7 +23,9 @@ use serde::{Deserialize, Serialize};
 use crate::LogLevel;
 use sha2::{Digest, Sha256};
 
-use crate::db::{self, is_sha256, Change, Touched, KIND_ATTACHMENT, KIND_FILTER, KIND_LIST, KIND_SETTINGS, KIND_TASK};
+use crate::db::{
+    self, is_sha256, Change, Touched, KIND_ATTACHMENT, KIND_BLOB, KIND_FILTER, KIND_LIST, KIND_SETTINGS, KIND_TASK,
+};
 use crate::error::{AppError, Result};
 use crate::hlc::Clock;
 use crate::model::{
@@ -46,6 +48,14 @@ const LOG_BYTES: &str = "log_bytes";
 const SNAP_BYTES: &str = "snap_bytes";
 /// S45: what a snapshot is taken to weigh before the device has written one.
 const SNAP_FLOOR: u64 = 16 * 1024;
+
+/// S47: set while the last run for the fields read everything the storage held.
+const WHOLE: &str = "blobs_whole";
+
+/// S47: attachment content still needed: an attachment that is not deleted
+/// refers to it, and its task, if known here, is not deleted for good.
+const NEEDED: &str = "SELECT DISTINCT a.sha256 FROM attachments a
+     WHERE a.deleted = 0 AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t.id = a.task_id AND t.purged = 1)";
 
 /// Set while this device is to put its data over the storage's (S38).
 const REPLACE: &str = "replace_remote";
@@ -640,6 +650,10 @@ impl Store {
             };
             self.note_blob(&mut troubles, sha256, what, outcome)?;
         }
+        if db::meta_get(&self.lock().conn, WHOLE)?.is_some() {
+            self.remove_unneeded_blobs(remote)?;
+            self.drop_unneeded_blobs()?;
+        }
         // A file no longer wanted takes its record of trouble with it.
         for gone in troubles
             .keys()
@@ -652,6 +666,65 @@ impl Store {
             self.poke_peers(remote, &self.device_id());
         }
         Ok(report)
+    }
+
+    /// S47: removes content no attachment needs any more from this device. Only
+    /// over a whole state: halfway through a run a reference may not have arrived yet.
+    pub(crate) fn drop_unneeded_blobs(&self) -> Result<()> {
+        let needed: BTreeSet<String> = {
+            let inner = self.lock();
+            let mut stmt = inner.conn.prepare(NEEDED)?;
+            let rows = stmt.query_map([], |r| r.get(0))?;
+            rows.collect::<rusqlite::Result<_>>()?
+        };
+        let Ok(entries) = std::fs::read_dir(self.dir.join("blobs")) else {
+            return Ok(());
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if is_sha256(&name) && !needed.contains(&name) {
+                std::fs::remove_file(entry.path())?;
+            }
+        }
+        Ok(())
+    }
+
+    /// S48: removes unneeded content from the storage, unless the data says a
+    /// device did so after it became unneeded, and then says it did.
+    fn remove_unneeded_blobs(&self, remote: &dyn Remote) -> Result<()> {
+        let unneeded: Vec<(String, String, Option<String>)> = {
+            let inner = self.lock();
+            let mut stmt = inner.conn.prepare(&format!(
+                "SELECT a.sha256, max(f.stamp),
+                        (SELECT g.stamp FROM fields g WHERE g.kind = ?1 AND g.id = a.sha256 AND g.field = 'gone')
+                 FROM attachments a
+                 JOIN fields f ON (f.kind = ?2 AND f.id = a.id AND f.field = 'deleted')
+                               OR (f.kind = ?3 AND f.id = a.task_id AND f.field = 'purged')
+                 WHERE a.sha256 NOT IN ({NEEDED})
+                 GROUP BY a.sha256"
+            ))?;
+            let rows = stmt.query_map(params![KIND_BLOB, KIND_ATTACHMENT, KIND_TASK], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+            })?;
+            rows.collect::<rusqlite::Result<_>>()?
+        };
+        for (sha256, unneeded_since, gone) in unneeded {
+            if !is_sha256(&sha256) || gone.is_some_and(|g| g > unneeded_since) {
+                continue;
+            }
+            // The record goes out with the next log file, after the content is gone (S48).
+            match remote.delete(&blob_remote_path(&sha256)) {
+                Ok(()) => self.write(|w| w.set(KIND_BLOB, &sha256, "gone", serde_json::json!(true)))?,
+                Err(e) => self.note(LogLevel::Error, "attachments", || {
+                    format!(
+                        "removal of {}: {}",
+                        blob_label(&sha256),
+                        hide_hash(&e.to_string(), &sha256)
+                    )
+                }),
+            }
+        }
+        Ok(())
     }
 
     /// R102: the files the passes before this one could not move.
@@ -766,6 +839,11 @@ impl Store {
         let (pulled, unreadable) = self.pull(remote, &me, &logs, &index(&names, MARK), first)?;
         if unreadable && !first {
             self.check_vault(remote)?;
+        }
+        if unreadable {
+            db::meta_del(&self.lock().conn, WHOLE)?;
+        } else {
+            db::meta_set(&self.lock().conn, WHOLE, "1")?;
         }
         *self.storage_seen.lock().unwrap_or_else(|p| p.into_inner()) = Some(storage);
         // S42: everything the storage held is here, so a task of a project has the mark of its project.
@@ -1015,7 +1093,7 @@ impl Store {
              DELETE FROM caldav_calendars; DELETE FROM caldav_items;
              DELETE FROM meta WHERE key IN ('sync_ok', 'sync_error', 'caldav_filters_sent', 'caldav_home', 'push_published',
                                             'own_seq', 'force_snapshot', 'replace_remote', 'replace_kept_at',
-                                            'log_bytes', 'snap_bytes');",
+                                            'log_bytes', 'snap_bytes', 'blobs_whole');",
         )?;
         if restore {
             // The file comes from outside: only registers this version would accept from a peer get in.
@@ -1084,7 +1162,8 @@ impl Store {
             "DELETE FROM peers; DELETE FROM outbox; DELETE FROM blobs_uploaded;
              DELETE FROM caldav_calendars; DELETE FROM caldav_items; DELETE FROM kept;
              DELETE FROM meta WHERE key IN ('sync_ok', 'sync_error', 'caldav_filters_sent', 'caldav_home', 'push_published',
-                                            'replace_remote', 'replace_kept_at', 'log_bytes', 'snap_bytes');
+                                            'replace_remote', 'replace_kept_at', 'log_bytes', 'snap_bytes',
+                                            'blobs_whole');
              UPDATE fields SET dirty = 1;",
         )?;
         db::meta_set(&tx, "force_snapshot", "1")?;
