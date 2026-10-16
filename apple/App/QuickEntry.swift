@@ -9,32 +9,6 @@ extension KeyboardShortcuts.Name {
     static let showLists = Self("showLists")
 }
 
-/// The new-task card shared by the floating quick-entry panel and the menu bar window.
-struct QuickEntryField: View {
-    @Environment(AppModel.self) private var model
-    var onDone: () -> Void
-    var onResize: () -> Void
-    /// The floating panel: the card pads itself and ends with the strip of the list and the buttons (R82).
-    var footer: Bool
-    @State private var draft: TaskDraft
-
-    /// `notes` is what the card starts with when it was taken from the clipboard (R58).
-    init(notes: String? = nil, footer: Bool = false, onDone: @escaping () -> Void, onResize: @escaping () -> Void = {}) {
-        self.onDone = onDone
-        self.onResize = onResize
-        self.footer = footer
-        _draft = State(initialValue: TaskDraft(notes: notes ?? "", pastedNotes: notes))
-    }
-
-    var body: some View {
-        DraftEditor(draft: $draft, onClose: {
-            draft = TaskDraft(listId: model.defaultListId)
-            onDone()
-        }, onResize: onResize, footer: footer)
-            .onAppear { draft.listId = model.defaultListId }
-    }
-}
-
 /// A borderless panel that takes the keyboard without activating the app,
 /// so the user stays in whatever they were doing.
 final class QuickEntryPanel: NSPanel {
@@ -75,37 +49,10 @@ final class QuickEntryPanel: NSPanel {
         // A fresh view each time: the field starts empty and focused.
         // R58: what was copied since the panel was last shown becomes the note.
         let notes = AppModel.shared.clipboardNotes ? ClipboardNote.take() : nil
-        if TaskTable.enabled { return presentCard(notes: notes) }
-        card = nil
-        let view = QuickEntryField(notes: notes, footer: true, onDone: { [weak self] in self?.close() }, onResize: { [weak self] in self?.refit() })
-            .environment(AppModel.shared)
-            .font(AppFont.style(.body))
-            .frame(width: 520)
-            .background(Color(nsColor: .windowBackgroundColor))
-            .clipShape(RoundedRectangle(cornerRadius: Self.corner, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: Self.corner, style: .continuous).strokeBorder(Color.primary.opacity(0.12)))
-        let hosting = NSHostingView(rootView: view)
-        hosting.safeAreaRegions = []
-        contentView = hosting
-        setContentSize(hosting.fittingSize)
-        // The card was placed for the size the panel had before, which on the
-        // first show is not the size of a card at all. Lay it out again before
-        // the panel is shown, or the first frame is drawn with the card off
-        // its place.
-        hosting.layoutSubtreeIfNeeded()
-        if let screen = NSScreen.main {
-            let frame = screen.visibleFrame
-            setFrameTopLeftPoint(NSPoint(x: frame.midX - self.frame.width / 2, y: frame.minY + frame.height * 0.78))
-        }
-        setAsideWindowsOfHiddenApp()
-        makeKeyAndOrderFront(nil)
-        // SwiftUI asks for focus when the view appears, which is before the
-        // panel is the key window, and the request is dropped. Hand the
-        // keyboard to the field once the panel has it.
-        DispatchQueue.main.async { [weak self] in self?.focusField() }
+        presentCard(notes: notes)
     }
 
-    /// The card of AppKit (#308) on the panel: the same card as in the list, with the strip of R82.
+    /// The card of a new task on the panel: the same card as in the list, with the strip of R82.
     private var card: DraftCard?
 
     private func presentCard(notes: String?) {
@@ -126,7 +73,7 @@ final class QuickEntryPanel: NSPanel {
         DispatchQueue.main.async { [weak self] in self?.card?.focusTitle() }
     }
 
-    /// Grows or shrinks with the card of AppKit, keeping the top edge where it is.
+    /// Grows or shrinks with the card, keeping the top edge where it is.
     private func refitCard() {
         DispatchQueue.main.async { [weak self] in
             guard let self, let card = self.card, self.contentView is PanelBox else { return }
@@ -135,27 +82,6 @@ final class QuickEntryPanel: NSPanel {
             let top = NSPoint(x: self.frame.minX, y: self.frame.maxY)
             self.setContentSize(NSSize(width: 520, height: height))
             self.setFrameTopLeftPoint(top)
-            self.invalidateShadow()
-        }
-    }
-
-    private func focusField() {
-        contentView?.layoutSubtreeIfNeeded()
-        func field(in view: NSView) -> NSTextField? {
-            if let found = view as? NSTextField, found.isEditable { return found }
-            return view.subviews.lazy.compactMap(field(in:)).first
-        }
-        if let target = contentView.flatMap(field(in:)) { makeFirstResponder(target) }
-    }
-
-    /// Grows or shrinks with the card, keeping the top edge where it is.
-    private func refit() {
-        DispatchQueue.main.async { [weak self] in
-            guard let self, let size = self.contentView?.fittingSize, size.height != self.contentView?.frame.height else { return }
-            let top = NSPoint(x: self.frame.minX, y: self.frame.maxY)
-            self.setContentSize(size)
-            self.setFrameTopLeftPoint(top)
-            // The shadow follows the shape the card draws.
             self.invalidateShadow()
         }
     }

@@ -240,3 +240,29 @@ final class DatePopoverView: NSView {
         return (responder as? NSView)?.isDescendant(of: time) == true
     }
 }
+
+/// What a key does in the date popover. Keys are told by their place on the
+/// keyboard, not by the character, so every layout gives the same choices.
+enum DateKey: Equatable {
+    case pick(days: Int), shift(days: Int), remove, confirm
+
+    private static let digits: [UInt16: Int] = [
+        18: 1, 19: 2, 20: 3, 21: 4, 23: 5, 22: 6, 26: 7, 28: 8, 25: 9,
+        83: 1, 84: 2, 85: 3, 86: 4, 87: 5, 88: 6, 89: 7, 91: 8, 92: 9,
+    ]
+
+    init?(code: UInt16) {
+        switch code {
+        case 17: self = .pick(days: 0) // T
+        case 46: self = .pick(days: 1) // M
+        case 13: self = .pick(days: 7) // W
+        case 24, 69: self = .shift(days: 1) // = and + of the main block, + of the keypad
+        case 27, 78: self = .shift(days: -1)
+        case 51, 117: self = .remove // ⌫ and ⌦
+        case 36, 76: self = .confirm // Return and Enter of the keypad
+        default:
+            guard let days = Self.digits[code] else { return nil }
+            self = .pick(days: days)
+        }
+    }
+}

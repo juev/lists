@@ -42,7 +42,7 @@ final class TaskCard: NSView, NSTextViewDelegate {
     private let bar = FillView()
     private let folder = NSImageView()
     private let title = CardTitleView()
-    private let notes = NotesTextView.PlainTextView()
+    private let notes = NoteTextView()
     private let placeholder = NSTextField(labelWithString: L("Notes"))
     private let chipsView = CardChipsView()
     private let filesView = CardFilesView()
