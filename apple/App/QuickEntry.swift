@@ -75,6 +75,8 @@ final class QuickEntryPanel: NSPanel {
         // A fresh view each time: the field starts empty and focused.
         // R58: what was copied since the panel was last shown becomes the note.
         let notes = AppModel.shared.clipboardNotes ? ClipboardNote.take() : nil
+        if TaskTable.enabled { return presentCard(notes: notes) }
+        card = nil
         let view = QuickEntryField(notes: notes, footer: true, onDone: { [weak self] in self?.close() }, onResize: { [weak self] in self?.refit() })
             .environment(AppModel.shared)
             .font(AppFont.style(.body))
@@ -101,6 +103,40 @@ final class QuickEntryPanel: NSPanel {
         // panel is the key window, and the request is dropped. Hand the
         // keyboard to the field once the panel has it.
         DispatchQueue.main.async { [weak self] in self?.focusField() }
+    }
+
+    /// The card of AppKit (#308) on the panel: the same card as in the list, with the strip of R82.
+    private var card: DraftCard?
+
+    private func presentCard(notes: String?) {
+        let card = DraftCard(draft: TaskDraft(notes: notes ?? "", pastedNotes: notes, listId: AppModel.shared.defaultListId), footer: true, escSaves: false)
+        card.onClose = { [weak self] in self?.close() }
+        self.card = card
+        let box = PanelBox(card: card)
+        contentView = box
+        setContentSize(NSSize(width: 520, height: card.height(width: 520)))
+        card.onResize = { [weak self] in self?.refitCard() }
+        box.layoutSubtreeIfNeeded()
+        if let screen = NSScreen.main {
+            let frame = screen.visibleFrame
+            setFrameTopLeftPoint(NSPoint(x: frame.midX - self.frame.width / 2, y: frame.minY + frame.height * 0.78))
+        }
+        setAsideWindowsOfHiddenApp()
+        makeKeyAndOrderFront(nil)
+        DispatchQueue.main.async { [weak self] in self?.card?.focusTitle() }
+    }
+
+    /// Grows or shrinks with the card of AppKit, keeping the top edge where it is.
+    private func refitCard() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let card = self.card, self.contentView is PanelBox else { return }
+            let height = card.height(width: 520)
+            guard height != self.contentView?.frame.height else { return }
+            let top = NSPoint(x: self.frame.minX, y: self.frame.maxY)
+            self.setContentSize(NSSize(width: 520, height: height))
+            self.setFrameTopLeftPoint(top)
+            self.invalidateShadow()
+        }
     }
 
     private func focusField() {
@@ -403,5 +439,30 @@ final class Reminders {
                 store.log(level: .error, source: "notify", message: "the system refused \(refused.count) of \(requests.count) notifications: \(logged(first))")
             }
         }
+    }
+}
+
+/// The panel drawn by the card: corners rounder than a window has and a hairline around them (R82).
+@MainActor
+private final class PanelBox: NSView {
+    init(card: DraftCard) {
+        super.init(frame: .zero)
+        wantsLayer = true
+        card.autoresizingMask = [.width, .height]
+        card.frame = bounds
+        addSubview(card)
+    }
+
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    override var wantsUpdateLayer: Bool { true }
+
+    override func updateLayer() {
+        layer?.cornerRadius = QuickEntryPanel.corner
+        layer?.cornerCurve = .continuous
+        layer?.masksToBounds = true
+        layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        layer?.borderWidth = 1
+        layer?.borderColor = NSColor.labelColor.withAlphaComponent(0.12).cgColor
     }
 }

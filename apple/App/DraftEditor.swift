@@ -29,6 +29,8 @@ struct TaskDraft: Equatable {
     var subtaskText = ""
     /// The icon of subtasks was pressed: the field of the next subtask is on show.
     var subtasksShown = false
+    /// R130: the task the new one goes right under; none puts it first in its list.
+    var after: String?
 
     var isBlank: Bool { title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 

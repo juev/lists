@@ -62,6 +62,14 @@ extension NSFont {
     }
 }
 
+extension NSFont {
+    /// The same font with another weight, its design kept.
+    func weighted(_ weight: NSFont.Weight) -> NSFont {
+        let traits: [NSFontDescriptor.TraitKey: Any] = [.weight: weight.rawValue]
+        return NSFont(descriptor: fontDescriptor.addingAttributes([.traits: traits]), size: pointSize) ?? self
+    }
+}
+
 extension NSImage {
     /// A symbol of the system sized to go with the text in that font.
     static func symbol(_ name: String, _ font: NSFont, weight: NSFont.Weight = .regular, label: String? = nil) -> NSImage? {
