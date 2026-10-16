@@ -16,6 +16,25 @@ pub trait Remote: Send + Sync {
     /// Deleting a missing file is not an error.
     fn delete(&self, path: &str) -> Result<()>;
     fn exists(&self, path: &str) -> Result<bool>;
+    /// Folder names directly inside `dir`. A missing directory is empty.
+    fn folders(&self, dir: &str) -> Result<Vec<String>> {
+        Err(AppError::sync(format!("folders of {dir} cannot be listed here")))
+    }
+    /// Moves a file, replacing one at `to` and creating its parent directories.
+    /// `false` when there is nothing at `from`: someone else moved it first.
+    fn rename(&self, from: &str, to: &str) -> Result<bool> {
+        copy_over(self, from, to)
+    }
+}
+
+/// A move made of the operations every storage has: read, write, delete.
+pub(crate) fn copy_over<R: Remote + ?Sized>(remote: &R, from: &str, to: &str) -> Result<bool> {
+    let Some(data) = remote.get(from)? else {
+        return Ok(false);
+    };
+    remote.put(to, &data)?;
+    remote.delete(from)?;
+    Ok(true)
 }
 
 /// A plain folder: a mounted share, a folder synced by another tool, or a test directory.
@@ -90,5 +109,33 @@ impl Remote for DirRemote {
 
     fn exists(&self, path: &str) -> Result<bool> {
         Ok(self.resolve(path)?.is_file())
+    }
+
+    fn folders(&self, dir: &str) -> Result<Vec<String>> {
+        let entries = match fs::read_dir(self.resolve(dir)?) {
+            Ok(entries) => entries,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(vec![]),
+            Err(e) => return Err(e.into()),
+        };
+        let mut names = Vec::new();
+        for entry in entries {
+            let entry = entry?;
+            if entry.file_type()?.is_dir() {
+                names.push(entry.file_name().to_string_lossy().into_owned());
+            }
+        }
+        Ok(names)
+    }
+
+    fn rename(&self, from: &str, to: &str) -> Result<bool> {
+        let (source, target) = (self.resolve(from)?, self.resolve(to)?);
+        if let Some(parent) = target.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        match fs::rename(source, target) {
+            Ok(()) => Ok(true),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(e) => Err(e.into()),
+        }
     }
 }
