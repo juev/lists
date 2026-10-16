@@ -654,6 +654,34 @@ enum DebugScript {
                     print("debug: undo \(manager?.canUndo == true ? manager?.undoActionName ?? "" : "nothing")")
                     manager?.undo()
                 case "sidebar": print("debug: sidebar rows \(tableRows(in: target?.contentView?.superview))")
+                case "sidebardrop", "sidebarmove", "sidebarmenu":
+                    // #308: `sidebardrop:task>row` drops what a drag of the task carries on the row of the sidebar with that title,
+                    // `sidebarmove:list>row` puts the list before that row the way a drag among the lists does (`end` after the last),
+                    // `sidebarmenu:row` prints the items of the menu of that row.
+                    let table = tables(in: target?.contentView?.superview).compactMap { $0 as? SidebarTableView }.first
+                    let parts = argument.split(separator: ">", maxSplits: 1).map(String.init)
+                    guard let coordinator = table?.coordinator else { print("debug: \(name) no sidebar table"); break }
+                    let index = { (title: String) in coordinator.rows.firstIndex { $0.item?.title == title } }
+                    if name == "sidebarmenu" {
+                        print("debug: sidebar menu \(index(argument).flatMap { coordinator.menu(forRow: $0) }?.items.map(\.title) ?? [])")
+                    } else if name == "sidebardrop", parts.count == 2, let row = index(parts[1]) {
+                        let ids = taskId(titled: parts[0]).map(AppModel.shared.dragIds) ?? []
+                        print("debug: sidebar drop \(ids.compactMap(AppModel.shared.row).map(\.title)) taken \(coordinator.drop(ids, onRow: row)), takes \(coordinator.takesTasks(row))")
+                    } else if name == "sidebarmove", parts.count == 2, let list = AppModel.shared.lists.first(where: { $0.name == parts[0] }) {
+                        let row = parts[1] == "end" ? (coordinator.rows.lastIndex { $0.item?.kind == .list }.map { $0 + 1 }) : index(parts[1])
+                        print("debug: sidebar move \(row.map { coordinator.moveList(list.id, toRow: $0) } ?? false), lists \(AppModel.shared.lists.filter { !$0.archived && $0.id != "inbox" }.map(\.name))")
+                    } else {
+                        print("debug: \(name) \(argument) not understood")
+                    }
+                case "winid":
+                    // The number of the main window, for `screencapture -l` from outside while the window is on screen.
+                    print("debug: window id \(target?.windowNumber ?? 0)")
+                case "sidebarrows":
+                    // #308: the heights of the rows of the sidebar, its selected row, and with the sidebar of AppKit the title of each row.
+                    let table = tables(in: target?.contentView?.superview).first { $0.style == .sourceList }
+                    let heights = table.map { table in (0..<table.numberOfRows).map { Int(table.rect(ofRow: $0).height.rounded()) } } ?? []
+                    let titles = (table as? SidebarTableView)?.coordinator?.titles ?? []
+                    print("debug: sidebar heights \(heights), selected \(table?.selectedRow ?? -1), titles \(titles), first responder \(table.map { $0.window?.firstResponder === $0 } ?? false)")
                 case "rowheights":
                     // R122: the height of each row of the task list, in points, the empty first row and headings among them.
                     let tables = tables(in: target?.contentView?.superview).filter { $0.style != .sourceList }

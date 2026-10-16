@@ -263,6 +263,49 @@ struct Sidebar: View {
 
     var body: some View {
         @Bindable var model = model
+        content
+            .bottomBar {
+                HStack {
+                    Menu {
+                        Button(L("New list")) { model.creatingList = true }
+                        Button(L("New project")) { model.creatingProject = true }
+                        Button(L("New filter")) { model.creatingFilter = true }
+                    } label: {
+                        Label(L("New list"), systemImage: "plus")
+                    } primaryAction: {
+                        model.creatingList = true
+                    }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
+                    .foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .padding(10)
+            }
+            .sheet(item: $editing) { ListEditor(list: $0) }
+            .sheet(isPresented: $model.creatingList) { ListEditor(list: nil) }
+            .sheet(item: $editingFilter) { FilterEditor(filter: $0) }
+            .sheet(isPresented: $model.creatingFilter) { FilterEditor(filter: nil) }
+            .sheet(isPresented: $model.creatingProject) { ProjectEditor() }
+    }
+
+    /// With the task table the sidebar is an AppKit table too, whose selection keeps its colour (#308).
+    @ViewBuilder
+    private var content: some View {
+        if TaskTable.enabled {
+            SidebarTable(
+                model: model,
+                rows: SidebarRow.rows(model),
+                scope: model.scope,
+                look: "\(model.textScale) \(model.fontDesign) \(model.isSearching)",
+                configureList: { editing = $0 },
+                configureFilter: { editingFilter = $0 })
+        } else {
+            list
+        }
+    }
+
+    private var list: some View {
         List(selection: Binding<Scope?>(get: { model.scope }, set: { if let s = $0 { model.search = ""; model.searchOpen = false; model.scope = s } })) {
             Section {
                 // R93: each built-in view has a row always, while it holds something, or never.
@@ -403,29 +446,6 @@ struct Sidebar: View {
             guard Keyboard.text == nil, model.clearPicked() || model.closeSelectedCard() else { return .ignored }
             return .handled
         }
-        .bottomBar {
-            HStack {
-                Menu {
-                    Button(L("New list")) { model.creatingList = true }
-                    Button(L("New project")) { model.creatingProject = true }
-                    Button(L("New filter")) { model.creatingFilter = true }
-                } label: {
-                    Label(L("New list"), systemImage: "plus")
-                } primaryAction: {
-                    model.creatingList = true
-                }
-                .menuStyle(.borderlessButton)
-                .fixedSize()
-                .foregroundStyle(.secondary)
-                Spacer()
-            }
-            .padding(10)
-        }
-        .sheet(item: $editing) { ListEditor(list: $0) }
-        .sheet(isPresented: $model.creatingList) { ListEditor(list: nil) }
-        .sheet(item: $editingFilter) { FilterEditor(filter: $0) }
-        .sheet(isPresented: $model.creatingFilter) { FilterEditor(filter: nil) }
-        .sheet(isPresented: $model.creatingProject) { ProjectEditor() }
     }
 
     /// A section title with the button that adds to the section.
