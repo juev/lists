@@ -84,6 +84,9 @@ import UserNotifications
 /// `veil` (makes the windows of the app transparent and deaf to the mouse and leaves the app hidden) and
 /// `hideapp` (hides the app the way Hide Lists does), `unhideapp` (shows it again without making it active),
 /// `quickopen` and `quickclose` (show quick entry transparent and without the keyboard, and close it; while it is open that way, `type` and `key` go to its card),
+/// `menubarsim:open`, `menubarsim:close` and `menubarsim:lists` (do to the app what opening the menu bar window, closing it and its Open Lists do, R98,
+/// without the window and without making the app active), `menubaropen` and `menubarclose` (click the menu bar item, the windows that come on screen
+/// made transparent, and print the windows on screen; the menu bar window takes the keyboard, so these are not for a run beside a person at work),
 /// `apphidden` (prints whether the app is hidden, whether it is active and how many of its main windows are ordered in),
 /// `closemain` (closes the main window), `showlists` (does what the key that shows Lists does, R124; with `LISTS_DEBUG_QUIET` it leaves
 /// the app in the background), `mainwindow` (prints whether the main window is there, on screen, minimised and key, and the answer of R124
@@ -622,6 +625,34 @@ enum DebugScript {
                     QuickEntryPanel.shared.alphaValue = 1
                     QuickEntryPanel.debugSilent = false
                     try? await _Concurrency.Task.sleep(for: .milliseconds(300))
+                case "menubarsim":
+                    // What opening and closing the menu bar window do to a hidden app (R98), without the window and
+                    // without making the app active: `menubarsim:open`, `menubarsim:close`, `menubarsim:lists`.
+                    switch argument {
+                    case "open":
+                        QuickEntryPanel.shared.menuBarWindowOpened()
+                        NSApp.unhideWithoutActivation()
+                    case "lists": QuickEntryPanel.shared.menuBarWindowClosed(showLists: true)
+                    default: QuickEntryPanel.shared.menuBarWindowClosed()
+                    }
+                    try? await _Concurrency.Task.sleep(for: .milliseconds(500))
+                case "menubaropen", "menubarclose":
+                    // A click on the menu bar item, as a person makes it: opens its window, or closes it. The windows
+                    // that come on screen meanwhile are made transparent at once, the main window among them.
+                    // The window takes the keyboard and makes the app active: not for a run beside a person at work.
+                    let button = NSApp.windows
+                        .filter { String(describing: type(of: $0)) == "NSStatusBarWindow" }
+                        .compactMap { $0.contentView.flatMap(statusButton(in:)) }
+                        .first
+                    guard let button else { print("debug: no menu bar item"); break }
+                    let before = Set(NSApp.windows.filter(\.isVisible).map(ObjectIdentifier.init))
+                    button.performClick(nil)
+                    for _ in 0..<60 {
+                        for window in NSApp.windows where window.isVisible && !before.contains(ObjectIdentifier(window)) { hide(window) }
+                        try? await _Concurrency.Task.sleep(for: .milliseconds(10))
+                    }
+                    let shown = NSApp.windows.filter { $0.isVisible }.map { String(describing: type(of: $0)) }
+                    print("debug: \(name) windows on screen \(shown.sorted())")
                 case "unhideapp":
                     NSApp.unhideWithoutActivation()
                     try? await _Concurrency.Task.sleep(for: .milliseconds(300))
@@ -867,6 +898,12 @@ enum DebugScript {
     private static func hide(_ window: NSWindow) {
         window.alphaValue = 0
         window.ignoresMouseEvents = true
+    }
+
+    /// The button of the menu bar item in its window.
+    private static func statusButton(in view: NSView) -> NSStatusBarButton? {
+        if let button = view as? NSStatusBarButton { return button }
+        return view.subviews.lazy.compactMap(statusButton(in:)).first
     }
 
     /// The window of the popover that is open, if one is.

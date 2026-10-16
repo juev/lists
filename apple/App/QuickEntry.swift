@@ -159,8 +159,19 @@ final class QuickEntryPanel: NSPanel {
                     self.hiddenWith = NSApp.windows.filter { $0 !== self && !($0 is NSPanel) && $0.canBecomeMain && $0.isVisible }
                 }
             },
+            // The menu bar window shows a hidden app, which would bring back all its windows; only that window is wanted.
+            center.addObserver(forName: NSApplication.willUnhideNotification, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self, self.menuBarOpen else { return }
+                    self.setAsideHiddenWindows()
+                }
+            },
             center.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.returnWindows(hide: false) }
+                MainActor.assumeIsolated {
+                    // The menu bar window makes the app active for its field: that is not the person coming back to Lists.
+                    guard let self, !self.menuBarOpen else { return }
+                    self.returnWindows(hide: false)
+                }
             },
         ]
     }
@@ -171,13 +182,31 @@ final class QuickEntryPanel: NSPanel {
     /// person comes back to the app.
     private func setAsideWindowsOfHiddenApp() {
         guard NSApp.isHidden else { return }
+        setAsideHiddenWindows()
+        NSApp.unhideWithoutActivation()
+    }
+
+    private func setAsideHiddenWindows() {
         for window in hiddenWith where NSApp.windows.contains(window) {
             setAside.append((window, window.alphaValue))
             window.alphaValue = 0
             window.orderOut(nil)
         }
         hiddenWith = []
-        NSApp.unhideWithoutActivation()
+    }
+
+    /// The window of the menu bar item is on screen (R98): it shows a hidden app alone, as the panel does.
+    private var menuBarOpen = false
+
+    func menuBarWindowOpened() {
+        menuBarOpen = true
+    }
+
+    /// With `showLists` the person asked for Lists from the menu bar window: its windows come back. Otherwise
+    /// an app that was hidden before the window opened is hidden again.
+    func menuBarWindowClosed(showLists: Bool = false) {
+        menuBarOpen = false
+        returnWindows(hide: !showLists)
     }
 
     /// Puts back what `setAsideWindowsOfHiddenApp` took away. With `hide` the app goes back to being hidden, as it
