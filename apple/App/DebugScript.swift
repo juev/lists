@@ -307,6 +307,26 @@ enum DebugScript {
                     }
                     let ids = taskId(titled: parts[0]).map(model.dragIds) ?? []
                     print("debug: drag \(ids.compactMap(model.row).map(\.title)) taken \(scope.map { model.drop(ids, on: $0) } ?? false)")
+                case "dragwrite", "reorder":
+                    // #308: `dragwrite:title` prints what the task table puts on the pasteboard for a drag of that row, with the
+                    // size of the picture at the pointer; `reorder:title>before` drops that row between rows, before the row of
+                    // the task `before` (`end` for the end of the list), the way the table does.
+                    let table = tables(in: target?.contentView?.superview).compactMap { $0 as? TaskTableView }.first
+                    let parts = argument.split(separator: ">", maxSplits: 1).map(String.init)
+                    guard let table, let coordinator = table.coordinator, let id = taskId(titled: parts[0]),
+                          let row = coordinator.rows.firstIndex(where: { $0.taskId == id }) else {
+                        print("debug: \(name) no task table or no row \(parts.first ?? "")")
+                        break
+                    }
+                    if name == "dragwrite" {
+                        let item = coordinator.tableView(table, pasteboardWriterForRow: row) as? NSPasteboardItem
+                        let ids = item?.string(forType: .string)?.split(separator: "\n").map(String.init) ?? []
+                        let image = TaskTable.Coordinator.dragImage(title: taskTitle(id), count: ids.count)
+                        print("debug: drag writes \(ids.map(taskTitle)), picture \(Int(image.size.width))x\(Int(image.size.height))")
+                    } else {
+                        let before = parts.count > 1 && parts[1] != "end" ? taskId(titled: parts[1]).flatMap { b in coordinator.rows.firstIndex { $0.taskId == b } } : coordinator.rows.count
+                        print("debug: reorder \(before.map { coordinator.move(id, toRow: $0) } ?? false), can reorder \(AppModel.shared.canReorder)")
+                    }
                 case "batchmenu":
                     // The menu a right click on the selected row builds while several rows are selected.
                     let model = AppModel.shared
