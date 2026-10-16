@@ -35,6 +35,8 @@ enum TaskTableRow: Equatable {
     case found(TaskItem, parent: String)
     /// The field for a new task of the open project above (R30).
     case newChild(parent: String, depth: Int)
+    /// R37: the card of a new task, where the task is going to stand (R130).
+    case draft(TaskDraft)
 
     /// What tells the row from the others while its content changes.
     var key: String {
@@ -44,6 +46,7 @@ enum TaskTableRow: Equatable {
         case .task(let state): state.task.id
         case .found(let task, let parent): parent + " " + task.id
         case .newChild(let parent, _): "new " + parent
+        case .draft: "draft"
         }
     }
 
@@ -55,8 +58,11 @@ enum TaskTableRow: Equatable {
 
     /// Whether the row is the open card of its task.
     var isCard: Bool {
-        if case .task(let state) = self { return state.open }
-        return false
+        switch self {
+        case .task(let state): state.open
+        case .draft: true
+        default: false
+        }
     }
 
     var task: TaskItem? {
@@ -100,7 +106,28 @@ enum TaskTableRow: Equatable {
             if let title = section.title { rows.append(.heading(id: section.id, title: title)) }
             for task in section.tasks { add(task, depth: 0) }
         }
+        if let draft = model.draft { rows.insert(.draft(draft), at: draftPlace(draft, in: rows, model)) }
         return rows
+    }
+
+    /// R130: the card of a new task stands right under the task it goes under, a subtask standing for its parent, with
+    /// whatever that task has under it; without one, before the first task of the view.
+    @MainActor
+    private static func draftPlace(_ draft: TaskDraft, in rows: [TaskTableRow], _ model: AppModel) -> Int {
+        let anchor = draft.after.flatMap(model.row).map { model.isSubtask($0) ? $0.parentId ?? $0.id : $0.id }
+        if let anchor, let index = rows.firstIndex(where: { $0.taskId == anchor }), case .task(let state) = rows[index] {
+            var end = index + 1
+            while end < rows.count {
+                switch rows[end] {
+                case .found: end += 1
+                case .newChild(_, let depth) where depth > state.depth: end += 1
+                case .task(let next) where next.depth > state.depth: end += 1
+                default: return end
+                }
+            }
+            return end
+        }
+        return rows.firstIndex { if case .task = $0 { true } else { false } } ?? rows.count
     }
 }
 
@@ -177,7 +204,7 @@ struct TaskTable: NSViewRepresentable {
         func update(_ new: TaskTable) {
             guard let table else { return }
             let lookChanged = new.look != look
-            let wasOpen = Set(rows.filter(\.isCard).compactMap(\.taskId))
+            let wasOpen = Set(rows.filter(\.isCard).map(\.key))
             if lookChanged || new.rows.map(\.key) != rows.map(\.key) {
                 rows = new.rows
                 look = new.look
@@ -199,7 +226,7 @@ struct TaskTable: NSViewRepresentable {
             }
             // A card just opened is brought into sight once it has its height (R38), and takes the keyboard into its
             // title when it was opened for typing.
-            if let opened = rows.firstIndex(where: { $0.isCard && !wasOpen.contains($0.taskId ?? "") }) {
+            if let opened = rows.firstIndex(where: { $0.isCard && !wasOpen.contains($0.key) }) {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak table] in
                     guard let table, opened < table.numberOfRows else { return }
                     table.scrollRowToVisible(opened)
@@ -275,6 +302,34 @@ struct TaskTable: NSViewRepresentable {
         private func pruneCards() {
             let open = Set(rows.filter(\.isCard).compactMap(\.taskId))
             cards = cards.filter { open.contains($0.key) }
+            if !rows.contains(where: { $0.key == "draft" }) { draft = nil }
+        }
+
+        /// The card of a new task while it is open (R37).
+        private var draft: DraftCard?
+
+        private func draftCard(_ value: TaskDraft) -> DraftCard {
+            if let draft {
+                draft.sync(value)
+                return draft
+            }
+            let card = DraftCard(draft: value, footer: false, escSaves: true)
+            card.onChange = { [model] new in if model.draft != nil { model.draft = new } }
+            card.onClose = { [model] in model.draft = nil }
+            card.onResize = { [weak self] in
+                guard let self, let table = self.table, let row = self.rows.firstIndex(where: { $0.key == "draft" }) else { return }
+                table.noteHeightOfRows(withIndexesChanged: [row])
+            }
+            draft = card
+            // R37: the keyboard is in the title at once, the panel of quick entry used before or not (#152): the card asks
+            // again while it is not given the keyboard.
+            for wait in [0.0, 0.05, 0.15, 0.35, 0.75] {
+                DispatchQueue.main.asyncAfter(deadline: .now() + wait) { [weak card] in
+                    guard let card, card.window != nil, Keyboard.text == nil, !Keyboard.inCard else { return }
+                    card.focusTitle()
+                }
+            }
+            return card
         }
 
         /// The row takes its new content in the view it has.
@@ -289,6 +344,7 @@ struct TaskTable: NSViewRepresentable {
                 }
             case .found(let task, _): (view as? FoundRowCell)?.configure(task, model: model)
             case .newChild(let parent, let depth): (view as? NewChildCell)?.configure(parent: parent, depth: depth)
+            case .draft(let draft): (view as? DraftCard)?.sync(draft)
             }
         }
 
@@ -328,6 +384,8 @@ struct TaskTable: NSViewRepresentable {
                 let cell = tableView.makeView(withIdentifier: NewChildCell.identifier, owner: nil) as? NewChildCell ?? NewChildCell()
                 cell.configure(parent: parent, depth: depth)
                 return cell
+            case .draft(let draft):
+                return draftCard(draft)
             case .found(let task, _):
                 let cell = tableView.makeView(withIdentifier: FoundRowCell.identifier, owner: nil) as? FoundRowCell ?? FoundRowCell()
                 cell.configure(task, model: model)
@@ -349,6 +407,7 @@ struct TaskTable: NSViewRepresentable {
             case .task(let state): TaskTableMetrics.taskRow(origin: state.origin != nil, spacing: model.rowSpacing)
             case .found: TaskTableMetrics.foundRow()
             case .newChild: TaskTableMetrics.newChildRow()
+            case .draft(let draft): draftCard(draft).height(width: tableView.tableColumns.first?.width ?? tableView.bounds.width)
             }
         }
 

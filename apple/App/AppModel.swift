@@ -791,6 +791,8 @@ final class AppModel {
         default: break
         }
         var new = TaskDraft(listId: targetListId)
+        // R130: the task selected now is the one the new task goes under; the card of the main window stands there.
+        new.after = selectedTask?.id
         if case .project(let id) = scope {
             new.parentId = id
             // R129: the card shows the project; a list chosen there instead starts from the project's list.
@@ -847,12 +849,13 @@ final class AppModel {
         let parse = parseQuickText
         let task: TaskItem? = perform { store in
             let created: TaskItem
-            // R130: a new task goes first in its list.
+            // R130: a new task goes first in its list, or right under the task that was selected when the card opened.
+            let after = draft.after
             switch (draft.parentId, parse) {
-            case (let parent?, true): created = try store.quickAddUnder(text: title, parentId: parent, first: true)
-            case (let parent?, false): created = try store.createTask(new: NewTask(title: title, parentId: parent, first: true))
-            case (nil, true): created = try store.quickAdd(text: title, listId: draft.listId, first: true)
-            case (nil, false): created = try store.createTask(new: NewTask(title: title, listId: draft.listId, first: true))
+            case (let parent?, true): created = try store.quickAddUnder(text: title, parentId: parent, first: true, after: after)
+            case (let parent?, false): created = try store.createTask(new: NewTask(title: title, parentId: parent, first: true, after: after))
+            case (nil, true): created = try store.quickAdd(text: title, listId: draft.listId, first: true, after: after)
+            case (nil, false): created = try store.createTask(new: NewTask(title: title, listId: draft.listId, first: true, after: after))
             }
             if !draft.notes.isEmpty { try store.setNotes(id: created.id, notes: draft.notes) }
             if let start = draft.start { try store.setStart(id: created.id, start: start) }

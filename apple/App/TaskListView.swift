@@ -10,7 +10,8 @@ struct TaskListView: View {
         @Bindable var model = model
         VStack(spacing: 0) {
             ViewTitle()
-            if model.draft != nil {
+            // With the task table the card of a new task is a row of it (R37, #308).
+            if model.draft != nil && !TaskTable.enabled {
                 DraftEditor(
                     draft: Binding(get: { model.draft ?? TaskDraft() }, set: { if model.draft != nil { model.draft = $0 } }),
                     onClose: { model.draft = nil })
@@ -23,7 +24,7 @@ struct TaskListView: View {
             }
             if let error = model.startupError {
                 ContentUnavailableView(L("The database could not be opened"), systemImage: "exclamationmark.triangle", description: Text(error))
-            } else if model.sections.allSatisfy(\.tasks.isEmpty) {
+            } else if model.sections.allSatisfy(\.tasks.isEmpty) && !(TaskTable.enabled && model.draft != nil) {
                 // R78: the events of the day are shown on a day without tasks as well.
                 if model.eventsShown {
                     EventsBlock(events: model.dayEvents)
