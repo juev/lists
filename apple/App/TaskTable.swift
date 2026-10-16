@@ -74,6 +74,8 @@ struct TaskTable: NSViewRepresentable {
     let focusRequests: Int
     /// The task whose card takes the keyboard into its title once it is on screen.
     let titleFocus: String?
+    /// The view on screen.
+    let scope: Scope
 
     func makeCoordinator() -> Coordinator { Coordinator(model: model) }
 
@@ -170,6 +172,21 @@ struct TaskTable: NSViewRepresentable {
                 focusRequests = new.focusRequests
                 table.window?.makeFirstResponder(table)
             }
+            // R117: a view chosen in the sidebar or by ⌘1…⌘6 has the keyboard, so the arrows select its tasks. A table made
+            // for the view, after one that held nothing, takes it as well.
+            if new.scope != scope {
+                scope = new.scope
+                takeKeyboard()
+            }
+        }
+
+        private var scope: Scope?
+
+        /// The keyboard comes to the table once the click in the sidebar is over: the sidebar takes it for itself while
+        /// it follows the mouse. The card of a new task keeps it (R37).
+        private func takeKeyboard() {
+            table?.wantsKeyboard = true
+            table?.takeKeyboardIfWanted()
         }
 
         /// True while a text view, the field editor of a text field, a chip of a card or the row of a file in it has the keyboard.
@@ -295,6 +312,22 @@ final class TaskTableView: NSTableView {
         super.viewDidMoveToWindow()
         keyboardWatch = window?.observe(\.firstResponder, options: [.new]) { [weak self] window, _ in
             MainActor.assumeIsolated { self?.keyboardMoved(to: window.firstResponder) }
+        }
+        takeKeyboardIfWanted()
+    }
+
+    /// Set when the table is to have the keyboard as soon as it can: a table made for a new view is not in the window yet.
+    var wantsKeyboard = false
+
+    /// Once the click in the sidebar is over: the sidebar takes the keyboard for itself while it follows the mouse.
+    /// The card of a new task keeps the keyboard (R37).
+    func takeKeyboardIfWanted() {
+        RunLoop.main.perform(inModes: [.default]) { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.wantsKeyboard, let window = self.window else { return }
+                self.wantsKeyboard = false
+                if self.model.draft == nil { window.makeFirstResponder(self) }
+            }
         }
     }
 
