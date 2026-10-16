@@ -633,11 +633,7 @@ enum DebugScript {
                     // A click on the menu bar item, as a person makes it: opens its window, or closes it. The windows
                     // that come on screen meanwhile are made transparent at once, the main window among them.
                     // The window takes the keyboard and makes the app active: not for a run beside a person at work.
-                    let button = NSApp.windows
-                        .filter { String(describing: type(of: $0)) == "NSStatusBarWindow" }
-                        .compactMap { $0.contentView.flatMap(statusButton(in:)) }
-                        .first
-                    guard let button else { print("debug: no menu bar item"); break }
+                    guard let button = QuickEntryPanel.menuBarButton else { print("debug: no menu bar item"); break }
                     let before = Set(NSApp.windows.filter(\.isVisible).map(ObjectIdentifier.init))
                     button.performClick(nil)
                     for _ in 0..<60 {
@@ -895,12 +891,6 @@ enum DebugScript {
     private static func hide(_ window: NSWindow) {
         window.alphaValue = 0
         window.ignoresMouseEvents = true
-    }
-
-    /// The button of the menu bar item in its window.
-    private static func statusButton(in view: NSView) -> NSStatusBarButton? {
-        if let button = view as? NSStatusBarButton { return button }
-        return view.subviews.lazy.compactMap(statusButton(in:)).first
     }
 
     /// The window of the popover that is open, if one is.
