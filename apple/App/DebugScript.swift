@@ -24,6 +24,7 @@ import UserNotifications
 /// `inbox` (switches to the Inbox view), `open` (expands the selected task), `edit` (opens it with the caret in the title, the way Return does), `select:1` and `select:-1` (move the selection the way the arrow keys do),
 /// `pick:title` (selects a row the way a click does), `drag:title>target` (drops what a drag of that row carries on a row of the sidebar, R123),
 /// `movemenu` (prints the items of "Move to list" in the menu of the selected row, R129),
+/// `rowitem:Move to list>Title` (chooses the item at that path of the menu a right click on the selected row builds, and prints its titles; `rowitem:Due>Today`, `rowitem:Priority>High`),
 /// `addsub:title` (adds a subtask to the selected task the way its field does on Return), `subtasks` (prints the lines of the selected task, or of the task
 /// the selected subtask belongs to: the title and the state of each, which of them is a subtask without a card, the one whose title is being edited,
 /// and the lines a search shows under its rows), `renamesub:old=new` (renames the subtask in its line: starts the edit the way Return on the selected
@@ -309,6 +310,21 @@ enum DebugScript {
                     let items = model.selectedTask.map { TaskRow.menuItems(for: $0, model) } ?? []
                     let move = items.first { $0.title == L("Move to list") }?.children ?? []
                     print("debug: move menu \(move.filter { !$0.isDivider }.map { $0.isHeader ? "[\($0.title)]" : $0.disabled ? "-" + $0.title : $0.title })")
+                case "rowitem":
+                    // The item of the menu of the selected row, chosen the way a click on it does.
+                    let model = AppModel.shared
+                    var items = model.selectedTask.map { TaskRow.menuItems(for: $0, model) } ?? []
+                    var item: RowMenuItem?
+                    for title in argument.split(separator: ">").map(String.init) {
+                        item = items.first { !$0.isDivider && !$0.isHeader && ($0.title == title || $0.title == L(title)) }
+                        items = item?.children ?? []
+                    }
+                    if let item, item.children == nil, !item.disabled {
+                        item.action()
+                        print("debug: row item \(argument) chosen")
+                    } else {
+                        print("debug: row item \(argument) not found or not available")
+                    }
                 case "addsub":
                     let model = AppModel.shared
                     if let id = model.selection {
