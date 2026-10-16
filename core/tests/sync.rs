@@ -11,7 +11,7 @@ use lists_core::*;
 use tempfile::TempDir;
 
 /// The root of the storage (S49).
-const ROOT: &str = "lists/v1";
+const ROOT: &str = "lists";
 
 fn sync(d: &Device, storage: &TempDir) -> SyncReport {
     d.sync_with(&DirRemote::new(storage.path())).unwrap()
@@ -809,6 +809,304 @@ fn s50_a_compressed_snapshot_carries_the_time_it_was_written() {
         (before..=after).contains(&mtime),
         "{mtime} not within {before}..={after}"
     );
+}
+
+/// The storage again, as an app that was started anew sees it: the format
+/// and the old place are looked at once per storage and process (S14, S49).
+fn restarted(storage: &TempDir) -> DirRemote {
+    DirRemote::new(storage.path().join("."))
+}
+
+/// Moves a storage to where versions before #294 kept it, `lists/v1/`.
+fn to_legacy(storage: &TempDir) {
+    let (root, aside) = (storage.path().join(ROOT), storage.path().join("aside"));
+    std::fs::remove_file(root.join("v1/vault.json")).unwrap();
+    std::fs::remove_dir(root.join("v1")).unwrap();
+    std::fs::rename(&root, &aside).unwrap();
+    std::fs::create_dir(&root).unwrap();
+    std::fs::rename(&aside, root.join("v1")).unwrap();
+}
+
+/// Every file under a folder of the storage, by its path inside that folder.
+fn tree(dir: &Path) -> Vec<String> {
+    let mut out = Vec::new();
+    for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if entry.path().is_dir() {
+            out.extend(tree(&entry.path()).into_iter().map(|n| format!("{name}/{n}")));
+        } else {
+            out.push(name);
+        }
+    }
+    out.sort();
+    out
+}
+
+fn vault(path: &Path) -> serde_json::Value {
+    serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
+}
+
+/// A storage whose moves give out after a number of them, as when the network goes.
+struct CutShort {
+    inner: DirRemote,
+    left: Mutex<u32>,
+}
+
+impl Remote for CutShort {
+    fn id(&self) -> String {
+        self.inner.id()
+    }
+    fn list(&self, dir: &str) -> Result<Vec<String>> {
+        self.inner.list(dir)
+    }
+    fn get(&self, path: &str) -> Result<Option<Vec<u8>>> {
+        self.inner.get(path)
+    }
+    fn put(&self, path: &str, data: &[u8]) -> Result<()> {
+        self.inner.put(path, data)
+    }
+    fn delete(&self, path: &str) -> Result<()> {
+        self.inner.delete(path)
+    }
+    fn exists(&self, path: &str) -> Result<bool> {
+        self.inner.exists(path)
+    }
+    fn folders(&self, dir: &str) -> Result<Vec<String>> {
+        self.inner.folders(dir)
+    }
+    fn rename(&self, from: &str, to: &str) -> Result<bool> {
+        let mut left = self.left.lock().unwrap();
+        if *left == 0 {
+            return Err(AppError::Sync {
+                msg: "connection reset".into(),
+            });
+        }
+        *left -= 1;
+        self.inner.rename(from, to)
+    }
+}
+
+/// A storage of the layout before #294 with a snapshot, a log file, a mark,
+/// attachment content and a nudge address of A.
+fn legacy_storage(format_1: bool) -> (TempDir, Device, Attachment, String) {
+    let storage = tempfile::tempdir().unwrap();
+    let a = device();
+    a.set_compact_after_for_tests(0);
+    let task = add(&a, "из снимка");
+    let att = attach(&a, &task, "a.txt", b"content of A");
+    sync(&a, &storage);
+    sync_files(&a, &storage);
+    a.set_compact_after_for_tests(256);
+    add(&a, "из журнала");
+    sync(&a, &storage);
+    std::fs::create_dir_all(storage.path().join(ROOT).join("push")).unwrap();
+    std::fs::write(
+        storage
+            .path()
+            .join(ROOT)
+            .join("push")
+            .join(format!("{}.json", a.device_id())),
+        br#"{"v":1,"url":"https://push.example/a"}"#,
+    )
+    .unwrap();
+    let id = if format_1 {
+        to_format_1(&storage)
+    } else {
+        vault(&storage.path().join(ROOT).join("vault.json"))["vault"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    to_legacy(&storage);
+    (storage, a, att, id)
+}
+
+#[test]
+fn s49_a_storage_in_lists_v1_moves_to_lists() {
+    for format_1 in [false, true] {
+        let (storage, a, att, id) = legacy_storage(format_1);
+        let (root, old) = (storage.path().join(ROOT), storage.path().join(ROOT).join("v1"));
+        let mut before: Vec<String> = tree(&old).into_iter().filter(|n| n != "vault.json").collect();
+        before.sort();
+        assert_eq!(
+            before
+                .iter()
+                .filter(|n| n.starts_with("log/") && n.ends_with(".snap"))
+                .count(),
+            1,
+            "{before:?}"
+        );
+
+        let b = device();
+        add(&b, "с B");
+        sync(&b, &storage);
+        sync_files(&b, &storage);
+        let mut got = view(&b, Scope::Inbox);
+        got.sort();
+        assert_eq!(got, ["из журнала", "из снимка", "с B"], "format 1: {format_1}");
+
+        // Every file of A is under its old name in the new place, and only the old vault is left behind.
+        let moved: Vec<String> = tree(&root)
+            .into_iter()
+            .filter(|n| !n.starts_with("v1/") && n != "vault.json" && !n.contains(&b.device_id()))
+            .collect();
+        assert_eq!(moved, before);
+        assert_eq!(tree(&old), ["vault.json"]);
+        assert_eq!(
+            vault(&root.join("vault.json")),
+            serde_json::json!({"format": 2, "vault": id})
+        );
+        assert_eq!(
+            vault(&old.join("vault.json")),
+            serde_json::json!({"format": 3, "vault": id})
+        );
+        let files = b
+            .attachments(
+                b.tasks(Scope::All)
+                    .unwrap()
+                    .into_iter()
+                    .find(|t| t.title == "из снимка")
+                    .unwrap()
+                    .id,
+            )
+            .unwrap();
+        assert_eq!(files[0].sha256, att.sha256);
+        assert_eq!(
+            std::fs::read(files[0].local_path.as_ref().unwrap()).unwrap(),
+            b"content of A"
+        );
+
+        // A, already on the new version, goes on in the new place; C joins from nothing.
+        sync(&a, &storage);
+        assert!(view(&a, Scope::Inbox).contains(&"с B".to_string()));
+        let c = device();
+        sync(&c, &storage);
+        let mut got = view(&c, Scope::Inbox);
+        got.sort();
+        assert_eq!(got, ["из журнала", "из снимка", "с B"]);
+    }
+}
+
+#[test]
+fn s49_a_move_cut_short_is_finished_by_the_next_run() {
+    let (storage, _a, _att, id) = legacy_storage(false);
+    let root = storage.path().join(ROOT);
+    let b = device();
+    let cut = CutShort {
+        inner: DirRemote::new(storage.path()),
+        left: Mutex::new(2),
+    };
+    assert!(b.sync_with(&cut).is_err());
+    assert!(
+        !root.join("vault.json").exists(),
+        "the new place is not named before the move is done"
+    );
+    assert_eq!(vault(&root.join("v1/vault.json"))["format"], 2);
+
+    sync(&b, &storage);
+    let mut got = view(&b, Scope::Inbox);
+    got.sort();
+    assert_eq!(got, ["из журнала", "из снимка"]);
+    assert_eq!(tree(&root.join("v1")), ["vault.json"]);
+    assert_eq!(vault(&root.join("vault.json"))["vault"], id.as_str());
+}
+
+#[test]
+fn s49_two_devices_moving_at_once_lose_nothing() {
+    let (storage, _a, _att, _) = legacy_storage(false);
+    let before: Vec<String> = tree(&storage.path().join(ROOT).join("v1"))
+        .into_iter()
+        .filter(|n| n != "vault.json")
+        .collect();
+    let (b, c) = (device(), device());
+    // B lists the old place and moves one file; C moves the rest under its feet; B goes on.
+    let cut = CutShort {
+        inner: DirRemote::new(storage.path()),
+        left: Mutex::new(1),
+    };
+    assert!(b.sync_with(&cut).is_err());
+    sync(&c, &storage);
+    sync(&b, &storage);
+    let moved: Vec<String> = tree(&storage.path().join(ROOT))
+        .into_iter()
+        .filter(|n| !n.starts_with("v1/") && n != "vault.json")
+        .collect();
+    assert_eq!(moved, before);
+    assert_eq!(dump(&b), dump(&c));
+    assert_eq!(view(&b, Scope::Inbox).len(), 2);
+}
+
+#[test]
+fn s49_what_an_earlier_version_writes_to_the_old_place_after_the_move_is_fetched() {
+    let (storage, a, _att, _) = legacy_storage(false);
+    let b = device();
+    sync(&b, &storage);
+    assert_eq!(sync_files(&b, &storage).downloaded, 1);
+
+    // A is still on the earlier version: its next file and content land in lists/v1/.
+    let elsewhere = tempfile::tempdir().unwrap();
+    let late = add(&a, "поздняя");
+    let att = attach(&a, &late, "late.txt", b"late content");
+    sync(&a, &elsewhere);
+    sync_files(&a, &elsewhere);
+    let old = storage.path().join(ROOT).join("v1");
+    // What A wrote there, its log and a snapshot if it took one, goes to the old place.
+    let mut written = Vec::new();
+    for dir in ["log", "snap"] {
+        std::fs::create_dir_all(old.join(dir)).unwrap();
+        for name in files(&elsewhere, dir) {
+            std::fs::copy(
+                elsewhere.path().join(ROOT).join(dir).join(&name),
+                old.join(dir).join(&name),
+            )
+            .unwrap();
+            written.push(format!("{dir}/{name}"));
+        }
+    }
+    let blob = format!("blobs/{}/{}", &att.sha256[..2], att.sha256);
+    std::fs::create_dir_all(old.join(&blob).parent().unwrap()).unwrap();
+    std::fs::copy(elsewhere.path().join(ROOT).join(&blob), old.join(&blob)).unwrap();
+
+    // Without a restart B does not look there.
+    sync(&b, &storage);
+    assert!(!view(&b, Scope::Inbox).contains(&"поздняя".to_string()));
+    b.sync_with(&restarted(&storage)).unwrap();
+    assert!(view(&b, Scope::Inbox).contains(&"поздняя".to_string()));
+    // The content waits there until it is asked for.
+    assert_eq!(tree(&old), [blob.clone(), "vault.json".to_string()]);
+    for file in &written {
+        assert!(storage.path().join(ROOT).join(file).is_file(), "{file}");
+    }
+
+    // The content is found in the old place and moved to the new one.
+    assert_eq!(sync_files(&b, &storage).downloaded, 1);
+    assert!(storage.path().join(ROOT).join(&blob).is_file());
+    assert_eq!(tree(&old), ["vault.json"]);
+}
+
+#[test]
+fn s49_a_new_storage_closes_the_old_place() {
+    let storage = tempfile::tempdir().unwrap();
+    let a = device();
+    add(&a, "задача");
+    sync(&a, &storage);
+    let root = storage.path().join(ROOT);
+    let id = vault(&root.join("vault.json"))["vault"].clone();
+    assert_eq!(
+        vault(&root.join("v1/vault.json")),
+        serde_json::json!({"format": 3, "vault": id})
+    );
+    assert_eq!(vault(&root.join("vault.json"))["format"], 2);
+}
+
+#[test]
+fn s49_the_side_check_sees_a_storage_not_moved_yet_and_moves_nothing() {
+    let (storage, _a, _att, _) = legacy_storage(false);
+    let before = tree(storage.path());
+    let c = device();
+    add(&c, "своя");
+    assert!(c.sync_conflict(folder(&storage), String::new()).unwrap());
+    assert_eq!(tree(storage.path()), before);
 }
 
 #[test]

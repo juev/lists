@@ -1282,7 +1282,7 @@ final class AppModel {
             folderWatcher.watch(nil) {}
             return
         }
-        let log = URL(fileURLWithPath: path).appendingPathComponent("lists/v1/log", isDirectory: true)
+        let log = URL(fileURLWithPath: path).appendingPathComponent("lists/log", isDirectory: true)
         folderWatcher.watch(log) { [weak self] in
             MainActor.assumeIsolated { self?.scheduleSync() }
         }

@@ -15,7 +15,8 @@
 //! Calendars carry a change tag and a sync token, and answer the
 //! `sync-collection` and `calendar-multiget` reports. `.no-ctag`, `.no-sync`
 //! and `.no-report` in the served root turn off the tag, the token with its
-//! report, and both reports.
+//! report, and both reports. `.no-move` makes the server refuse MOVE with
+//! 405, as a server without it would.
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -282,6 +283,29 @@ fn handle(mut request: Request, root: &Path) {
                     write_props(&path, root, &body);
                 }
                 201
+            }
+        }
+        Method::NonStandard(ref m) if m.as_str() == "MOVE" => {
+            // The destination is an absolute address; only its path matters here.
+            let destination = header(&request, "Destination").unwrap_or_default();
+            let target = destination
+                .split_once("://")
+                .and_then(|(_, rest)| rest.split_once('/'))
+                .map(|(_, path)| root.join(path.trim_end_matches('/')));
+            match target {
+                _ if root.join(".no-move").exists() => 405,
+                None => 400,
+                Some(_) if current.is_none() => 404,
+                Some(target) if !target.parent().is_some_and(Path::is_dir) => 409,
+                Some(target) => {
+                    let existed = target.exists();
+                    std::fs::rename(&path, &target).unwrap();
+                    if existed {
+                        204
+                    } else {
+                        201
+                    }
+                }
             }
         }
         Method::NonStandard(ref m) if m.as_str() == "PROPPATCH" => {

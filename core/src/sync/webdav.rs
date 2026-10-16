@@ -1,11 +1,11 @@
-//! WebDAV as dumb file storage: GET, PUT, DELETE, HEAD, MKCOL and a depth-1 PROPFIND.
+//! WebDAV as dumb file storage: GET, PUT, DELETE, HEAD, MKCOL, MOVE and a depth-1 PROPFIND.
 
 use std::io::Read;
 use std::time::Duration;
 
 use base64::Engine;
 
-use super::remote::Remote;
+use super::remote::{copy_over, Remote};
 use crate::error::{AppError, Result};
 use crate::model::ConnectionCheck;
 
@@ -136,12 +136,9 @@ fn fail(what: &str, path: &str, code: u16) -> AppError {
     AppError::sync(format!("{what} {path}: HTTP {code}{hint}"))
 }
 
-impl Remote for WebDavRemote {
-    fn id(&self) -> String {
-        self.base.clone()
-    }
-
-    fn list(&self, dir: &str) -> Result<Vec<String>> {
+impl WebDavRemote {
+    /// Names directly inside `dir`, each with whether it is a folder.
+    fn entries(&self, dir: &str) -> Result<Vec<(String, bool)>> {
         let url = self.url(&format!("{dir}/"));
         let result = self
             .request("PROPFIND", &url)
@@ -157,7 +154,58 @@ impl Remote for WebDavRemote {
         let body = response
             .into_string()
             .map_err(|e| AppError::sync(format!("PROPFIND: {e}")))?;
-        parse_listing(&body)
+        parse_entries(&body, dir)
+    }
+}
+
+impl Remote for WebDavRemote {
+    fn id(&self) -> String {
+        self.base.clone()
+    }
+
+    fn list(&self, dir: &str) -> Result<Vec<String>> {
+        Ok(self
+            .entries(dir)?
+            .into_iter()
+            .filter(|(_, folder)| !folder)
+            .map(|(name, _)| name)
+            .collect())
+    }
+
+    fn folders(&self, dir: &str) -> Result<Vec<String>> {
+        Ok(self
+            .entries(dir)?
+            .into_iter()
+            .filter(|(_, folder)| *folder)
+            .map(|(name, _)| name)
+            .collect())
+    }
+
+    /// S49: one MOVE, the content stays on the server. A server without MOVE gets a copy.
+    fn rename(&self, from: &str, to: &str) -> Result<bool> {
+        let send = || {
+            let request = self
+                .request("MOVE", &self.url(from))
+                .set("Destination", &self.url(to))
+                .set("Overwrite", "T");
+            status(request.call(), "MOVE")
+        };
+        match send()? {
+            200..=299 => return Ok(true),
+            405 | 501 => return copy_over(self, from, to),
+            // The source is gone, or the folder of the target is missing (S43).
+            404 | 409 => {}
+            code => return Err(fail("MOVE", from, code)),
+        }
+        if !self.exists(from)? {
+            return Ok(false);
+        }
+        self.make_parents(to)?;
+        match send()? {
+            200..=299 => Ok(true),
+            405 | 501 => copy_over(self, from, to),
+            code => Err(fail("MOVE", from, code)),
+        }
     }
 
     fn get(&self, path: &str) -> Result<Option<Vec<u8>>> {
@@ -207,23 +255,26 @@ impl Remote for WebDavRemote {
     }
 }
 
-/// File names from a multistatus body. Collections, including the listed one, are skipped.
-fn parse_listing(body: &str) -> Result<Vec<String>> {
+/// Names from a multistatus body, each with whether it is a folder. The listed
+/// folder `dir` itself is skipped.
+fn parse_entries(body: &str, dir: &str) -> Result<Vec<(String, bool)>> {
     let doc = roxmltree::Document::parse(body).map_err(|e| AppError::sync(format!("PROPFIND answer: {e}")))?;
+    let listed = format!("/{}", dir.trim_matches('/'));
     let mut names = Vec::new();
     for response in doc.descendants().filter(|n| n.tag_name().name() == "response") {
-        let is_collection = response.descendants().any(|n| n.tag_name().name() == "collection");
         let href = response
             .descendants()
             .find(|n| n.tag_name().name() == "href")
             .and_then(|n| n.text())
             .unwrap_or("")
             .trim();
-        if is_collection || href.ends_with('/') || href.is_empty() {
+        let folder = href.ends_with('/') || response.descendants().any(|n| n.tag_name().name() == "collection");
+        let path = percent_decode(href.trim_end_matches('/'));
+        if path.is_empty() || path.ends_with(&listed) {
             continue;
         }
-        if let Some(name) = href.rsplit('/').next() {
-            names.push(percent_decode(name));
+        if let Some(name) = path.rsplit('/').next().filter(|n| !n.is_empty()) {
+            names.push((name.to_string(), folder));
         }
     }
     Ok(names)
@@ -254,7 +305,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn listing_skips_collections_and_decodes_names() {
+    fn listing_tells_files_from_folders_and_decodes_names() {
         let body = r#"<?xml version="1.0"?>
 <d:multistatus xmlns:d="DAV:">
   <d:response><d:href>/dav/lists/v1/log/</d:href>
@@ -262,10 +313,15 @@ mod tests {
   <d:response><d:href>/dav/lists/v1/log/aaaaaaaaaaaa-0000000001.jsonl</d:href>
     <d:propstat><d:prop><d:resourcetype/></d:prop></d:propstat></d:response>
   <D:response xmlns:D="DAV:"><D:href>http://host/dav/lists/v1/log/a%20b.jsonl</D:href></D:response>
+  <d:response><d:href>/dav/lists/v1/log/c2/</d:href></d:response>
 </d:multistatus>"#;
         assert_eq!(
-            parse_listing(body).unwrap(),
-            vec!["aaaaaaaaaaaa-0000000001.jsonl", "a b.jsonl"]
+            parse_entries(body, "lists/v1/log").unwrap(),
+            vec![
+                ("aaaaaaaaaaaa-0000000001.jsonl".to_string(), false),
+                ("a b.jsonl".to_string(), false),
+                ("c2".to_string(), true),
+            ]
         );
     }
 }

@@ -1,11 +1,12 @@
 //! Sync through dumb file storage. Layout and rules: docs/specs/sync.md.
 //!
 //! ```text
-//! lists/v1/vault.json
-//! lists/v1/log/<device>-<seq>.jsonl     immutable batch of field changes
-//! lists/v1/log/<device>-<seq>.snap      empty: the device has a snapshot as of <seq>
-//! lists/v1/snap/<device>-<seq>.jsonl    full state of a device as of its log <seq>, gzip
-//! lists/v1/blobs/<aa>/<sha256>          attachment content
+//! lists/vault.json
+//! lists/log/<device>-<seq>.jsonl     immutable batch of field changes
+//! lists/log/<device>-<seq>.snap      empty: the device has a snapshot as of <seq>
+//! lists/snap/<device>-<seq>.jsonl    full state of a device as of its log <seq>, gzip
+//! lists/blobs/<aa>/<sha256>          attachment content
+//! lists/v1/vault.json                format 3: the storage moved here from lists/v1/
 //! ```
 //!
 //! A device only ever writes files carrying its own id, so two devices never
@@ -35,7 +36,11 @@ use crate::store::{hex, new_device_id, Store};
 use remote::{DirRemote, Remote};
 use webdav::WebDavRemote;
 
-const ROOT: &str = "lists/v1";
+const ROOT: &str = "lists";
+/// S49: where the storage lived before #294. Only its `vault.json` stays, and says the storage moved.
+const LEGACY: &str = "lists/v1";
+/// S49: the format `lists/v1/vault.json` gets after the move: earlier versions stop on it (S14).
+const MOVED: u32 = 3;
 /// S46: the storage format this version writes; it reads format 1 as well.
 const FORMAT: u32 = 2;
 /// `push/<device>.json` keeps its own number: the storage format does not change it.
@@ -174,6 +179,33 @@ fn blob_remote_path(sha256: &str) -> String {
     format!("{ROOT}/blobs/{}/{}", &sha256[..2], sha256)
 }
 
+fn legacy_blob_path(sha256: &str) -> String {
+    format!("{LEGACY}/blobs/{}/{}", &sha256[..2], sha256)
+}
+
+fn read_vault(remote: &dyn Remote, path: &str) -> Result<Option<Vault>> {
+    let Some(data) = remote.get(path)? else {
+        return Ok(None);
+    };
+    serde_json::from_slice(&data)
+        .map(Some)
+        .map_err(|_| AppError::sync("vault.json in the storage is not readable"))
+}
+
+fn put_vault(remote: &dyn Remote, path: &str, format: u32, vault: &str) -> Result<()> {
+    let vault = Vault {
+        format,
+        vault: vault.to_string(),
+    };
+    remote.put(path, &serde_json::to_vec(&vault)?)
+}
+
+fn newer_format(format: u32) -> AppError {
+    AppError::sync(format!(
+        "the storage uses format {format}, this version understands format {FORMAT}; update the app"
+    ))
+}
+
 /// What a download of attachment content came to.
 enum Fetched {
     Stored,
@@ -294,33 +326,69 @@ impl Store {
 
     fn check_vault(&self, remote: &dyn Remote) -> Result<()> {
         let path = format!("{ROOT}/vault.json");
-        match remote.get(&path)? {
-            Some(data) => {
-                let vault: Vault = serde_json::from_slice(&data)
-                    .map_err(|_| AppError::sync("vault.json in the storage is not readable"))?;
-                match vault.format {
-                    FORMAT => Ok(()),
-                    // S46: the storage moves on; its files of format 1 stay readable.
-                    1 => remote.put(
-                        &path,
-                        &serde_json::to_vec(&Vault {
-                            format: FORMAT,
-                            vault: vault.vault,
-                        })?,
-                    ),
-                    other => Err(AppError::sync(format!(
-                        "the storage uses format {other}, this version understands format {FORMAT}; update the app"
-                    ))),
+        if let Some(vault) = read_vault(remote, &path)? {
+            match vault.format {
+                FORMAT => {}
+                // S46: the storage moves on; its files of format 1 stay readable.
+                1 => put_vault(remote, &path, FORMAT, &vault.vault)?,
+                other => return Err(newer_format(other)),
+            }
+            // S49: a device of an earlier version may have written to the old place since the move.
+            let names = remote.list(&format!("{LEGACY}/log"))?;
+            if names
+                .iter()
+                .any(|n| parse_name(n, DATA).or_else(|| parse_name(n, MARK)).is_some())
+            {
+                self.move_legacy(remote, false)?;
+            }
+            return Ok(());
+        }
+        let legacy = format!("{LEGACY}/vault.json");
+        let id = match read_vault(remote, &legacy)? {
+            Some(vault) if matches!(vault.format, 1 | 2 | MOVED) => {
+                self.move_legacy(remote, true)?;
+                vault.vault
+            }
+            Some(vault) => return Err(newer_format(vault.format)),
+            None => uuid::Uuid::now_v7().to_string(),
+        };
+        // S49: the new place is named last but one, the old one is closed last, so a move cut short starts over.
+        put_vault(remote, &path, FORMAT, &id)?;
+        put_vault(remote, &legacy, MOVED, &id)
+    }
+
+    /// S49: moves the files of `lists/v1/` to the same names under `lists/`.
+    /// Attachment content goes along with `blobs`; after the move it is looked
+    /// for one file at a time (`download_blob`).
+    fn move_legacy(&self, remote: &dyn Remote, blobs: bool) -> Result<()> {
+        let mut moved = 0;
+        for dir in ["log", "snap", "push"] {
+            for name in remote.list(&format!("{LEGACY}/{dir}"))? {
+                let ours = match dir {
+                    "push" => name.ends_with(".json"),
+                    _ => parse_name(&name, DATA).or_else(|| parse_name(&name, MARK)).is_some(),
+                };
+                if ours && remote.rename(&format!("{LEGACY}/{dir}/{name}"), &format!("{ROOT}/{dir}/{name}"))? {
+                    moved += 1;
                 }
             }
-            None => {
-                let vault = Vault {
-                    format: FORMAT,
-                    vault: uuid::Uuid::now_v7().to_string(),
-                };
-                remote.put(&path, &serde_json::to_vec(&vault)?)
+        }
+        if blobs {
+            for folder in remote.folders(&format!("{LEGACY}/blobs"))? {
+                for name in remote.list(&format!("{LEGACY}/blobs/{folder}"))? {
+                    if is_sha256(&name)
+                        && name.starts_with(&folder)
+                        && remote.rename(&legacy_blob_path(&name), &blob_remote_path(&name))?
+                    {
+                        moved += 1;
+                    }
+                }
             }
         }
+        self.note(LogLevel::Info, "sync", || {
+            format!("moved {moved} files from {LEGACY}/ to {ROOT}/")
+        });
+        Ok(())
     }
 
     /// Whether the marks in `log/` leave something unexplained: a device whose
@@ -603,7 +671,13 @@ impl Store {
 
     /// Whether the content arrived, and why not when it did not.
     fn download_blob(&self, remote: &dyn Remote, sha256: &str) -> Result<Fetched> {
-        let Some(data) = remote.get(&blob_remote_path(sha256))? else {
+        let path = blob_remote_path(sha256);
+        let mut found = remote.get(&path)?;
+        // S49: content a device of an earlier version uploaded to the old place after the move.
+        if found.is_none() && remote.rename(&legacy_blob_path(sha256), &path)? {
+            found = remote.get(&path)?;
+        }
+        let Some(data) = found else {
             return Ok(Fetched::Missing);
         };
         // The name is the hash: content that does not match is dropped, not stored.
@@ -1268,11 +1342,14 @@ impl Store {
         if !self.holds_data()? {
             return Ok(false);
         }
+        // S49: a storage not moved yet holds its files in the old place.
         let files = |remote: &dyn Remote| -> Result<bool> {
-            for dir in ["log", "snap"] {
-                let names = remote.list(&format!("{ROOT}/{dir}"))?;
-                if names.iter().any(|name| parse_name(name, DATA).is_some()) {
-                    return Ok(true);
+            for root in [ROOT, LEGACY] {
+                for dir in ["log", "snap"] {
+                    let names = remote.list(&format!("{root}/{dir}"))?;
+                    if names.iter().any(|name| parse_name(name, DATA).is_some()) {
+                        return Ok(true);
+                    }
                 }
             }
             Ok(false)
