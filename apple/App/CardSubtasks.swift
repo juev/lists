@@ -100,7 +100,7 @@ final class SubtaskLineView: NSView, NSTextFieldDelegate {
     override func menu(for event: NSEvent) -> NSMenu? { subtaskMenu() }
 
     /// The menu of the subtask, built from the same items as the menu of a row of the list.
-    func subtaskMenu() -> NSMenu { rowMenu.menu(SubtaskRow.menuItems(task, model)) }
+    func subtaskMenu() -> NSMenu { rowMenu.menu(TaskMenus.subtaskItems(task, model)) }
 
     // MARK: The title (R38)
 

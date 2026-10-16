@@ -121,7 +121,7 @@ The data in the storage is not encrypted by the app. The storage password is kep
 | Path | What |
 |---|---|
 | `core/` | Rust crate: storage (SQLite), merge of concurrent edits, sync, recurrence, quick-entry parsing |
-| `apple/` | macOS app, share extension and the helper of quick entry, SwiftUI |
+| `apple/` | macOS app, share extension and the helper of quick entry: SwiftUI, with the task list, the cards and the sidebar in AppKit |
 | `android/` | Android app, Kotlin and Jetpack Compose |
 | `web/` | `lists-web`: a small server with the same core and a web interface |
 | `scripts/` | builds the core for each platform and generates the bindings |

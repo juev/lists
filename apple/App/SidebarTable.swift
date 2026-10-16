@@ -87,7 +87,7 @@ enum SidebarRow: Equatable {
     }
 }
 
-/// The sidebar of the main window as an AppKit table (#308), behind the same launch flag as the task table. Its rows
+/// The sidebar of the main window as an AppKit table (#308). Its rows
 /// draw the selection themselves, as Things does: the chosen view keeps its colour while the keyboard is with the tasks.
 struct SidebarTable: NSViewRepresentable {
     let model: AppModel

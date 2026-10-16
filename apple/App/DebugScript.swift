@@ -189,8 +189,8 @@ enum DebugScript {
                     }
                 case "code":
                     // A press on the keyboard comes with the window a popover hangs on, not with the popover.
-                    if TaskTable.enabled, let code = UInt16(argument) {
-                        // The AppKit date popover (#308) takes its keys before the calendar does, as key equivalents of its window.
+                    if let code = UInt16(argument) {
+                        // The date popover takes its keys before the calendar does, as key equivalents of its window.
                         let window = popoverWindow ?? dateEditor
                         let event = NSEvent.keyEvent(
                             with: .keyDown, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
@@ -198,7 +198,7 @@ enum DebugScript {
                             isARepeat: false, keyCode: code)
                         let taken = event.map { window?.performKeyEquivalent(with: $0) ?? false } ?? false
                         print("debug: code \(code) \(window == nil ? "no date editor" : taken ? "taken" : "not taken")")
-                    } else if let code = UInt16(argument) { post(code: code, to: popoverWindow.map { $0.parent ?? $0 } ?? dateEditor) }
+                    }
                 case "dateeditor":
                     if step.contains(":") {
                         dateEditor = editorWindow(value: argument.isEmpty ? nil : argument)
@@ -330,19 +330,19 @@ enum DebugScript {
                 case "batchmenu":
                     // The menu a right click on the selected row builds while several rows are selected.
                     let model = AppModel.shared
-                    let items = model.selectedTask.flatMap { TaskRow.batchItems(for: $0, model) }
+                    let items = model.selectedTask.flatMap { TaskMenus.batchItems(for: $0, model) }
                     print("debug: batch menu \(items.map { $0.filter { !$0.isDivider }.map { item in item.children.map { "\(item.title) ▸ \($0.count)" } ?? item.title } }.map(String.init(describing:)) ?? "none")")
                 case "movemenu":
                     // R129: the items of "Move to list" in the menu a right click on the selected row builds, the one of several
                     // selected rows or of the row alone: a header in brackets, an item that is not available with a minus.
                     let model = AppModel.shared
-                    let items = model.selectedTask.map { TaskRow.menuItems(for: $0, model) } ?? []
+                    let items = model.selectedTask.map { TaskMenus.taskItems(for: $0, model) } ?? []
                     let move = items.first { $0.title == L("Move to list") }?.children ?? []
                     print("debug: move menu \(move.filter { !$0.isDivider }.map { $0.isHeader ? "[\($0.title)]" : $0.disabled ? "-" + $0.title : $0.title })")
                 case "rowitem":
                     // The item of the menu of the selected row, chosen the way a click on it does.
                     let model = AppModel.shared
-                    var items = model.selectedTask.map { TaskRow.menuItems(for: $0, model) } ?? []
+                    var items = model.selectedTask.map { TaskMenus.taskItems(for: $0, model) } ?? []
                     var item: RowMenuItem?
                     for title in argument.split(separator: ">").map(String.init) {
                         item = items.first { !$0.isDivider && !$0.isHeader && ($0.title == title || $0.title == L(title)) }
@@ -385,7 +385,7 @@ enum DebugScript {
                 case "submenu":
                     let parts = argument.split(separator: "=", maxSplits: 1).map(String.init)
                     if let task = shown.first(where: { $0.title == parts.first }), AppModel.shared.isSubtask(task) {
-                        let items = SubtaskRow.menuItems(task, AppModel.shared)
+                        let items = TaskMenus.subtaskItems(task, AppModel.shared)
                         print("debug: subtask menu \(items.map(\.title))")
                         if parts.count == 2 { items.first { $0.title == parts[1] }?.action() }
                     } else {
@@ -609,8 +609,7 @@ enum DebugScript {
                         with: .rightMouseDown, location: NSPoint(x: xy[0], y: Double(window.frame.height) - xy[1]), modifierFlags: [],
                         timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
                         eventNumber: 0, clickCount: 1, pressure: 1) {
-                        // A subtask inside the row of its parent answers first, as it does to the click.
-                        var menu = SubtaskMenuView.area(at: event.locationInWindow, in: window)?.subtaskMenu()
+                        var menu: NSMenu?
                         var view = root.hitTest(event.locationInWindow)
                         while let current = view, menu == nil {
                             menu = current.menu(for: event)
@@ -831,8 +830,8 @@ enum DebugScript {
                     print("debug: key window \(window.map { type(of: $0) }.map(String.init(describing:)) ?? "none"), first responder \(window?.firstResponder.map { String(describing: type(of: $0)) } ?? "none")\((window?.firstResponder as? NSTableView)?.style == .sourceList ? " (sidebar)" : "")\((window?.firstResponder as? NSText).map { " with \"\($0.string)\"" } ?? "")\(((window?.firstResponder as? NSTextView)?.delegate as? NSTextField).map { ", field \(Int($0.frame.width))x\(Int($0.frame.height))" } ?? "")")
                 case "rowshot":
                     // The row of the selected task drawn into a file, eight pixels to a point.
-                    if TaskTable.enabled, let task = AppModel.shared.selectedTask {
-                        // The cell of the task table (#308), in a light window that is never shown.
+                    if let task = AppModel.shared.selectedTask {
+                        // The cell of the task table, in a light window that is never shown.
                         let model = AppModel.shared
                         let origin = model.mixesLists ? model.origin(of: task) : nil
                         let size = NSSize(width: 320, height: TaskTableMetrics.taskRow(origin: origin != nil, spacing: model.rowSpacing))
@@ -853,15 +852,6 @@ enum DebugScript {
                             page.cacheDisplay(in: page.bounds, to: image)
                             try? image.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: argument))
                             print("debug: row drawn, \(image.pixelsWide)x\(image.pixelsHigh) pixels, text scale \(model.textScale), design \(model.fontDesign)")
-                        }
-                    } else if let task = AppModel.shared.selectedTask {
-                        let row = TaskRow(task: task, depth: 0).environment(AppModel.shared)
-                            .frame(width: 320).background(Color.white).environment(\.colorScheme, .light)
-                        let renderer = ImageRenderer(content: row)
-                        renderer.scale = 8
-                        if let image = renderer.cgImage {
-                            try? NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: argument))
-                            print("debug: row drawn, \(image.width)x\(image.height) pixels, text scale \(AppModel.shared.textScale), design \(AppModel.shared.fontDesign)")
                         }
                     }
                 case "viewicons":
@@ -1022,14 +1012,9 @@ enum DebugScript {
     private static func editorWindow(value: String?) -> NSWindow {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300), styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
-        if TaskTable.enabled {
-            let editor = DatePopoverView(title: "debug", value: value) { print("debug: date applied \($0 ?? "none")") }
-            window.contentView = editor
-            window.makeFirstResponder(editor.calendarPicker)
-        } else {
-            let editor = DateEditor(title: "debug", value: value) { print("debug: date applied \($0 ?? "none")") }
-            window.contentView = NSHostingView(rootView: editor)
-        }
+        let editor = DatePopoverView(title: "debug", value: value) { print("debug: date applied \($0 ?? "none")") }
+        window.contentView = editor
+        window.makeFirstResponder(editor.calendarPicker)
         window.contentView?.layoutSubtreeIfNeeded()
         return window
     }
@@ -1037,20 +1022,6 @@ enum DebugScript {
     private static func datePickers(in view: NSView?) -> [NSDatePicker] {
         guard let view else { return [] }
         return ((view as? NSDatePicker).map { [$0] } ?? []) + view.subviews.flatMap(datePickers(in:))
-    }
-
-    /// A key press told by its key code alone, put in the queue the way the keyboard
-    /// does, so that event monitors see it.
-    private static func post(code: UInt16, to window: NSWindow?) {
-        guard let window else { return print("debug: no date editor for key code \(code)") }
-        for type in [NSEvent.EventType.keyDown, .keyUp] {
-            if let event = NSEvent.keyEvent(
-                with: type, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
-                windowNumber: window.windowNumber, context: nil, characters: "", charactersIgnoringModifiers: "",
-                isARepeat: false, keyCode: code) {
-                NSApp.postEvent(event, atStart: false)
-            }
-        }
     }
 
     /// The main window of an app that a quiet script left hidden. `canBecomeMain`

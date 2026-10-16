@@ -1,6 +1,5 @@
 import AppKit
 import ImageIO
-import SwiftUI
 
 /// Attachments as files the system can show (R54, R55).
 ///
@@ -79,22 +78,7 @@ enum AttachmentFiles {
 }
 
 /// What the pointer does over a file of a card (R86): a click opens it, a drag takes it out of the app
-/// under its own name, a right click opens its menu. An AppKit view: inside a list row SwiftUI gives
-/// the drag and the context menu to the row, so the file gets neither from `onDrag` or `contextMenu`.
-struct FilePointer: NSViewRepresentable {
-    let url: () -> URL?
-    let choices: () -> [MenuChoice]
-    let click: () -> Void
-
-    func makeNSView(context: Context) -> FilePointerView { FilePointerView() }
-
-    func updateNSView(_ view: FilePointerView, context: Context) {
-        view.url = url
-        view.choices = choices
-        view.click = click
-    }
-}
-
+/// under its own name, a right click opens its menu.
 final class FilePointerView: NSView, NSDraggingSource {
     var url: () -> URL? = { nil }
     var choices: () -> [MenuChoice] = { [] }
@@ -147,35 +131,5 @@ final class FilePointerView: NSView, NSDraggingSource {
 
     @objc private func run(_ item: NSMenuItem) {
         if actions.indices.contains(item.tag) { actions[item.tag]() }
-    }
-}
-
-/// The icon of an attachment row: a thumbnail for an image, a symbol for the rest.
-struct AttachmentIcon: View {
-    let file: Attachment
-    static let side: CGFloat = 28
-
-    @State private var thumbnail: CGImage?
-    @Environment(\.displayScale) private var scale
-
-    private var isImage: Bool { file.mime.hasPrefix("image/") }
-
-    var body: some View {
-        Group {
-            if let thumbnail {
-                Image(decorative: thumbnail, scale: scale)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .frame(width: Self.side, height: Self.side)
-                    .clipShape(RoundedRectangle(cornerRadius: 4))
-            } else {
-                Image(systemName: isImage ? "photo" : "doc").foregroundStyle(.secondary)
-            }
-        }
-        .task(id: file.localPath) {
-            guard isImage, let path = file.localPath else { thumbnail = nil; return }
-            let pixels = Int(Self.side * scale)
-            thumbnail = await _Concurrency.Task.detached { AttachmentFiles.thumbnail(path: path, pixels: pixels) }.value
-        }
     }
 }

@@ -131,12 +131,9 @@ enum TaskTableRow: Equatable {
     }
 }
 
-/// The list of tasks as an AppKit table (#308), behind the launch flag `-TaskTable YES` until it does all the list did.
-/// The selection, the keys and the menus of the rows go to the model; the table keeps no state of its own.
+/// The list of tasks as an AppKit table (#308). The selection, the keys and the menus of the rows go to the model;
+/// the table keeps no state of its own.
 struct TaskTable: NSViewRepresentable {
-    /// Whether the main window shows the table in place of the SwiftUI list.
-    static var enabled: Bool { UserDefaults.standard.bool(forKey: "TaskTable") }
-
     let model: AppModel
     let rows: [TaskTableRow]
     let selected: Set<String>
@@ -616,50 +613,7 @@ final class TaskTableView: NSTableView {
 
     override func menu(for event: NSEvent) -> NSMenu? {
         guard let row = coordinator?.row(row(at: convert(event.locationInWindow, from: nil))), let task = row.task else { return nil }
-        if case .found = row { return rowMenu.menu(SubtaskRow.menuItems(task, model)) }
-        return rowMenu.menu(TaskRow.menuItems(for: task, model))
-    }
-}
-
-/// A menu of AppKit built from the items of the menu of a task, which keeps the actions of its items.
-@MainActor
-final class RowMenu: NSObject {
-    private var actions: [() -> Void] = []
-
-    func menu(_ items: [RowMenuItem]) -> NSMenu {
-        actions = []
-        return build(items)
-    }
-
-    private func build(_ items: [RowMenuItem]) -> NSMenu {
-        let menu = NSMenu()
-        menu.autoenablesItems = false
-        for item in items {
-            if item.isDivider {
-                menu.addItem(.separator())
-                continue
-            }
-            if item.isHeader {
-                menu.addItem(.sectionHeader(title: item.title))
-                continue
-            }
-            let entry = NSMenuItem(title: item.title, action: nil, keyEquivalent: "")
-            if let children = item.children {
-                entry.submenu = build(children)
-            } else {
-                entry.action = #selector(run(_:))
-                entry.target = self
-                entry.tag = actions.count
-                actions.append(item.action)
-                entry.state = item.on == true ? .on : .off
-                entry.isEnabled = !item.disabled
-            }
-            menu.addItem(entry)
-        }
-        return menu
-    }
-
-    @objc private func run(_ item: NSMenuItem) {
-        if actions.indices.contains(item.tag) { actions[item.tag]() }
+        if case .found = row { return rowMenu.menu(TaskMenus.subtaskItems(task, model)) }
+        return rowMenu.menu(TaskMenus.taskItems(for: task, model))
     }
 }

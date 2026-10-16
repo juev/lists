@@ -224,11 +224,7 @@ struct MenuBarView: View {
 
     private var content: some View {
         VStack(alignment: .leading, spacing: 10) {
-            if TaskTable.enabled {
-                DraftCardView(onDone: {})
-            } else {
-                QuickEntryField(onDone: {})
-            }
+            DraftCardView(onDone: {})
             Divider()
             let today = (try? model.store?.tasks(view: .today)) ?? []
             if today.isEmpty {

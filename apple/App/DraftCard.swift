@@ -1,6 +1,53 @@
 import AppKit
 import SwiftUI
 
+/// A task that is being typed and does not exist yet.
+struct TaskDraft: Equatable {
+    var title = ""
+    var notes = ""
+    /// The note as it came from the clipboard (R58); nil when it was typed.
+    var pastedNotes: String?
+    var start: String?
+    /// The due date chosen in the card; nil while the title or the list decides (R75).
+    var due: String?
+    /// The date was taken away in the card: the task gets none from its list.
+    var dueRemoved = false
+    var `repeat`: Repeat?
+    var priority = Priority.none
+    /// The priority was chosen in the card, "none" included: the default of
+    /// the list no longer applies.
+    var priorityChosen = false
+    var tags: [String] = []
+    var listId = "inbox"
+    /// Set when the task is typed inside a project or the project is chosen in the card (R129): it becomes a task of it.
+    var parentId: String?
+    /// Attached once the task exists.
+    var files: [URL] = []
+    /// The subtasks typed in the card (R113): they are created with the task, in this order.
+    var subtasks: [String] = []
+    /// What is in the field of the next subtask and has not been added.
+    var subtaskText = ""
+    /// The icon of subtasks was pressed: the field of the next subtask is on show.
+    var subtasksShown = false
+    /// R130: the task the new one goes right under; none puts it first in its list.
+    var after: String?
+
+    var isBlank: Bool { title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+    /// Return in the field of the next subtask: what is typed there becomes a line, an empty field adds none (R113).
+    mutating func addSubtask() {
+        let title = subtaskText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { return }
+        subtasks.append(title)
+        subtaskText = ""
+    }
+
+    /// The subtasks the saved task gets: the lines, then what was left in the field. A line emptied in the card is not one.
+    var typedSubtasks: [String] {
+        (subtasks + [subtaskText]).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+    }
+}
+
 /// The card of a new task on AppKit (#308), the same in the list of the main window (R37), in the quick-entry panel and
 /// in the menu bar window (R82, R114): every field can be filled before the task is created. Return in the title and
 /// ⌘Return anywhere save; Esc saves in the list (R37) and throws the card away in the panel and the menu bar window (R114).
@@ -23,7 +70,7 @@ final class DraftCard: NSView, NSTextViewDelegate, NSTextFieldDelegate {
     private let title = CardTitleView()
     private let titlePlaceholder = NSTextField(labelWithString: L("New task"))
     private let parsed = CardChipsView()
-    private let notes = NotesTextView.PlainTextView()
+    private let notes = NoteTextView()
     private let notesPlaceholder = NSTextField(labelWithString: L("Notes"))
     private let pasteBox = PasteBlock()
     private let pasteRemove = NSButton()
