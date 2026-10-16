@@ -84,10 +84,9 @@ import UserNotifications
 /// `veil` (makes the windows of the app transparent and deaf to the mouse and leaves the app hidden) and
 /// `hideapp` (hides the app the way Hide Lists does), `unhideapp` (shows it again without making it active),
 /// `quickopen` and `quickclose` (show quick entry transparent and without the keyboard, and close it; while it is open that way, `type` and `key` go to its card),
-/// `menubarsim:open`, `menubarsim:close` and `menubarsim:lists` (do to the app what opening the menu bar window, closing it and its Open Lists do, R98,
-/// without the window and without making the app active), `menubaropen` and `menubarclose` (click the menu bar item, the windows that come on screen
+/// `menubarlists` (does to the app what Open Lists in the menu bar window does), `menubaropen` and `menubarclose` (click the menu bar item, the windows that come on screen
 /// made transparent, and print the windows on screen; the menu bar window takes the keyboard, so these are not for a run beside a person at work),
-/// `apphidden` (prints whether the app is hidden, whether it is active and how many of its main windows are ordered in),
+/// `apphidden` (prints whether the app is hidden, whether it is active, how many of its main windows are ordered in and how many of its windows the window server has on screen),
 /// `closemain` (closes the main window), `showlists` (does what the key that shows Lists does, R124; with `LISTS_DEBUG_QUIET` it leaves
 /// the app in the background), `mainwindow` (prints whether the main window is there, on screen, minimised and key, and the answer of R124
 /// for each state of the app),
@@ -625,16 +624,10 @@ enum DebugScript {
                     QuickEntryPanel.shared.alphaValue = 1
                     QuickEntryPanel.debugSilent = false
                     try? await _Concurrency.Task.sleep(for: .milliseconds(300))
-                case "menubarsim":
-                    // What opening and closing the menu bar window do to a hidden app (R98), without the window and
-                    // without making the app active: `menubarsim:open`, `menubarsim:close`, `menubarsim:lists`.
-                    switch argument {
-                    case "open":
-                        QuickEntryPanel.shared.menuBarWindowOpened()
-                        NSApp.unhideWithoutActivation()
-                    case "lists": QuickEntryPanel.shared.menuBarWindowClosed(showLists: true)
-                    default: QuickEntryPanel.shared.menuBarWindowClosed()
-                    }
+                case "menubarlists":
+                    // What Open Lists in the menu bar window does to the app, short of opening a window through SwiftUI.
+                    QuickEntryPanel.shared.menuBarWindowClosed(showLists: true)
+                    NSApp.activate(ignoringOtherApps: true)
                     try? await _Concurrency.Task.sleep(for: .milliseconds(500))
                 case "menubaropen", "menubarclose":
                     // A click on the menu bar item, as a person makes it: opens its window, or closes it. The windows
@@ -673,7 +666,11 @@ enum DebugScript {
                     print("debug: main window \(window == nil ? "none" : "there"), on screen \(window?.isVisible ?? false), minimised \(window?.isMiniaturized ?? false), key \(window?.isKeyWindow ?? false); \(answers.joined(separator: ", "))")
                 case "apphidden":
                     let shown = NSApp.windows.filter { !($0 is NSPanel) && $0.canBecomeMain && $0.isVisible }.count
-                    print("debug: app \(NSApp.isHidden ? "hidden" : "shown"), active \(NSApp.isActive), main windows in the window list \(shown), quick entry \(QuickEntryPanel.shared.isVisible ? "shown" : "hidden")")
+                    // What the window server has on screen: a hidden app may still have a window ordered in.
+                    let pid = ProcessInfo.processInfo.processIdentifier
+                    let listed = (CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]]) ?? []
+                    let onScreen = listed.filter { ($0[kCGWindowOwnerPID as String] as? Int32) == pid && ($0[kCGWindowLayer as String] as? Int) == 0 }.count
+                    print("debug: app \(NSApp.isHidden ? "hidden" : "shown"), active \(NSApp.isActive), main windows in the window list \(shown), windows on screen \(onScreen), quick entry \(QuickEntryPanel.shared.isVisible ? "shown" : "hidden")")
                 case "copytext", "copysecret", "copyfile":
                     let pasteboard = ClipboardNote.pasteboard
                     pasteboard.clearContents()
