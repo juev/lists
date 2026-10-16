@@ -160,10 +160,22 @@ final class QuickEntryPanel: NSPanel {
                 }
             },
             // The menu bar window shows a hidden app, which would bring back all its windows; only that window is wanted.
+            // Ordering the windows out before the app is shown leaves it hidden for good, so they are made transparent
+            // now and ordered out once the app is shown.
             center.addObserver(forName: NSApplication.willUnhideNotification, object: nil, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated {
                     guard let self, self.menuBarOpen else { return }
-                    self.setAsideHiddenWindows()
+                    for window in self.hiddenWith where NSApp.windows.contains(window) {
+                        self.setAside.append((window, window.alphaValue))
+                        window.alphaValue = 0
+                    }
+                    self.hiddenWith = []
+                }
+            },
+            center.addObserver(forName: NSApplication.didUnhideNotification, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self, self.menuBarOpen else { return }
+                    self.setAside.forEach { $0.window.orderOut(nil) }
                 }
             },
             center.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
@@ -182,17 +194,13 @@ final class QuickEntryPanel: NSPanel {
     /// person comes back to the app.
     private func setAsideWindowsOfHiddenApp() {
         guard NSApp.isHidden else { return }
-        setAsideHiddenWindows()
-        NSApp.unhideWithoutActivation()
-    }
-
-    private func setAsideHiddenWindows() {
         for window in hiddenWith where NSApp.windows.contains(window) {
             setAside.append((window, window.alphaValue))
             window.alphaValue = 0
             window.orderOut(nil)
         }
         hiddenWith = []
+        NSApp.unhideWithoutActivation()
     }
 
     /// The window of the menu bar item is on screen (R98): it shows a hidden app alone, as the panel does.
