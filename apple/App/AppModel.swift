@@ -1051,8 +1051,15 @@ final class AppModel {
         undoManager?.setActionName(L("Delete Task"))
     }
 
+    /// The due date of one task from its menu or ⌘T; undo gives the former one back, as for several (R117, #299).
     func setDue(_ task: TaskItem, _ due: String?) {
+        let former = task.due
+        guard former != due else { return }
         perform { try $0.setDue(id: task.id, due: due) }
+        undoManager?.registerUndo(withTarget: self) { model in
+            model.perform { try $0.setDue(id: task.id, due: former) }
+        }
+        undoManager?.setActionName(L("Change Tasks"))
     }
 
     /// Shows a task in its list, expanded, with every ancestor expanded too.
