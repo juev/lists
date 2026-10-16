@@ -211,6 +211,18 @@ struct MenuBarView: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
+        content
+            // Reading counts keeps this view refreshed when tasks change elsewhere.
+            .id(model.counts)
+            // R98: out of the view that `id` makes anew, so that only opening and closing the window count.
+            .background {
+                Color.clear
+                    .onAppear { QuickEntryPanel.shared.menuBarWindowOpened() }
+                    .onDisappear { QuickEntryPanel.shared.menuBarWindowClosed() }
+            }
+    }
+
+    private var content: some View {
         VStack(alignment: .leading, spacing: 10) {
             QuickEntryField(onDone: {})
             Divider()
@@ -240,11 +252,13 @@ struct MenuBarView: View {
             Divider()
             HStack {
                 Button(L("Open Lists")) {
+                    QuickEntryPanel.shared.menuBarWindowClosed(showLists: true)
                     openWindow(id: "main")
                     NSApp.activate(ignoringOtherApps: true)
                 }
                 // R116: out of the Dock Lists has no main menu, and this is the way to its settings.
                 Button(L("Settings…")) {
+                    QuickEntryPanel.shared.menuBarWindowClosed(showLists: true)
                     openSettings()
                     NSApp.activate(ignoringOtherApps: true)
                 }
@@ -255,8 +269,6 @@ struct MenuBarView: View {
         }
         .padding(14)
         .frame(width: 340)
-        // Reading counts keeps this view refreshed when tasks change elsewhere.
-        .id(model.counts)
     }
 }
 
