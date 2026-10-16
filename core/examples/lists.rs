@@ -29,7 +29,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("{}\t{}\t{}", task.list_id, task.due.unwrap_or_default(), task.title);
             }
         }
-        ("add", [text]) => println!("{}", store.quick_add(text.clone(), None)?.id),
+        ("add", [text]) => println!("{}", store.quick_add(text.clone(), None, false, None)?.id),
         ("note", [id, text]) => store.set_notes(id.clone(), text.clone())?,
         // Debug form, so that every character of the note is told from its neighbours.
         ("note", [id]) => println!("{:?}", store.task(id.clone())?.notes),

@@ -49,6 +49,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             due,
             priority: Some(priority),
             tags: tags.iter().map(|t| t.to_string()).collect(),
+            ..NewTask::default()
         })
     };
 

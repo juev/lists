@@ -1759,7 +1759,7 @@ fn projects_and_saved_filters_sync_like_everything_else() {
     let (a, b) = (device(), device());
     let p = add(&a, "проект");
     a.set_project(p.id.clone(), true).unwrap();
-    a.quick_add_under("шаг".into(), p.id.clone()).unwrap();
+    a.quick_add_under("шаг".into(), p.id.clone(), false, None).unwrap();
     let f = a
         .create_filter(
             "Неделя".into(),

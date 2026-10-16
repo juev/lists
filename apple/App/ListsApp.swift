@@ -100,7 +100,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 case "add":
                     if let text = value("text") {
                         let model = AppModel.shared
-                        _ = model.perform { try $0.quickAdd(text: text, listId: model.defaultListId) }
+                        _ = model.perform { try $0.quickAdd(text: text, listId: model.defaultListId, first: true) }
                     }
                 case "show":
                     if let id = value("id") { AppModel.shared.reveal(id) }
@@ -117,7 +117,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         MainActor.assumeIsolated {
             let model = AppModel.shared
             _ = model.perform { store in
-                let task = try store.createTask(new: NewTask(title: String(lines[0].prefix(200)), listId: model.defaultListId))
+                let task = try store.createTask(new: NewTask(title: String(lines[0].prefix(200)), listId: model.defaultListId, first: true))
                 if lines.count > 1 || lines[0].count > 200 { try store.setNotes(id: task.id, notes: text) }
             }
         }

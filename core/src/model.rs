@@ -181,6 +181,13 @@ pub struct NewTask {
     pub priority: Option<Priority>,
     #[uniffi(default = [])]
     pub tags: Vec<String>,
+    /// R130: the task goes first among its siblings; without it, and without `after`, it goes last.
+    #[uniffi(default = false)]
+    pub first: bool,
+    /// R130: the task goes right under this one, or under its parent when it is a subtask; where that task
+    /// is not a sibling of the new one, the new task goes first.
+    #[uniffi(default = None)]
+    pub after: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, uniffi::Enum)]

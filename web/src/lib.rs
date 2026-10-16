@@ -484,11 +484,12 @@ impl App {
                     if let Some(project) = scope.strip_prefix("project:") {
                         self.dirty.store(true, Ordering::Relaxed);
                         return Ok(task_json(
-                            &s.quick_add_under(text_arg(a, "text")?, project.to_string())?,
+                            // R130: a new task goes first; the page has no selected task to go under.
+                            &s.quick_add_under(text_arg(a, "text")?, project.to_string(), true, None)?,
                         ));
                     }
                     // The view gives a task its list and nothing else (R75).
-                    task_json(&s.quick_add(text_arg(a, "text")?, list)?)
+                    task_json(&s.quick_add(text_arg(a, "text")?, list, true, None)?)
                 }
                 "addSubtask" => task_json(&s.create_task(NewTask {
                     title: text_arg(a, "title")?,

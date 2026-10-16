@@ -341,7 +341,7 @@ fn r76_a_waiting_attachment_is_fetched_when_it_is_asked_for() {
     let (data, source) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
     let other = Store::open(data.path().to_string_lossy().into_owned()).unwrap();
     other.set_sync_config(folder).unwrap();
-    let task = other.quick_add("с файлом".into(), None).unwrap();
+    let task = other.quick_add("с файлом".into(), None, false, None).unwrap();
     let file = source.path().join("note.txt");
     std::fs::write(&file, b"from the other device").unwrap();
     let added = other
@@ -1152,4 +1152,42 @@ fn r129_tasks_go_into_a_project_one_by_one_and_in_a_batch_and_are_taken_back() {
     );
     assert_eq!(task(&c)["list"], home);
     assert!(task(&b)["parent"].is_null());
+}
+
+#[test]
+fn r130_quick_add_puts_the_task_first() {
+    let web = web(None);
+    for text in ["а", "б", "в"] {
+        call(&web, "", json!({ "op": "quickAdd", "text": text, "scope": "inbox" }));
+    }
+    let inbox = get(&web, "", "/api/tasks?scope=inbox");
+    let titles: Vec<&str> = inbox
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["title"].as_str().unwrap())
+        .collect();
+    assert_eq!(titles, ["в", "б", "а"]);
+
+    let project = call(
+        &web,
+        "",
+        json!({ "op": "createProject", "title": "Проект", "scope": "inbox" }),
+    );
+    let id = project["id"].as_str().unwrap().to_string();
+    for text in ["п1", "п2"] {
+        call(
+            &web,
+            "",
+            json!({ "op": "quickAdd", "text": text, "scope": format!("project:{id}") }),
+        );
+    }
+    let tasks = get(&web, "", &format!("/api/tasks?scope=project%3A{id}"));
+    let titles: Vec<&str> = tasks
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["title"].as_str().unwrap())
+        .collect();
+    assert_eq!(titles, ["п2", "п1"]);
 }

@@ -336,13 +336,13 @@ fn r10_a_subtask_has_a_title_only() {
     assert!(d.create_task(with_due).is_err());
     // The line typed under a task is the title as it stands: nothing is picked out of it.
     let typed = d
-        .quick_add_under("молоко завтра !! #дом".into(), top.id.clone())
+        .quick_add_under("молоко завтра !! #дом".into(), top.id.clone(), false, None)
         .unwrap();
     assert_eq!(typed.title, "молоко завтра !! #дом");
     assert_eq!((typed.due, typed.priority, typed.tags.len()), (None, Priority::None, 0));
 
     // No subtasks of its own, and it stays with its task.
-    assert!(d.quick_add_under("глубже".into(), sub.id.clone()).is_err());
+    assert!(d.quick_add_under("глубже".into(), sub.id.clone(), false, None).is_err());
     assert!(d.move_task(sub.id.clone(), None, None, None).is_err());
     assert!(d.move_task(sub.id.clone(), None, Some(other.id.clone()), None).is_err());
     assert!(d.move_to_list(sub.id.clone(), INBOX_ID.into()).is_err());
@@ -376,7 +376,9 @@ fn r10_the_tasks_of_a_project_are_full_tasks() {
     let d = device();
     let project = add(&d, "п");
     d.set_project(project.id.clone(), true).unwrap();
-    let task = d.quick_add_under("т завтра !!".into(), project.id.clone()).unwrap();
+    let task = d
+        .quick_add_under("т завтра !!".into(), project.id.clone(), false, None)
+        .unwrap();
     assert_eq!((task.title.as_str(), task.due.as_deref()), ("т", Some("2026-10-06")));
     d.set_notes(task.id.clone(), "заметка".into()).unwrap();
     d.add_tag(task.id.clone(), "дом".into()).unwrap();
@@ -385,7 +387,7 @@ fn r10_the_tasks_of_a_project_are_full_tasks() {
     // A task of a project has subtasks, and those have a title only.
     let sub = add_sub(&d, &task, "у");
     assert!(d.set_due(sub.id.clone(), Some("2026-10-09".into())).is_err());
-    assert!(d.quick_add_under("глубже".into(), sub.id).is_err());
+    assert!(d.quick_add_under("глубже".into(), sub.id, false, None).is_err());
 
     // A task goes into a project and out of it with its fields.
     let loose = add(&d, "в");
@@ -424,9 +426,11 @@ fn r32_tasks_closed_as_wont_do_or_in_the_trash_are_tasks_of_the_project() {
     let d = device();
     let project = add(&d, "п");
     d.set_project(project.id.clone(), true).unwrap();
-    let wont = d.quick_add_under("не буду завтра".into(), project.id.clone()).unwrap();
+    let wont = d
+        .quick_add_under("не буду завтра".into(), project.id.clone(), false, None)
+        .unwrap();
     let trashed = d
-        .quick_add_under("в корзине завтра".into(), project.id.clone())
+        .quick_add_under("в корзине завтра".into(), project.id.clone(), false, None)
         .unwrap();
     d.wont_do_task(wont.id.clone()).unwrap();
     d.delete_task(trashed.id.clone()).unwrap();
@@ -506,7 +510,9 @@ fn r10_the_copy_of_a_project_keeps_the_fields_of_its_tasks() {
     let d = device();
     let project = add(&d, "п");
     d.set_project(project.id.clone(), true).unwrap();
-    let task = d.quick_add_under("т завтра".into(), project.id.clone()).unwrap();
+    let task = d
+        .quick_add_under("т завтра".into(), project.id.clone(), false, None)
+        .unwrap();
     add_sub(&d, &task, "строка");
 
     let copy = d.duplicate_task(project.id).unwrap();
@@ -1120,7 +1126,7 @@ fn r23_quick_add_creates_the_task_the_line_describes() {
     let d = device();
     let shop = d.create_list("Покупки".into()).unwrap();
     let t = d
-        .quick_add("купить молоко завтра 18:30 !! #дом @покупки".into(), None)
+        .quick_add("купить молоко завтра 18:30 !! #дом @покупки".into(), None, false, None)
         .unwrap();
     assert_eq!(t.title, "купить молоко");
     assert_eq!(t.due.as_deref(), Some("2026-10-06T18:30"));
@@ -1129,11 +1135,16 @@ fn r23_quick_add_creates_the_task_the_line_describes() {
     assert_eq!(t.list_id, shop.id);
 
     // An unknown @word is not a list: it stays in the title, the fallback list is used.
-    let other = d.quick_add("написать @ivan".into(), Some(shop.id.clone())).unwrap();
+    let other = d
+        .quick_add("написать @ivan".into(), Some(shop.id.clone()), false, None)
+        .unwrap();
     assert_eq!(other.title, "написать @ivan");
     assert_eq!(other.list_id, shop.id);
 
-    assert!(d.quick_add("#тег !!".into(), None).is_err(), "a title is required");
+    assert!(
+        d.quick_add("#тег !!".into(), None, false, None).is_err(),
+        "a title is required"
+    );
 }
 
 #[test]
@@ -1205,7 +1216,7 @@ fn projects_are_tasks_with_a_view_of_their_own() {
 
     d.set_project(launch.id.clone(), true).unwrap();
     let design = d
-        .quick_add_under("Макеты завтра !! #дизайн".into(), launch.id.clone())
+        .quick_add_under("Макеты завтра !! #дизайн".into(), launch.id.clone(), false, None)
         .unwrap();
     assert_eq!(
         (design.title.as_str(), design.due.as_deref(), design.priority),
@@ -2606,7 +2617,7 @@ fn r129_a_task_goes_into_a_project_at_its_end_and_out_of_it_into_a_list() {
         })
         .unwrap();
     d.set_project(project.id.clone(), true).unwrap();
-    d.quick_add_under("р".into(), project.id.clone()).unwrap();
+    d.quick_add_under("р".into(), project.id.clone(), false, None).unwrap();
     let a = add(&d, "а");
     d.set_due(a.id.clone(), Some("2026-10-07".into())).unwrap();
 
@@ -2643,4 +2654,118 @@ fn r129_a_task_goes_into_a_project_at_its_end_and_out_of_it_into_a_list() {
     assert!(d.move_to_project(a.id.clone(), holder.id.clone()).is_err());
     assert_eq!(d.task(holder.id).unwrap().parent_id, None);
     assert_eq!(d.task(line.id).unwrap().title, "строка");
+}
+
+fn placed(store: &Store, title: &str, first: bool, after: Option<&TaskItem>) -> TaskItem {
+    store
+        .create_task(NewTask {
+            title: title.into(),
+            first,
+            after: after.map(|t| t.id.clone()),
+            ..NewTask::default()
+        })
+        .unwrap()
+}
+
+#[test]
+fn r130_a_new_task_goes_first_or_right_under_the_task_it_is_placed_after() {
+    let d = device();
+    let a = add(&d, "а");
+    add(&d, "б");
+    add(&d, "в");
+    placed(&d, "г", true, None);
+    assert_eq!(view(&d, Scope::Inbox), ["г", "а", "б", "в"]);
+    placed(&d, "д", false, Some(&a));
+    assert_eq!(view(&d, Scope::Inbox), ["г", "а", "д", "б", "в"]);
+    // Without either a task still goes last, as everything that does not ask for a place.
+    add(&d, "е");
+    assert_eq!(view(&d, Scope::Inbox), ["г", "а", "д", "б", "в", "е"]);
+}
+
+#[test]
+fn r130_placed_under_a_subtask_the_new_task_goes_under_its_parent() {
+    let d = device();
+    let a = add(&d, "а");
+    add(&d, "б");
+    let sub = add_sub(&d, &a, "подзадача");
+    placed(&d, "в", false, Some(&sub));
+    assert_eq!(view(&d, Scope::Inbox), ["а", "в", "б"]);
+    assert_eq!(titles(&d.subtasks(a.id).unwrap()), ["подзадача"]);
+}
+
+#[test]
+fn r130_placed_under_a_task_of_another_list_the_new_task_goes_first() {
+    let d = device();
+    let home = d.create_list("дом".into()).unwrap();
+    let other = d
+        .create_task(NewTask {
+            title: "чужая".into(),
+            list_id: Some(home.id.clone()),
+            ..NewTask::default()
+        })
+        .unwrap();
+    add(&d, "а");
+    add(&d, "б");
+    placed(&d, "в", false, Some(&other));
+    assert_eq!(view(&d, Scope::Inbox), ["в", "а", "б"]);
+    assert_eq!(view(&d, Scope::List { id: home.id }), ["чужая"]);
+}
+
+#[test]
+fn r130_a_task_of_a_project_goes_first_or_under_a_task_of_the_project() {
+    let d = device();
+    let project = d.create_project("проект".into(), None).unwrap();
+    let p1 = d.quick_add_under("п1".into(), project.id.clone(), false, None).unwrap();
+    d.quick_add_under("п2".into(), project.id.clone(), false, None).unwrap();
+    d.quick_add_under("п0".into(), project.id.clone(), true, None).unwrap();
+    d.quick_add_under("п3".into(), project.id.clone(), false, Some(p1.id))
+        .unwrap();
+    assert_eq!(view(&d, Scope::Project { id: project.id }), ["п0", "п1", "п3", "п2"]);
+}
+
+#[test]
+fn r130_quick_add_places_the_task_too() {
+    let d = device();
+    let a = add(&d, "а");
+    add(&d, "б");
+    d.quick_add("в !!".into(), None, true, None).unwrap();
+    d.quick_add("г".into(), None, false, Some(a.id)).unwrap();
+    assert_eq!(view(&d, Scope::Inbox), ["в", "а", "г", "б"]);
+}
+
+#[test]
+fn r130_another_sort_order_places_the_new_task_by_itself() {
+    let d = device();
+    let list = d.create_list("сроки".into()).unwrap();
+    d.set_list_sort(list.id.clone(), SortMode::Due).unwrap();
+    let new = |title: &str, due: &str, first: bool| {
+        d.create_task(NewTask {
+            title: title.into(),
+            list_id: Some(list.id.clone()),
+            due: Some(due.into()),
+            first,
+            ..NewTask::default()
+        })
+        .unwrap()
+    };
+    new("позже", "2026-10-20", false);
+    new("раньше", "2026-10-10", false);
+    new("посередине", "2026-10-15", true);
+    assert_eq!(view(&d, Scope::List { id: list.id }), ["раньше", "посередине", "позже"]);
+}
+
+#[test]
+fn r130_a_subtask_goes_last_whatever_it_asks_for() {
+    let d = device();
+    let a = add(&d, "а");
+    add_sub(&d, &a, "w");
+    d.quick_add_under("x".into(), a.id.clone(), true, None).unwrap();
+    d.create_task(NewTask {
+        title: "y".into(),
+        parent_id: Some(a.id.clone()),
+        first: true,
+        ..NewTask::default()
+    })
+    .unwrap();
+    assert_eq!(titles(&d.subtasks(a.id).unwrap()), ["w", "x", "y"]);
 }
