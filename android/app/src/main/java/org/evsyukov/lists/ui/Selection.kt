@@ -16,6 +16,8 @@ sealed interface BatchAction {
     data class Start(val value: String) : BatchAction
     data class SetPriority(val value: Priority) : BatchAction
     data class MoveTo(val listId: String) : BatchAction
+    /** R129: into a project, at its end. */
+    data class MoveToProject(val projectId: String) : BatchAction
     data class Tag(val name: String) : BatchAction
 }
 
@@ -49,6 +51,12 @@ fun selectionActions(selected: List<TaskItem>): SelectionActions = when {
 /** A tag as the core stores it. */
 internal fun cleanTag(tag: String): String = tag.trim().trimStart('#').lowercase()
 
+/**
+ * R129: whether the task can be moved into the project. A project and a task with lines under it stay at the top level
+ * (R10), and a task already in the project stays where it is, as with a drop onto a project (R123).
+ */
+fun TaskItem.goesInto(projectId: String): Boolean = !(isProject || subtasksTotal > 0u || id == projectId || parentId == projectId)
+
 /** The step of the action for this task, or null when the action does not apply to it and the task is passed over. */
 fun BatchAction.on(task: TaskItem): Step? {
     // A task in the trash is only restored, and a record of a completed occurrence only deleted.
@@ -66,6 +74,7 @@ fun BatchAction.on(task: TaskItem): Step? {
         is BatchAction.Start -> if (task.start == value) null else Step(Back.Start(task.start))
         is BatchAction.SetPriority -> if (task.priority == value) null else Step(Back.SetPriority(task.priority))
         is BatchAction.MoveTo -> if (task.parentId == null && task.listId == listId) null else Step(Back.Place(task.listId, task.parentId))
+        is BatchAction.MoveToProject -> if (task.goesInto(projectId)) Step(Back.Place(task.listId, task.parentId)) else null
         is BatchAction.Tag -> cleanTag(name).let { tag -> if (tag.isEmpty() || tag in task.tags) null else Step(Back.Untag(tag)) }
     }
 }
@@ -80,6 +89,7 @@ fun BatchAction.run(store: Store, id: String) {
         is BatchAction.Start -> store.setStart(id, value)
         is BatchAction.SetPriority -> store.setPriority(id, value)
         is BatchAction.MoveTo -> store.moveToList(id, listId)
+        is BatchAction.MoveToProject -> store.moveToProject(id, projectId)
         is BatchAction.Tag -> store.addTag(id, name)
     }
 }
@@ -104,7 +114,7 @@ fun BatchAction.done(): Int = when (this) {
     BatchAction.Complete, BatchAction.WontDo -> R.string.batch_completed
     BatchAction.Delete -> R.string.batch_deleted
     BatchAction.Restore -> R.string.batch_restored
-    is BatchAction.MoveTo -> R.string.batch_moved
+    is BatchAction.MoveTo, is BatchAction.MoveToProject -> R.string.batch_moved
     else -> R.string.batch_changed
 }
 

@@ -554,10 +554,17 @@ fun EditorSheet(editing: Editing, state: UiState, model: MainViewModel, onRemind
         "priority" -> ChoiceDialog(str(R.string.priority), priorities.map { it.title() }, priorities.indexOf(task.priority), { dialog = null }) { index ->
             model.act { it.setPriority(task.id, priorities[index]) }
         }
-        "list" -> {
-            val lists = state.lists.filter { !it.archived }
-            ChoiceDialog(str(R.string.move_to_list), lists.map { it.displayName() }, lists.indexOfFirst { it.id == task.listId }, { dialog = null }) { index ->
-                model.act { it.moveToList(task.id, lists[index].id) }
+        "list" -> DestinationDialog(
+            str(R.string.move_to_list),
+            state.lists.filter { !it.archived },
+            state.projects,
+            task.parentId ?: task.listId,
+            { dialog = null },
+            projectEnabled = { task.goesInto(it.id) },
+        ) { to ->
+            when (to) {
+                is Destination.ToList -> model.act { it.moveToList(task.id, to.id) }
+                is Destination.ToProject -> model.act { it.moveToProject(task.id, to.id) }
             }
         }
         "tag" -> TagDialog(state.tags.map { it.name }.filter { it !in task.tags }, { dialog = null }) { tag -> model.act { it.addTag(task.id, tag) } }
@@ -656,6 +663,57 @@ fun ChoiceDialog(title: String, options: List<String>, selected: Int, onDismiss:
                         fontWeight = if (index == selected) FontWeight.Bold else null,
                         modifier = Modifier.fillMaxWidth().clickable { onPick(index); onDismiss() }.padding(vertical = 12.dp),
                     )
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDismiss) { Text(str(R.string.cancel)) } },
+    )
+}
+
+/** Where a task goes (R129): a list, or a project and with it the project's list. */
+sealed interface Destination {
+    data class ToList(val id: String) : Destination
+    data class ToProject(val id: String, val listId: String) : Destination
+}
+
+/**
+ * R129: the lists and, under them as a group of their own, the projects a task goes to. [selected] is the id of the
+ * list or the project shown in bold; an option that is not enabled is shown dimmed and does nothing.
+ */
+@Composable
+fun DestinationDialog(
+    title: String,
+    lists: List<TaskList>,
+    projects: List<TaskItem>,
+    selected: String?,
+    onDismiss: () -> Unit,
+    listEnabled: (TaskList) -> Boolean = { true },
+    projectEnabled: (TaskItem) -> Boolean = { true },
+    onPick: (Destination) -> Unit,
+) {
+    @Composable
+    fun Option(text: String, on: Boolean, enabled: Boolean, pick: Destination) = Text(
+        text,
+        fontWeight = if (on) FontWeight.Bold else null,
+        color = if (enabled) Color.Unspecified else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
+        modifier = Modifier.fillMaxWidth().clickable(enabled = enabled) { onPick(pick); onDismiss() }.padding(vertical = 12.dp),
+    )
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                lists.forEach { Option(it.displayName(), it.id == selected, listEnabled(it), Destination.ToList(it.id)) }
+                if (projects.isNotEmpty()) {
+                    HorizontalDivider(Modifier.padding(vertical = 4.dp))
+                    Text(
+                        str(R.string.projects),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(vertical = 8.dp),
+                    )
+                    projects.forEach { Option(it.title, it.id == selected, projectEnabled(it), Destination.ToProject(it.id, it.listId)) }
                 }
             }
         },

@@ -66,6 +66,7 @@ class QuickAddActivity : ComponentActivity() {
         // What was shared or selected carries its own text.
         readsClipboard = shared == Shared() && EntryPrefs.clipboard(this)
         val lists = runCatching { Repo.store.lists().filter { !it.archived } }.getOrDefault(emptyList())
+        val projects = runCatching { Repo.store.projects() }.getOrDefault(emptyList())
 
         setContent {
             AppTheme {
@@ -90,6 +91,7 @@ class QuickAddActivity : ComponentActivity() {
                             NewTaskCard(
                                 lists = lists,
                                 listId = listId,
+                                projects = projects,
                                 // Typed text is parsed for dates and tags, unless that is turned off; shared text is taken as is.
                                 parse = shared.title.isEmpty() && EntryPrefs.parse(this@QuickAddActivity),
                                 onSubmit = ::save,
