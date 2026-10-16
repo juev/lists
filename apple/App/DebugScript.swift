@@ -796,7 +796,7 @@ enum DebugScript {
                         page.color = .white
                         page.addSubview(cell)
                         window.contentView = page
-                        cell.configure(task, origin: origin, dayInHeading: model.dayInHeading(task), model: model)
+                        cell.configure(TaskRowState(task: task, origin: origin, dayInHeading: model.dayInHeading(task), open: false), model: model)
                         cell.layoutSubtreeIfNeeded()
                         if let image = NSBitmapImageRep(
                             bitmapDataPlanes: nil, pixelsWide: Int(size.width) * 8, pixelsHigh: Int(size.height) * 8, bitsPerSample: 8,

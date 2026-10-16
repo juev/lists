@@ -1,40 +1,68 @@
 import AppKit
 import SwiftUI
 
+/// What the row of a task shows.
+struct TaskRowState: Equatable {
+    var task: TaskItem
+    /// R72: where the task lives, in a view that mixes lists.
+    var origin: RowOrigin?
+    var dayInHeading: Bool
+    var open: Bool
+    /// R30, R31: a task of an open project stands under it, moved to the right.
+    var depth = 0
+    /// What an open card shows of its subtasks (R10, R38).
+    var lines: CardLines?
+}
+
+/// The subtasks of an open card as the card draws them.
+struct CardLines: Equatable {
+    /// The subtasks on show: none while they are folded behind their line, none for a project, whose tasks are rows.
+    var subtasks: [TaskItem]
+    var shown: Bool
+    /// The subtasks among the selected rows (R117).
+    var selected: Set<String>
+    /// The subtask whose title is being edited in its line (R38).
+    var renaming: String?
+}
+
 /// A row of the task table (#308).
 enum TaskTableRow: Equatable {
     /// R78: the events of the day, above the tasks of Today.
     case events([DayEvent])
     case heading(id: String, title: String)
-    case task(TaskItem, origin: RowOrigin?, dayInHeading: Bool, open: Bool)
+    case task(TaskRowState)
     /// R22: a subtask a search found the task above by.
     case found(TaskItem, parent: String)
+    /// The field for a new task of the open project above (R30).
+    case newChild(parent: String, depth: Int)
 
     /// What tells the row from the others while its content changes.
     var key: String {
         switch self {
         case .events: "events"
         case .heading(let id, _): "heading " + id
-        case .task(let task, _, _, _): task.id
+        case .task(let state): state.task.id
         case .found(let task, let parent): parent + " " + task.id
+        case .newChild(let parent, _): "new " + parent
         }
     }
 
     /// The task a click on the row selects; none for the rows that are not tasks of the view.
     var taskId: String? {
-        if case .task(let task, _, _, _) = self { return task.id }
+        if case .task(let state) = self { return state.task.id }
         return nil
     }
 
     /// Whether the row is the open card of its task.
     var isCard: Bool {
-        if case .task(_, _, _, true) = self { return true }
+        if case .task(let state) = self { return state.open }
         return false
     }
 
     var task: TaskItem? {
         switch self {
-        case .task(let task, _, _, _), .found(let task, _): task
+        case .task(let state): state.task
+        case .found(let task, _): task
         default: nil
         }
     }
@@ -43,17 +71,34 @@ enum TaskTableRow: Equatable {
     @MainActor
     static func rows(_ model: AppModel) -> [TaskTableRow] {
         var rows: [TaskTableRow] = model.eventsShown ? [.events(model.dayEvents)] : []
+        let selected = Set(model.selectedIds)
+        func add(_ task: TaskItem, depth: Int) {
+            let open = model.expanded.contains(task.id)
+            let origin = depth == 0 && model.mixesLists ? model.origin(of: task) : nil
+            var lines: CardLines?
+            if open {
+                let shown = model.showsSubtasks(task)
+                let children = model.children[task.id] ?? []
+                lines = CardLines(
+                    subtasks: shown && !task.isProject ? children : [],
+                    shown: shown,
+                    selected: selected.intersection(children.map(\.id)),
+                    renaming: model.renaming.flatMap { id in children.contains { $0.id == id } ? id : nil })
+            }
+            rows.append(.task(TaskRowState(task: task, origin: origin, dayInHeading: model.dayInHeading(task), open: open, depth: depth, lines: lines)))
+            // R22: the subtasks a search found the task by; an open task shows all of its subtasks instead.
+            if !open, let found = model.found[task.id] {
+                rows.append(contentsOf: found.map { .found($0, parent: task.id) })
+            }
+            // R30, R31: the tasks of an open project are tasks with cards of their own, under it.
+            if open, task.isProject {
+                for child in model.children[task.id] ?? [] { add(child, depth: depth + 1) }
+                if !task.deleted && !task.isLog { rows.append(.newChild(parent: task.id, depth: depth + 1)) }
+            }
+        }
         for section in model.visibleSections {
             if let title = section.title { rows.append(.heading(id: section.id, title: title)) }
-            for task in section.tasks {
-                let open = model.expanded.contains(task.id)
-                let origin = model.mixesLists ? model.origin(of: task) : nil
-                rows.append(.task(task, origin: origin, dayInHeading: model.dayInHeading(task), open: open))
-                // R22: the subtasks a search found the task by; an open task shows all of its subtasks instead.
-                if !open, let lines = model.found[task.id] {
-                    rows.append(contentsOf: lines.map { .found($0, parent: task.id) })
-                }
-            }
+            for task in section.tasks { add(task, depth: 0) }
         }
         return rows
     }
@@ -205,12 +250,15 @@ struct TaskTable: NSViewRepresentable {
         /// The open cards, kept while they are open: the table may ask for the view of a row again at any time.
         private var cards: [String: TaskCard] = [:]
 
-        private func card(_ task: TaskItem) -> TaskCard {
+        private func card(_ state: TaskRowState) -> TaskCard {
+            let task = state.task
             if let card = cards[task.id] {
-                card.configure(task)
+                card.configure(task, lines: state.lines)
+                card.depth = state.depth
                 return card
             }
-            let card = TaskCard(task: task)
+            let card = TaskCard(task: task, lines: state.lines)
+            card.depth = state.depth
             card.onHeightChange = { [weak self, weak card] in
                 guard let self, let card, let table = self.table, let row = self.rows.firstIndex(where: { $0.isCard && $0.taskId == card.task.id }) else { return }
                 table.noteHeightOfRows(withIndexesChanged: [row])
@@ -230,11 +278,12 @@ struct TaskTable: NSViewRepresentable {
             switch rows[index] {
             case .events(let events): (view as? EventsCell)?.configure(events)
             case .heading(_, let title): (view as? HeadingCell)?.configure(title)
-            case .task(let task, let origin, let dayInHeading, let open):
-                if open { (view as? TaskCard)?.configure(task) } else {
-                    (view as? TaskRowCell)?.configure(task, origin: origin, dayInHeading: dayInHeading, model: model)
+            case .task(let state):
+                if state.open { (view as? TaskCard)?.configure(state.task, lines: state.lines) } else {
+                    (view as? TaskRowCell)?.configure(state, model: model)
                 }
             case .found(let task, _): (view as? FoundRowCell)?.configure(task, model: model)
+            case .newChild(let parent, let depth): (view as? NewChildCell)?.configure(parent: parent, depth: depth)
             }
         }
 
@@ -264,11 +313,15 @@ struct TaskTable: NSViewRepresentable {
                 let cell = tableView.makeView(withIdentifier: HeadingCell.identifier, owner: nil) as? HeadingCell ?? HeadingCell()
                 cell.configure(title)
                 return cell
-            case .task(let task, _, _, true):
-                return card(task)
-            case .task(let task, let origin, let dayInHeading, false):
+            case .task(let state) where state.open:
+                return card(state)
+            case .task(let state):
                 let cell = tableView.makeView(withIdentifier: TaskRowCell.identifier, owner: nil) as? TaskRowCell ?? TaskRowCell()
-                cell.configure(task, origin: origin, dayInHeading: dayInHeading, model: model)
+                cell.configure(state, model: model)
+                return cell
+            case .newChild(let parent, let depth):
+                let cell = tableView.makeView(withIdentifier: NewChildCell.identifier, owner: nil) as? NewChildCell ?? NewChildCell()
+                cell.configure(parent: parent, depth: depth)
                 return cell
             case .found(let task, _):
                 let cell = tableView.makeView(withIdentifier: FoundRowCell.identifier, owner: nil) as? FoundRowCell ?? FoundRowCell()
@@ -287,9 +340,10 @@ struct TaskTable: NSViewRepresentable {
             switch rows[row] {
             case .events(let events): TaskTableMetrics.events(events.count)
             case .heading: TaskTableMetrics.heading()
-            case .task(let task, _, _, true): card(task).height(width: tableView.tableColumns.first?.width ?? tableView.bounds.width)
-            case .task(_, let origin, _, false): TaskTableMetrics.taskRow(origin: origin != nil, spacing: model.rowSpacing)
+            case .task(let state) where state.open: card(state).height(width: tableView.tableColumns.first?.width ?? tableView.bounds.width)
+            case .task(let state): TaskTableMetrics.taskRow(origin: state.origin != nil, spacing: model.rowSpacing)
             case .found: TaskTableMetrics.foundRow()
+            case .newChild: TaskTableMetrics.newChildRow()
             }
         }
 

@@ -46,13 +46,20 @@ final class TaskCard: NSView, NSTextViewDelegate {
     private let placeholder = NSTextField(labelWithString: L("Notes"))
     private let chipsView = CardChipsView()
     private let filesView = CardFilesView()
+    private let subtasksView = CardSubtasksView()
+    /// R30, R31: the card of a task of an open project stands to the right, under the project.
+    var depth = 0 {
+        didSet { if depth != oldValue { needsLayout = true } }
+    }
+    private var lines: CardLines?
     private var observers: [NSObjectProtocol] = []
 
     private var model: AppModel { AppModel.shared }
     private var locked: Bool { task.deleted || task.isLog }
 
-    init(task: TaskItem) {
+    init(task: TaskItem, lines: CardLines?) {
         self.task = task
+        self.lines = lines
         super.init(frame: .zero)
         identifier = Self.identifier
         bar.radius = 1.5
@@ -89,6 +96,7 @@ final class TaskCard: NSView, NSTextViewDelegate {
         addSubview(notes)
         addSubview(chipsView)
         addSubview(filesView)
+        addSubview(subtasksView)
         // R19: files dropped on the card are attached to the task.
         registerForDraggedTypes([.fileURL])
 
@@ -109,7 +117,7 @@ final class TaskCard: NSView, NSTextViewDelegate {
         title.string = task.title
         notes.setText(task.notes)
         attachments = (try? model.store?.attachments(taskId: task.id)) ?? []
-        configure(task)
+        configure(task, lines: lines)
     }
 
     required init?(coder: NSCoder) { fatalError("not used") }
@@ -118,9 +126,11 @@ final class TaskCard: NSView, NSTextViewDelegate {
         for observer in observers { NotificationCenter.default.removeObserver(observer) }
     }
 
-    /// Takes the new state of the task; what is being typed stays.
-    func configure(_ task: TaskItem) {
+    /// Takes the new state of the task and of its subtasks; what is being typed stays.
+    func configure(_ task: TaskItem, lines: CardLines?) {
         self.task = task
+        self.lines = lines
+        subtasksView.configure(task, lines ?? CardLines(subtasks: [], shown: false, selected: [], renaming: nil))
         let body = AppFont.native(.body)
         mark.configure(task, model: model)
         bar.color = TaskRowCell.priorityBar(task.priority)
@@ -322,11 +332,13 @@ final class TaskCard: NSView, NSTextViewDelegate {
             let index = chipsView.stops.firstIndex { $0.chip == chip } ?? 0
             model.perform { try $0.removeTag(id: id, tag: tag) }
             guard had, let fresh = model.row(id) else { return }
-            configure(fresh)
+            configure(fresh, lines: lines)
             let now = chipsView.stops
             if !now.isEmpty { window?.makeFirstResponder(now[min(index, now.count - 1)]) }
         case .subtask:
+            // The field of the first subtask opens and takes the keyboard (R38).
             model.showSubtasks(id)
+            DispatchQueue.main.async { [weak self] in self?.subtasksView.focusField() }
         case .file:
             chooseFiles()
         case .list:
@@ -581,7 +593,7 @@ final class TaskCard: NSView, NSTextViewDelegate {
 
     private struct Frames {
         var outline = NSRect.zero, mark = NSRect.zero, bar = NSRect.zero, folder = NSRect.zero
-        var title = NSRect.zero, notes = NSRect.zero, chips = NSRect.zero, files = NSRect.zero
+        var title = NSRect.zero, notes = NSRect.zero, chips = NSRect.zero, files = NSRect.zero, subtasks = NSRect.zero
         var height: CGFloat = 0
     }
 
@@ -590,8 +602,9 @@ final class TaskCard: NSView, NSTextViewDelegate {
         var frames = Frames()
         let body = AppFont.native(.body)
         let line = TaskTableMetrics.lineHeight(body)
-        let content = Self.margin + Self.padding.left
-        let contentWidth = max(width - 2 * content, 1)
+        let shift = CGFloat(depth) * TaskTableMetrics.depthIndent
+        let content = shift + Self.margin + Self.padding.left
+        let contentWidth = max(width - shift - 2 * (Self.margin + Self.padding.left), 1)
         // The row of the task inside the card: the mark at the first line of the title (R73).
         var x = content + 6
         let headerTop = Self.margin + Self.padding.top + 6
@@ -623,8 +636,13 @@ final class TaskCard: NSView, NSTextViewDelegate {
             frames.files = NSRect(x: left, y: y, width: innerWidth, height: filesView.height)
             y += filesView.height
         }
+        if !subtasksView.isEmpty {
+            y += 6
+            frames.subtasks = NSRect(x: left, y: y, width: innerWidth, height: subtasksView.height)
+            y += subtasksView.height
+        }
         let bottom = y + Self.padding.bottom
-        frames.outline = NSRect(x: Self.margin, y: Self.margin, width: width - 2 * Self.margin, height: bottom - Self.margin)
+        frames.outline = NSRect(x: shift + Self.margin, y: Self.margin, width: width - shift - 2 * Self.margin, height: bottom - Self.margin)
         frames.height = bottom + Self.margin
         return frames
     }
@@ -646,6 +664,7 @@ final class TaskCard: NSView, NSTextViewDelegate {
         placeholder.frame = NSRect(origin: frames.notes.origin, size: NSSize(width: frames.notes.width, height: TaskTableMetrics.lineHeight(AppFont.native(.body))))
         chipsView.frame = frames.chips
         filesView.frame = frames.files
+        subtasksView.frame = frames.subtasks
     }
 }
 

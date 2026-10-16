@@ -19,6 +19,12 @@ enum TaskTableMetrics {
         return content + 2 * (rowInset + RowSpacing.padding(spacing))
     }
 
+    /// How far a task of an open project stands to the right of the project (R30).
+    static let depthIndent: CGFloat = 22
+
+    /// The field for a new task of an open project.
+    static func newChildRow() -> CGFloat { lineHeight(AppFont.native(.callout)) + 8 + 2 * rowInset }
+
     /// R22: a subtask a search found its task by, a line under the row of the task.
     static func foundRow() -> CGFloat { lineHeight(AppFont.native(.body)) + 12 + 2 * rowInset }
 
@@ -125,6 +131,8 @@ final class TaskRowCell: NSTableCellView {
     private let date = NSTextField(labelWithString: "")
     private let chevron = NSButton()
     private var spacing = "normal"
+    /// R30, R31: a task of an open project is moved to the right under it.
+    private var depth = 0
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -145,8 +153,12 @@ final class TaskRowCell: NSTableCellView {
 
     required init?(coder: NSCoder) { fatalError("not used") }
 
-    func configure(_ task: TaskItem, origin rowOrigin: RowOrigin?, dayInHeading: Bool, model: AppModel) {
+    func configure(_ state: TaskRowState, model: AppModel) {
+        let task = state.task
+        let rowOrigin = state.origin
+        let dayInHeading = state.dayInHeading
         self.task = task
+        depth = state.depth
         spacing = model.rowSpacing
         let body = AppFont.native(.body)
         let caption = AppFont.native(.caption)
@@ -232,7 +244,7 @@ final class TaskRowCell: NSTableCellView {
         let height = bounds.height
         let inset: CGFloat = 6
         let gap: CGFloat = 8
-        var x = inset
+        var x = inset + CGFloat(depth) * TaskTableMetrics.depthIndent
         func center(_ view: NSView, width: CGFloat, height viewHeight: CGFloat) {
             view.frame = NSRect(x: x, y: ((height - viewHeight) / 2).rounded(), width: width, height: viewHeight)
             x += width + gap
@@ -421,5 +433,58 @@ final class EventsCell: NSTableCellView {
 
     override func mouseUp(with event: NSEvent) {
         if bounds.contains(convert(event.locationInWindow, from: nil)) { SystemCalendars.shared.openCalendar() }
+    }
+}
+
+/// The field for a new task of an open project, under its tasks (R30): Return adds the task and the field stays for the next one.
+@MainActor
+final class NewChildCell: NSTableCellView {
+    static let identifier = NSUserInterfaceItemIdentifier("newChild")
+
+    private let icon = NSImageView()
+    private let field = NSTextField()
+    private var parent = ""
+    private var depth = 0
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        identifier = Self.identifier
+        field.isBordered = false
+        field.drawsBackground = false
+        field.focusRingType = .none
+        field.placeholderString = L("Subtask")
+        field.target = self
+        field.action = #selector(submit)
+        icon.contentTintColor = .tertiaryLabelColor
+        addSubview(icon)
+        addSubview(field)
+    }
+
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    func configure(parent: String, depth: Int) {
+        if parent != self.parent { field.stringValue = "" }
+        self.parent = parent
+        self.depth = depth
+        let font = AppFont.native(.callout)
+        field.font = font
+        icon.image = .symbol("plus.circle", font)
+        needsLayout = true
+    }
+
+    @objc private func submit() {
+        guard !field.stringValue.isEmpty else { return }
+        if AppModel.shared.add(field.stringValue, parent: parent) != nil { field.stringValue = "" }
+        window?.makeFirstResponder(field)
+    }
+
+    override func layout() {
+        super.layout()
+        let line = TaskTableMetrics.lineHeight(AppFont.native(.callout))
+        let x = 6 + 28 + CGFloat(depth - 1) * TaskTableMetrics.depthIndent
+        let size = icon.image?.size ?? .zero
+        icon.frame = NSRect(x: x, y: ((bounds.height - size.height) / 2).rounded(), width: size.width, height: size.height)
+        let fieldX = icon.frame.maxX + 6
+        field.frame = NSRect(x: fieldX, y: ((bounds.height - line - 2) / 2).rounded(), width: max(bounds.width - fieldX - 6, 0), height: line + 2)
     }
 }
