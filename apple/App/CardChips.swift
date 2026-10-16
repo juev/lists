@@ -13,6 +13,10 @@ struct MenuChoice {
     /// The check mark of a choice that has one.
     var on: Bool?
     let action: () -> Void
+    /// The title of a group of the choices that follow it.
+    var isHeader = false
+
+    static func header(_ title: String) -> MenuChoice { MenuChoice(title: title, action: {}, isHeader: true) }
 }
 
 /// The choices as the content of a SwiftUI menu.
@@ -22,7 +26,10 @@ struct ChoiceItems: View {
     var body: some View {
         ForEach(choices.indices, id: \.self) { index in
             let choice = choices[index]
-            if let on = choice.on {
+            if choice.isHeader {
+                Divider()
+                Text(choice.title)
+            } else if let on = choice.on {
                 Toggle(choice.title, isOn: Binding(get: { on }, set: { _ in choice.action() }))
             } else {
                 Button(choice.title, action: choice.action)
@@ -52,6 +59,11 @@ final class MenuAnchors {
         let menu = NSMenu()
         actions = choices.map(\.action)
         for (index, choice) in choices.enumerated() {
+            if choice.isHeader {
+                menu.addItem(.separator())
+                menu.addItem(.sectionHeader(title: choice.title))
+                continue
+            }
             let item = NSMenuItem(title: choice.title, action: #selector(pick(_:)), keyEquivalent: "")
             item.target = self
             item.tag = index

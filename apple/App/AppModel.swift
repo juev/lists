@@ -782,7 +782,11 @@ final class AppModel {
         default: break
         }
         var new = TaskDraft(listId: targetListId)
-        if case .project(let id) = scope { new.parentId = id }
+        if case .project(let id) = scope {
+            new.parentId = id
+            // R129: the card shows the project; a list chosen there instead starts from the project's list.
+            new.listId = projects.first { $0.id == id }?.listId ?? new.listId
+        }
         expanded.removeAll()
         draft = new
     }
