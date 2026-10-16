@@ -142,6 +142,11 @@ struct TaskTable: NSViewRepresentable {
         table.focusRingType = .none
         table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
         table.dataSource = context.coordinator
+        // R123: rows are dragged onto the sidebar and, in a list sorted by hand, to another place in it.
+        table.registerForDraggedTypes([.string])
+        table.setDraggingSourceOperationMask([.move, .copy, .generic], forLocal: true)
+        table.setDraggingSourceOperationMask(.copy, forLocal: false)
+        table.verticalMotionCanBeginDrag = true
         table.delegate = context.coordinator
         context.coordinator.table = table
         let scroll = NSScrollView()
@@ -345,6 +350,78 @@ struct TaskTable: NSViewRepresentable {
             case .found: TaskTableMetrics.foundRow()
             case .newChild: TaskTableMetrics.newChildRow()
             }
+        }
+
+        // MARK: Dragging (R123)
+
+        /// What a drag of the row carries: the ids of the rows, a line each — every selected row when it is one of them.
+        /// An open card is not dragged: it takes the pointer for its text.
+        func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> (any NSPasteboardWriting)? {
+            guard let id = rows[row].taskId, !rows[row].isCard else { return nil }
+            let item = NSPasteboardItem()
+            item.setString(model.dragIds(id).joined(separator: "\n"), forType: .string)
+            return item
+        }
+
+        /// R123: what follows the pointer is the title of the row the drag started on and, for several tasks, their number.
+        func tableView(_ tableView: NSTableView, draggingSession session: NSDraggingSession, willBeginAt screenPoint: NSPoint, forRowIndexes rowIndexes: IndexSet) {
+            guard let row = rowIndexes.first, let task = rows[row].task else { return }
+            let image = Self.dragImage(title: task.title, count: model.dragIds(task.id).count)
+            session.enumerateDraggingItems(options: [], for: tableView, classes: [NSPasteboardItem.self], searchOptions: [:]) { item, _, _ in
+                let at = item.draggingFrame.origin
+                item.setDraggingFrame(NSRect(origin: at, size: image.size), contents: image)
+            }
+        }
+
+        static func dragImage(title: String, count: Int) -> NSImage {
+            let font = AppFont.native(.body)
+            let label = NSAttributedString(string: title, attributes: [.font: font, .foregroundColor: NSColor.labelColor])
+            let badgeFont = NSFontManager.shared.convert(AppFont.native(.caption), toHaveTrait: .boldFontMask).monospacedDigits
+            let badge = NSAttributedString(string: "\(count)", attributes: [.font: badgeFont, .foregroundColor: NSColor.white])
+            let textWidth = min(ceil(label.size().width), 240)
+            let badgeSize = NSSize(width: ceil(badge.size().width) + 12, height: ceil(badge.size().height) + 2)
+            let line = TaskTableMetrics.lineHeight(font)
+            let width = 8 + textWidth + (count > 1 ? 6 + badgeSize.width : 0) + 8
+            let size = NSSize(width: width, height: line + 8)
+            return NSImage(size: size, flipped: false) { rect in
+                NSColor.windowBackgroundColor.withAlphaComponent(0.9).setFill()
+                NSBezierPath(roundedRect: rect, xRadius: 6, yRadius: 6).fill()
+                label.draw(with: NSRect(x: 8, y: 4, width: textWidth, height: line), options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
+                if count > 1 {
+                    let box = NSRect(x: 8 + textWidth + 6, y: (rect.height - badgeSize.height) / 2, width: badgeSize.width, height: badgeSize.height)
+                    NSColor.controlAccentColor.setFill()
+                    NSBezierPath(roundedRect: box, xRadius: box.height / 2, yRadius: box.height / 2).fill()
+                    badge.draw(at: NSPoint(x: box.minX + 6, y: box.minY + 1))
+                }
+                return true
+            }
+        }
+
+        /// A drop between rows moves a task in a list sorted by hand; anywhere else the table takes nothing.
+        func tableView(_ tableView: NSTableView, validateDrop info: any NSDraggingInfo, proposedRow row: Int, proposedDropOperation operation: NSTableView.DropOperation) -> NSDragOperation {
+            guard model.canReorder, info.draggingSource as AnyObject === tableView, operation == .above, dragged(info).count == 1 else { return [] }
+            return .move
+        }
+
+        func tableView(_ tableView: NSTableView, acceptDrop info: any NSDraggingInfo, row: Int, dropOperation: NSTableView.DropOperation) -> Bool {
+            guard let id = dragged(info).first else { return false }
+            return move(id, toRow: row)
+        }
+
+        private func dragged(_ info: any NSDraggingInfo) -> [String] {
+            (info.draggingPasteboard.string(forType: .string) ?? "").split(separator: "\n").map(String.init)
+        }
+
+        /// Moves the task to the place before the row with that index, the way a drop between rows does.
+        @discardableResult
+        func move(_ id: String, toRow row: Int) -> Bool {
+            // The order of the list counts its tasks alone: the rows of the view above the place that are its tasks.
+            let tasks = model.visibleSections.first?.tasks ?? []
+            guard let from = tasks.firstIndex(where: { $0.id == id }) else { return false }
+            let above = Set(rows.prefix(max(row, 0)).compactMap(\.taskId))
+            let to = tasks.filter { above.contains($0.id) }.count
+            model.move(from: [from], to: to)
+            return true
         }
 
         /// A card wraps its text at the width of the table.
