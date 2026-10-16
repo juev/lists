@@ -406,8 +406,7 @@ struct TaskRow: View {
             model.isSelected(task.id) && !isExpanded ? Color.primary.opacity(0.07) : .clear,
             in: RoundedRectangle(cornerRadius: 6))
         .contentShape(Rectangle())
-        .onTapGesture(count: 2) { model.toggleEditing(task.id) }
-        .simultaneousGesture(TapGesture().onEnded { TaskRow.click(task.id, model) })
+        .background { RowClickArea(id: task.id) { model.toggleEditing(task.id) } }
     }
 
     /// Marks after the title, only for what is set, without text or numbers (R72).
@@ -444,13 +443,6 @@ struct TaskRow: View {
         case .low: .blue
         case .none: nil
         }
-    }
-
-    /// R117: a click on a row, with the keys held at the moment: ⌘ adds the row or takes it out, Shift selects the range.
-    @MainActor
-    static func click(_ id: String, _ model: AppModel) {
-        let flags = NSEvent.modifierFlags
-        model.click(id, command: flags.contains(.command), shift: flags.contains(.shift))
     }
 
     /// R117: the menu of a row that is one of several selected ones: the actions change all of them.
@@ -615,8 +607,7 @@ struct SubtaskRow: View {
                     model.isSelected(task.id) ? Color.primary.opacity(0.07) : .clear,
                     in: RoundedRectangle(cornerRadius: 6))
                 .contentShape(Rectangle())
-                .onTapGesture(count: 2) { if !locked { model.startRenaming(task) } }
-                .simultaneousGesture(TapGesture().onEnded { TaskRow.click(task.id, model) })
+                .background { RowClickArea(id: task.id) { if !locked { model.startRenaming(task) } } }
                 .background { SubtaskMenuArea(items: { Self.menuItems(task, model) }) }
         }
     }
@@ -805,6 +796,90 @@ final class SubtaskMenuView: NSView {
             else { return event }
             NSMenu.popUpContextMenu(area.subtaskMenu(), with: event, for: area)
             return nil
+        }
+    }
+}
+
+/// The place of a row, or of a subtask inside the row of its parent, for the clicks of R117 (#300). Tap gestures on a row
+/// took the mouse from the list: neither a drag onto the sidebar (R123) nor a reorder started. An AppKit view under the
+/// row marks its place and takes nothing from the pointer, and the click counts only when the button went up where it
+/// went down: a drag changes no selection.
+struct RowClickArea: NSViewRepresentable {
+    let id: String
+    /// What a double click does.
+    let double: () -> Void
+
+    func makeNSView(context: Context) -> RowClickView { RowClickView() }
+
+    func updateNSView(_ view: RowClickView, context: Context) {
+        view.id = id
+        view.double = double
+    }
+}
+
+final class RowClickView: NSView {
+    var id = ""
+    var double: () -> Void = {}
+
+    private static let areas = NSHashTable<RowClickView>.weakObjects()
+    private static var monitor: Any?
+
+    /// The view marks a place and takes nothing from the pointer: clicks go to the row over it.
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window == nil {
+            Self.areas.remove(self)
+        } else {
+            Self.areas.add(self)
+            Self.watch()
+        }
+    }
+
+    /// The row a click at a point of the window is for: the innermost one, a subtask before the row of its parent.
+    /// None when the click lands on text or on a file, which take clicks of their own, or outside the row.
+    static func area(at point: NSPoint, in window: NSWindow) -> RowClickView? {
+        guard let hit = (window.contentView?.superview ?? window.contentView)?.hitTest(point),
+              let area = areas.allObjects
+                .filter({ $0.window === window && !$0.isHiddenOrHasHiddenAncestor && $0.convert($0.bounds, to: nil).contains(point) })
+                .min(by: { $0.bounds.height < $1.bounds.height })
+        else { return nil }
+        var row: NSView? = area
+        while let current = row, !(current is NSTableRowView) { row = current.superview }
+        guard let row, hit.isDescendant(of: row) else { return nil }
+        var view: NSView? = hit
+        while let current = view, current !== row {
+            if current is NSText || current is FilePointerView { return nil }
+            view = current.superview
+        }
+        return area
+    }
+
+    /// Presses are looked at before the list gets them, and passed on. The release of the button never comes here:
+    /// the list follows the mouse in a loop of its own until then (seen in a probe, #300). So the click is taken once
+    /// that loop is over and the default mode of the run loop runs again: with the button up near the place it went
+    /// down, it was a click; with the button still down or the pointer gone, a drag began and the selection stays.
+    private static func watch() {
+        guard monitor == nil else { return }
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { event in
+            // ⌃click opens the menu of the row.
+            guard !event.modifierFlags.contains(.control), let window = event.window,
+                  let area = area(at: event.locationInWindow, in: window)
+            else { return event }
+            let id = area.id
+            let flags = event.modifierFlags
+            let count = event.clickCount
+            let down = NSEvent.mouseLocation
+            RunLoop.main.perform(inModes: [.default]) {
+                let up = NSEvent.mouseLocation
+                guard NSEvent.pressedMouseButtons & 1 == 0, hypot(up.x - down.x, up.y - down.y) < 4 else { return }
+                MainActor.assumeIsolated {
+                    AppModel.shared.click(id, command: flags.contains(.command), shift: flags.contains(.shift))
+                    if count == 2 { area.double() }
+                }
+            }
+            return event
         }
     }
 }
