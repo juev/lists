@@ -10,6 +10,14 @@ final class TaskRowView: NSTableRowView {
 
     override var interiorBackgroundStyle: NSView.BackgroundStyle { .normal }
 
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        // The outline of an open card reaches past the edges of the row.
+        clipsToBounds = false
+    }
+
+    required init?(coder: NSCoder) { fatalError("not used") }
+
     override func drawSelection(in dirtyRect: NSRect) {
         guard !isCard else { return }
         // The strip covers the content of the row and leaves the space the rows keep between them.

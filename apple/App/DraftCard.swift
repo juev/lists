@@ -97,6 +97,8 @@ final class DraftCard: NSView, NSTextViewDelegate, NSTextFieldDelegate {
         self.footer = footer
         self.escSaves = escSaves
         super.init(frame: .zero)
+        // The outline reaches past the edges of the row.
+        clipsToBounds = false
         outline.isHidden = footer
         addSubview(outline)
         mark.contentTintColor = .tertiaryLabelColor
@@ -107,7 +109,8 @@ final class DraftCard: NSView, NSTextViewDelegate, NSTextFieldDelegate {
         title.isRichText = false
         title.allowsUndo = true
         title.textContainerInset = .zero
-        title.textContainer?.lineFragmentPadding = 0
+        // The text starts two points in, as in a label: the title of a row and its card stand at one place.
+        title.textContainer?.lineFragmentPadding = 2
         title.textContainer?.widthTracksTextView = true
         title.isVerticallyResizable = false
         title.isHorizontallyResizable = false
@@ -125,7 +128,7 @@ final class DraftCard: NSView, NSTextViewDelegate, NSTextFieldDelegate {
         notes.allowsUndo = true
         notes.drawsBackground = false
         notes.textContainerInset = .zero
-        notes.textContainer?.lineFragmentPadding = 0
+        notes.textContainer?.lineFragmentPadding = 2
         notes.textContainer?.widthTracksTextView = true
         notes.isVerticallyResizable = false
         notes.isHorizontallyResizable = false
@@ -723,7 +726,8 @@ final class DraftCard: NSView, NSTextViewDelegate, NSTextFieldDelegate {
 
     private var insets: NSEdgeInsets {
         footer ? NSEdgeInsets(top: 22, left: 18, bottom: 12, right: 18)
-            : NSEdgeInsets(top: Self.margin + 14, left: Self.margin + 16, bottom: Self.margin + 14, right: Self.margin + 16)
+            // In the list the mark and the title stand where those of a row do; the outline reaches past the row (TaskCard.outset).
+            : NSEdgeInsets(top: Self.margin + 14, left: 6, bottom: Self.margin + 14, right: 6)
     }
 
     private struct Frames {
@@ -750,7 +754,8 @@ final class DraftCard: NSView, NSTextViewDelegate, NSTextFieldDelegate {
         // The title row: the mark, the title, what the parser recognised.
         let markSize = mark.image?.size ?? .zero
         f.mark = NSRect(x: insets.left, y: y + (line - markSize.height) / 2, width: markSize.width, height: markSize.height)
-        let titleX = f.mark.maxX + 8
+        // In the list the title keeps the place a row gives it after the bar of the priority.
+        let titleX = f.mark.maxX + 8 + (footer ? 0 : 3 + 8)
         let parsedWidth = parsed.stops.isEmpty ? 0 : min(parsed.stops.reduce(0) { $0 + $1.intrinsicContentSize.width + 6 }, (right - titleX) / 2)
         let titleWidth = max(right - titleX - (parsedWidth > 0 ? parsedWidth + 8 : 0), 1)
         let titleHeight = textHeight(title, width: titleWidth)
@@ -758,7 +763,7 @@ final class DraftCard: NSView, NSTextViewDelegate, NSTextFieldDelegate {
         f.parsed = NSRect(x: right - parsedWidth, y: y, width: parsedWidth, height: parsed.height(width: parsedWidth))
         y += titleHeight + 10
         // Under the title, past the mark: the note, the fields, the subtasks, the files.
-        let left = insets.left + 26
+        let left = footer ? insets.left + 26 : titleX
         let inner = max(right - left, 1)
         if pasteShown {
             // The button that takes the text away stands inside the block, at its top right.
@@ -799,7 +804,7 @@ final class DraftCard: NSView, NSTextViewDelegate, NSTextFieldDelegate {
             f.strip = NSRect(x: 0, y: y, width: width, height: stripHeight)
             y += stripHeight
         } else {
-            f.outline = NSRect(x: Self.margin, y: Self.margin, width: width - 2 * Self.margin, height: y - 2 * Self.margin)
+            f.outline = NSRect(x: -TaskCard.outset, y: Self.margin, width: width + 2 * TaskCard.outset, height: y - 2 * Self.margin)
         }
         f.height = ceil(y)
         return f

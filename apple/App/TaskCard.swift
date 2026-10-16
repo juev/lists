@@ -30,8 +30,8 @@ final class TaskCard: NSView, NSTextViewDelegate {
     /// Space around the outline, and inside it around the content (the list before it had the same).
     private static let margin: CGFloat = 8
     private static let padding = NSEdgeInsets(top: 10, left: 10, bottom: 14, right: 10)
-    /// The note, the fields and the files start under the title, past the mark and the bar.
-    private static let indent: CGFloat = 34
+    /// How far the outline reaches past the left and the right edge of the row it opened from.
+    static let outset: CGFloat = 8
 
     private(set) var task: TaskItem
     /// The height changed with the text, the fields or the files: the table learns it.
@@ -61,6 +61,8 @@ final class TaskCard: NSView, NSTextViewDelegate {
         self.task = task
         self.lines = lines
         super.init(frame: .zero)
+        // The outline reaches past the edges of the row.
+        clipsToBounds = false
         identifier = Self.identifier
         bar.radius = 1.5
         for view in [outline, mark, bar, folder] as [NSView] { addSubview(view) }
@@ -70,7 +72,8 @@ final class TaskCard: NSView, NSTextViewDelegate {
         title.isRichText = false
         title.allowsUndo = true
         title.textContainerInset = .zero
-        title.textContainer?.lineFragmentPadding = 0
+        // The text starts two points in, as in a label: the title of a row and its card stand at one place.
+        title.textContainer?.lineFragmentPadding = 2
         title.textContainer?.widthTracksTextView = true
         title.isVerticallyResizable = false
         title.isHorizontallyResizable = false
@@ -85,7 +88,7 @@ final class TaskCard: NSView, NSTextViewDelegate {
         notes.allowsUndo = true
         notes.drawsBackground = false
         notes.textContainerInset = .zero
-        notes.textContainer?.lineFragmentPadding = 0
+        notes.textContainer?.lineFragmentPadding = 2
         notes.textContainer?.widthTracksTextView = true
         notes.isVerticallyResizable = false
         notes.isHorizontallyResizable = false
@@ -620,10 +623,9 @@ final class TaskCard: NSView, NSTextViewDelegate {
         let body = AppFont.native(.body)
         let line = TaskTableMetrics.lineHeight(body)
         let shift = CGFloat(depth) * TaskTableMetrics.depthIndent
-        let content = shift + Self.margin + Self.padding.left
-        let contentWidth = max(width - shift - 2 * (Self.margin + Self.padding.left), 1)
-        // The row of the task inside the card: the mark at the first line of the title (R73).
-        var x = content + 6
+        // The mark, the bar and the title stay where the row of the task had them, as in Things: the card grows around
+        // them, its outline reaching past the edges of the row.
+        var x = shift + 6
         let headerTop = Self.margin + Self.padding.top + 6
         let markSize = mark.fittingSize
         frames.mark = NSRect(x: x, y: headerTop + (line - markSize.height) / 2, width: markSize.width, height: markSize.height)
@@ -635,12 +637,12 @@ final class TaskCard: NSView, NSTextViewDelegate {
             frames.folder = NSRect(x: x, y: headerTop + (line - size.height) / 2, width: size.width, height: size.height)
             x += size.width + 8
         }
-        let titleWidth = max(content + contentWidth - 6 - x, 1)
+        let titleWidth = max(width - 6 - x, 1)
         let titleHeight = Self.textHeight(title, width: titleWidth, font: body)
         frames.title = NSRect(x: x, y: headerTop, width: titleWidth, height: titleHeight)
-        // Under the title: the note, the fields and the files, ten points apart.
-        let left = content + Self.indent
-        let innerWidth = max(content + contentWidth - left, 1)
+        // Under the title, from its left edge: the note, the fields and the files, ten points apart.
+        let left = x
+        let innerWidth = max(width - 6 - left, 1)
         var y = headerTop + titleHeight + 6 + 6
         let notesHeight = Self.textHeight(notes, width: innerWidth, font: body)
         frames.notes = NSRect(x: left, y: y, width: innerWidth, height: notesHeight)
@@ -659,7 +661,7 @@ final class TaskCard: NSView, NSTextViewDelegate {
             y += subtasksView.height
         }
         let bottom = y + Self.padding.bottom
-        frames.outline = NSRect(x: shift + Self.margin, y: Self.margin, width: width - shift - 2 * Self.margin, height: bottom - Self.margin)
+        frames.outline = NSRect(x: shift - Self.outset, y: Self.margin, width: width - shift + 2 * Self.outset, height: bottom - Self.margin)
         frames.height = bottom + Self.margin
         return frames
     }
