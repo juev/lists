@@ -1750,6 +1750,32 @@ impl Store {
         })
     }
 
+    /// Makes a task a task of the project, at the project's end (R129). A task that is already
+    /// there stays where it is. R32: a project, a task with subtasks and a subtask are refused.
+    pub fn move_to_project(&self, id: String, project_id: String) -> Result<()> {
+        self.write(|w| {
+            heal_tree(w)?;
+            let task = get_task(w.tx, &id)?;
+            let project = get_task(w.tx, &project_id)?;
+            if !subtasks::is_project(w.tx, &project_id)? {
+                return Err(AppError::invalid("a task goes only into a project"));
+            }
+            if task.parent_id.as_deref() == Some(project_id.as_str()) {
+                return Ok(());
+            }
+            if subtasks::is_subtask(w.tx, &id)? {
+                return Err(AppError::invalid("a subtask stays with its task"));
+            }
+            if task.is_project || !descendants(w.tx, &id)?.is_empty() {
+                return Err(AppError::invalid("a task with tasks under it stays at the top level"));
+            }
+            let pos = append_pos_in_parent(w.tx, &project_id)?;
+            w.task(&id, "parent", json!(project_id))?;
+            w.task(&id, "list", json!(project.list_id))?;
+            w.task(&id, "pos", json!(pos))
+        })
+    }
+
     /// Reorders, and moves a task into a project or out of one. With a parent the
     /// task is placed among its children; without one it becomes a top-level
     /// task of `list_id` (its current list when omitted). It is placed right

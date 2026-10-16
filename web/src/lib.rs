@@ -370,6 +370,12 @@ impl App {
                 msg: format!("{what} is missing"),
             })
         };
+        // A subtask stays with its task (R10); the tasks of a project are full tasks (R30).
+        let subtask = |task: &TaskItem| {
+            task.parent_id
+                .as_ref()
+                .is_some_and(|parent| s.task(parent.clone()).is_ok_and(|p| !p.is_project))
+        };
         let (mut changed, mut backs) = (0, Vec::new());
         for id in ids {
             // Read anew: a task that is gone by now is passed over.
@@ -430,10 +436,24 @@ impl App {
                     }
                     "move" => {
                         let list = need("the list")?;
-                        if task.parent_id.is_none() && task.list_id == list {
+                        if subtask(&task) || (task.parent_id.is_none() && task.list_id == list) {
                             continue;
                         }
                         s.move_to_list(id.clone(), list)?;
+                        Some(json!({ "op": "place", "id": id, "list": task.list_id, "parent": task.parent_id }))
+                    }
+                    // R129: the skips of a drop onto a project (R123).
+                    "project" => {
+                        let project = need("the project")?;
+                        if subtask(&task)
+                            || task.is_project
+                            || task.subtasks_total > 0
+                            || task.id == project
+                            || task.parent_id.as_deref() == Some(project.as_str())
+                        {
+                            continue;
+                        }
+                        s.move_to_project(id.clone(), project)?;
                         Some(json!({ "op": "place", "id": id, "list": task.list_id, "parent": task.parent_id }))
                     }
                     "tag" => {
@@ -516,6 +536,7 @@ impl App {
                     json!({ "removed": s.clear_completed(before)? })
                 }
                 "moveToList" => s.move_to_list(id()?, text_arg(a, "list")?).map(|_| done)?,
+                "moveToProject" => s.move_to_project(id()?, text_arg(a, "project")?).map(|_| done)?,
                 // Back to a list and a project a batch took the task from; it comes first there.
                 "place" => s
                     .move_task(id()?, Some(text_arg(a, "list")?), optional(a, "parent"), None)
