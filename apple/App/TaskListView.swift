@@ -38,7 +38,8 @@ struct TaskListView: View {
                     selected: Set(model.selectedIds),
                     lead: model.selection,
                     look: "\(model.rowSpacing) \(model.textScale) \(model.fontDesign)",
-                    focusRequests: model.listFocusRequests)
+                    focusRequests: model.listFocusRequests,
+                    titleFocus: model.titleFocus)
             } else {
                 ScrollViewReader { proxy in
                     List {

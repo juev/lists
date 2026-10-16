@@ -75,7 +75,7 @@ struct NotesTextView: NSViewRepresentable {
 
     /// Takes text only: a dropped file belongs to the card around the notes,
     /// which attaches it, and not in the text as a path.
-    private final class PlainTextView: MarkdownTextView {
+    final class PlainTextView: MarkdownTextView {
         override var acceptableDragTypes: [NSPasteboard.PasteboardType] {
             super.acceptableDragTypes.filter { $0 != .fileURL && $0.rawValue != "NSFilenamesPboardType" }
         }

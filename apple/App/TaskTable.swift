@@ -26,6 +26,12 @@ enum TaskTableRow: Equatable {
         return nil
     }
 
+    /// Whether the row is the open card of its task.
+    var isCard: Bool {
+        if case .task(_, _, _, true) = self { return true }
+        return false
+    }
+
     var task: TaskItem? {
         switch self {
         case .task(let task, _, _, _), .found(let task, _): task
@@ -66,6 +72,8 @@ struct TaskTable: NSViewRepresentable {
     /// What sets the fonts and the heights of the rows: the spacing (R122), the size and the design of the text (R35).
     let look: String
     let focusRequests: Int
+    /// The task whose card takes the keyboard into its title once it is on screen.
+    let titleFocus: String?
 
     func makeCoordinator() -> Coordinator { Coordinator(model: model) }
 
@@ -115,16 +123,40 @@ struct TaskTable: NSViewRepresentable {
         func update(_ new: TaskTable) {
             guard let table else { return }
             let lookChanged = new.look != look
+            let wasOpen = Set(rows.filter(\.isCard).compactMap(\.taskId))
             if lookChanged || new.rows.map(\.key) != rows.map(\.key) {
                 rows = new.rows
                 look = new.look
+                pruneCards()
                 table.reloadData()
             } else if new.rows != rows {
-                // The same rows with new content: each changed one draws itself again and the table learns its height.
-                let changed = IndexSet(new.rows.indices.filter { new.rows[$0] != rows[$0] })
+                // The same rows with new content. A row that opens or closes gets the other view and its height changes
+                // in an animation (R38); the others take the new content in place, so an open card keeps what is typed.
+                let changed = new.rows.indices.filter { new.rows[$0] != rows[$0] }
+                let reshaped = IndexSet(changed.filter { new.rows[$0].isCard != rows[$0].isCard })
                 rows = new.rows
-                table.reloadData(forRowIndexes: changed, columnIndexes: [0])
-                table.noteHeightOfRows(withIndexesChanged: changed)
+                pruneCards()
+                for index in changed where !reshaped.contains(index) { refresh(index) }
+                if !reshaped.isEmpty { table.reloadData(forRowIndexes: reshaped, columnIndexes: [0]) }
+                NSAnimationContext.runAnimationGroup { context in
+                    context.duration = reshaped.isEmpty ? 0 : 0.2
+                    table.noteHeightOfRows(withIndexesChanged: IndexSet(changed))
+                }
+            }
+            // A card just opened is brought into sight once it has its height (R38), and takes the keyboard into its
+            // title when it was opened for typing.
+            if let opened = rows.firstIndex(where: { $0.isCard && !wasOpen.contains($0.taskId ?? "") }) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak table] in
+                    guard let table, opened < table.numberOfRows else { return }
+                    table.scrollRowToVisible(opened)
+                }
+            }
+            if let id = model.titleFocus, let card = cards[id] {
+                DispatchQueue.main.async { [model] in
+                    guard model.titleFocus == id, card.window != nil else { return }
+                    model.titleFocus = nil
+                    card.focusTitle()
+                }
             }
             let leadMoved = new.lead != lead
             selected = new.selected
@@ -143,13 +175,49 @@ struct TaskTable: NSViewRepresentable {
         /// True while a text view, the field editor of a text field, a chip of a card or the row of a file in it has the keyboard.
         private var typing: Bool { Keyboard.text != nil || Keyboard.inCard }
 
+        /// The open cards, kept while they are open: the table may ask for the view of a row again at any time.
+        private var cards: [String: TaskCard] = [:]
+
+        private func card(_ task: TaskItem) -> TaskCard {
+            if let card = cards[task.id] {
+                card.configure(task)
+                return card
+            }
+            let card = TaskCard(task: task)
+            card.onHeightChange = { [weak self, weak card] in
+                guard let self, let card, let table = self.table, let row = self.rows.firstIndex(where: { $0.isCard && $0.taskId == card.task.id }) else { return }
+                table.noteHeightOfRows(withIndexesChanged: [row])
+            }
+            cards[task.id] = card
+            return card
+        }
+
+        private func pruneCards() {
+            let open = Set(rows.filter(\.isCard).compactMap(\.taskId))
+            cards = cards.filter { open.contains($0.key) }
+        }
+
+        /// The row takes its new content in the view it has.
+        private func refresh(_ index: Int) {
+            guard let table, let view = table.view(atColumn: 0, row: index, makeIfNecessary: false) else { return }
+            switch rows[index] {
+            case .events(let events): (view as? EventsCell)?.configure(events)
+            case .heading(_, let title): (view as? HeadingCell)?.configure(title)
+            case .task(let task, let origin, let dayInHeading, let open):
+                if open { (view as? TaskCard)?.configure(task) } else {
+                    (view as? TaskRowCell)?.configure(task, origin: origin, dayInHeading: dayInHeading, model: model)
+                }
+            case .found(let task, _): (view as? FoundRowCell)?.configure(task, model: model)
+            }
+        }
+
         /// The selection of the model drawn by the table, which does not choose rows by itself.
         private func showSelection() {
             guard let table else { return }
             let indexes = IndexSet(rows.indices.filter { rows[$0].taskId.map(selected.contains) == true })
             if table.selectedRowIndexes != indexes { table.selectRowIndexes(indexes, byExtendingSelection: false) }
             table.enumerateAvailableRowViews { view, row in
-                (view as? TaskRowView)?.isCard = self.rows.indices.contains(row) && { if case .task(_, _, _, true) = self.rows[row] { true } else { false } }()
+                (view as? TaskRowView)?.isCard = self.row(row)?.isCard == true
             }
         }
 
@@ -169,7 +237,9 @@ struct TaskTable: NSViewRepresentable {
                 let cell = tableView.makeView(withIdentifier: HeadingCell.identifier, owner: nil) as? HeadingCell ?? HeadingCell()
                 cell.configure(title)
                 return cell
-            case .task(let task, let origin, let dayInHeading, _):
+            case .task(let task, _, _, true):
+                return card(task)
+            case .task(let task, let origin, let dayInHeading, false):
                 let cell = tableView.makeView(withIdentifier: TaskRowCell.identifier, owner: nil) as? TaskRowCell ?? TaskRowCell()
                 cell.configure(task, origin: origin, dayInHeading: dayInHeading, model: model)
                 return cell
@@ -182,7 +252,7 @@ struct TaskTable: NSViewRepresentable {
 
         func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
             let view = TaskRowView()
-            if case .task(_, _, _, true) = rows[row] { view.isCard = true }
+            view.isCard = rows[row].isCard
             return view
         }
 
@@ -190,9 +260,16 @@ struct TaskTable: NSViewRepresentable {
             switch rows[row] {
             case .events(let events): TaskTableMetrics.events(events.count)
             case .heading: TaskTableMetrics.heading()
-            case .task(_, let origin, _, _): TaskTableMetrics.taskRow(origin: origin != nil, spacing: model.rowSpacing)
+            case .task(let task, _, _, true): card(task).height(width: tableView.tableColumns.first?.width ?? tableView.bounds.width)
+            case .task(_, let origin, _, false): TaskTableMetrics.taskRow(origin: origin != nil, spacing: model.rowSpacing)
             case .found: TaskTableMetrics.foundRow()
             }
+        }
+
+        /// A card wraps its text at the width of the table.
+        func tableViewColumnDidResize(_ notification: Notification) {
+            let open = IndexSet(rows.indices.filter { rows[$0].isCard })
+            if !open.isEmpty { table?.noteHeightOfRows(withIndexesChanged: open) }
         }
 
         /// The table chooses no rows by itself: a click and the keys go to the model, which hands the selection back.
@@ -212,6 +289,27 @@ final class TaskTableView: NSTableView {
 
     override var acceptsFirstResponder: Bool { true }
 
+    private var keyboardWatch: NSKeyValueObservation?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        keyboardWatch = window?.observe(\.firstResponder, options: [.new]) { [weak self] window, _ in
+            MainActor.assumeIsolated { self?.keyboardMoved(to: window.firstResponder) }
+        }
+    }
+
+    /// R44: the keyboard that goes elsewhere in the window, to the sidebar or the search field, closes the open card,
+    /// as a click there did. A card that takes the keyboard into one of its fields keeps it inside the table.
+    private func keyboardMoved(to responder: NSResponder?) {
+        guard !model.expanded.isEmpty, let view = responder as? NSView else { return }
+        // The field editor of a text field stands for the field.
+        let owner = ((view as? NSText)?.delegate as? NSView) ?? view
+        guard !owner.isDescendant(of: self) else { return }
+        DispatchQueue.main.async { [model] in
+            for open in model.expanded { model.closeCardByClick(open, keyboardToList: false) }
+        }
+    }
+
     // MARK: Clicks (R117)
 
     override func mouseDown(with event: NSEvent) {
@@ -220,9 +318,14 @@ final class TaskTableView: NSTableView {
             if let menu = menu(for: event) { NSMenu.popUpContextMenu(menu, with: event, for: self) }
             return
         }
-        let id = coordinator?.row(row(at: convert(event.locationInWindow, from: nil)))?.taskId
+        let index = row(at: convert(event.locationInWindow, from: nil))
+        let id = coordinator?.row(index)?.taskId
         let down = NSEvent.mouseLocation
         window?.makeFirstResponder(self)
+        // R44: a click on the empty space of the list closes the open card; one on another row selects it, which closes the card.
+        if index < 0 {
+            for open in model.expanded { model.closeCardByClick(open, keyboardToList: true) }
+        }
         // The table follows the mouse until the button goes up; a drag starts from here (R123).
         super.mouseDown(with: event)
         guard let id else { return }
