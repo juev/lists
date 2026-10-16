@@ -76,6 +76,8 @@ struct TaskTable: NSViewRepresentable {
     let titleFocus: String?
     /// The view on screen.
     let scope: Scope
+    /// Moves when the content of files has arrived: an open card reads its files again (R76).
+    let attachmentsArrived: Int
 
     func makeCoordinator() -> Coordinator { Coordinator(model: model) }
 
@@ -178,9 +180,17 @@ struct TaskTable: NSViewRepresentable {
                 scope = new.scope
                 takeKeyboard()
             }
+            if new.attachmentsArrived != attachmentsArrived {
+                attachmentsArrived = new.attachmentsArrived
+                for card in cards.values {
+                    card.reloadFiles()
+                    card.onHeightChange()
+                }
+            }
         }
 
         private var scope: Scope?
+        private var attachmentsArrived = 0
 
         /// The keyboard comes to the table once the click in the sidebar is over: the sidebar takes it for itself while
         /// it follows the mouse. The card of a new task keeps it (R37).
@@ -334,7 +344,8 @@ final class TaskTableView: NSTableView {
     /// R44: the keyboard that goes elsewhere in the window, to the sidebar or the search field, closes the open card,
     /// as a click there did. A card that takes the keyboard into one of its fields keeps it inside the table.
     private func keyboardMoved(to responder: NSResponder?) {
-        guard !model.expanded.isEmpty, let view = responder as? NSView else { return }
+        // A popover of the card has a window of its own: what takes the keyboard there stays in the card (R62).
+        guard !model.expanded.isEmpty, let view = responder as? NSView, view.window === window else { return }
         // The field editor of a text field stands for the field.
         let owner = ((view as? NSText)?.delegate as? NSView) ?? view
         guard !owner.isDescendant(of: self) else { return }

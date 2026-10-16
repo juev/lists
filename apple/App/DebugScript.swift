@@ -189,7 +189,16 @@ enum DebugScript {
                     }
                 case "code":
                     // A press on the keyboard comes with the window a popover hangs on, not with the popover.
-                    if let code = UInt16(argument) { post(code: code, to: popoverWindow.map { $0.parent ?? $0 } ?? dateEditor) }
+                    if TaskTable.enabled, let code = UInt16(argument) {
+                        // The AppKit date popover (#308) takes its keys before the calendar does, as key equivalents of its window.
+                        let window = popoverWindow ?? dateEditor
+                        let event = NSEvent.keyEvent(
+                            with: .keyDown, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                            windowNumber: window?.windowNumber ?? 0, context: nil, characters: "", charactersIgnoringModifiers: "",
+                            isARepeat: false, keyCode: code)
+                        let taken = event.map { window?.performKeyEquivalent(with: $0) ?? false } ?? false
+                        print("debug: code \(code) \(window == nil ? "no date editor" : taken ? "taken" : "not taken")")
+                    } else if let code = UInt16(argument) { post(code: code, to: popoverWindow.map { $0.parent ?? $0 } ?? dateEditor) }
                 case "dateeditor":
                     if step.contains(":") {
                         dateEditor = editorWindow(value: argument.isEmpty ? nil : argument)
@@ -555,6 +564,8 @@ enum DebugScript {
                             MainActor.assumeIsolated {
                                 let popover = note.object as? NSPopover
                                 popover?.animates = false
+                                // A transient popover of an app that is not active closes as soon as it is shown.
+                                popover?.behavior = .applicationDefined
                                 popover?.contentViewController?.view.window.map(hide)
                             }
                         }
@@ -961,10 +972,16 @@ enum DebugScript {
     private static var dateEditor: NSWindow?
 
     private static func editorWindow(value: String?) -> NSWindow {
-        let editor = DateEditor(title: "debug", value: value) { print("debug: date applied \($0 ?? "none")") }
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300), styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
-        window.contentView = NSHostingView(rootView: editor)
+        if TaskTable.enabled {
+            let editor = DatePopoverView(title: "debug", value: value) { print("debug: date applied \($0 ?? "none")") }
+            window.contentView = editor
+            window.makeFirstResponder(editor.calendarPicker)
+        } else {
+            let editor = DateEditor(title: "debug", value: value) { print("debug: date applied \($0 ?? "none")") }
+            window.contentView = NSHostingView(rootView: editor)
+        }
         window.contentView?.layoutSubtreeIfNeeded()
         return window
     }
