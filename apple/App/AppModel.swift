@@ -602,6 +602,15 @@ final class AppModel {
 
     func listName(_ list: TaskList) -> String { list.id == "inbox" ? L("Inbox") : list.name }
 
+    /// Whether the heading of the group of the row already names the day of the due date of its task (R72).
+    func dayInHeading(_ task: TaskItem) -> Bool {
+        switch effectiveScope {
+        case .today: return task.effectiveDue.map { Moment.day($0) == Moment.today() } ?? false
+        case .upcoming: return true
+        default: return false
+        }
+    }
+
     var scopeTitle: String {
         switch effectiveScope {
         case .inbox: return L("Inbox")

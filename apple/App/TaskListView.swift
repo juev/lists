@@ -31,6 +31,14 @@ struct TaskListView: View {
                         .padding(.top, 10)
                 }
                 emptyState
+            } else if TaskTable.enabled {
+                TaskTable(
+                    model: model,
+                    rows: TaskTableRow.rows(model),
+                    selected: Set(model.selectedIds),
+                    lead: model.selection,
+                    look: "\(model.rowSpacing) \(model.textScale) \(model.fontDesign)",
+                    focusRequests: model.listFocusRequests)
             } else {
                 ScrollViewReader { proxy in
                     List {
@@ -149,7 +157,8 @@ struct TaskListView: View {
         } message: { _ in
             Text(L("This cannot be undone."))
         }
-        .background(KeyCatcher(handle: selectAll))
+        // The table answers ⌘A of the Edit menu itself (#308).
+        .background { if !TaskTable.enabled { KeyCatcher(handle: selectAll) } }
     }
 
     /// R117: ⌘A selects every row of the view. The Edit menu takes the press before the list does and hands selectAll:
@@ -422,14 +431,7 @@ struct TaskRow: View {
         .foregroundStyle(.tertiary)
     }
 
-    /// Whether the heading of the group already names the day of the due date.
-    private var dayInHeading: Bool {
-        switch model.effectiveScope {
-        case .today: return task.effectiveDue.map { Moment.day($0) == Moment.today() } ?? false
-        case .upcoming: return true
-        default: return false
-        }
-    }
+    private var dayInHeading: Bool { model.dayInHeading(task) }
 
     /// In views that mix lists, say where the task lives.
     private var showsOrigin: Bool { depth == 0 && model.mixesLists }
@@ -712,7 +714,7 @@ struct SubtaskMenuArea: NSViewRepresentable {
 
 final class SubtaskMenuView: NSView {
     var items: () -> [RowMenuItem] = { [] }
-    private var actions: [() -> Void] = []
+    private let rowMenu = RowMenu()
 
     private static let areas = NSHashTable<SubtaskMenuView>.weakObjects()
     private static var monitor: Any?
@@ -751,42 +753,7 @@ final class SubtaskMenuView: NSView {
     }
 
     /// The menu of the subtask, built from the same items as the menu of a row of the list.
-    func subtaskMenu() -> NSMenu {
-        actions = []
-        return menu(of: items())
-    }
-
-    private func menu(of items: [RowMenuItem]) -> NSMenu {
-        let menu = NSMenu()
-        menu.autoenablesItems = false
-        for item in items {
-            if item.isDivider {
-                menu.addItem(.separator())
-                continue
-            }
-            if item.isHeader {
-                menu.addItem(.sectionHeader(title: item.title))
-                continue
-            }
-            let entry = NSMenuItem(title: item.title, action: nil, keyEquivalent: "")
-            if let children = item.children {
-                entry.submenu = self.menu(of: children)
-            } else {
-                entry.action = #selector(run(_:))
-                entry.target = self
-                entry.tag = actions.count
-                actions.append(item.action)
-                entry.state = item.on == true ? .on : .off
-                entry.isEnabled = !item.disabled
-            }
-            menu.addItem(entry)
-        }
-        return menu
-    }
-
-    @objc private func run(_ item: NSMenuItem) {
-        if actions.indices.contains(item.tag) { actions[item.tag]() }
-    }
+    func subtaskMenu() -> NSMenu { rowMenu.menu(items()) }
 
     /// Right clicks and ⌃clicks are looked at before the list gets them.
     private static func watch() {
