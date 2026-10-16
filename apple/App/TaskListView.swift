@@ -473,9 +473,11 @@ struct TaskRow: View {
             RowMenuItem(title: L("Priority"), children: Priority.all.map { priority in
                 RowMenuItem(title: priority.title) { model.batch(.priority(priority)) }
             }),
-            RowMenuItem(title: L("Move to list"), children: model.lists.filter { !$0.archived }.map { list in
+            RowMenuItem(title: L("Move to list"), children: moveItems(model, list: { list in
                 RowMenuItem(title: model.listName(list)) { model.batch(.move(listId: list.id)) }
-            }),
+            }, project: { project in
+                RowMenuItem(title: project.title) { model.batch(.project(id: project.id)) }
+            })),
         ]
         items.append(RowMenuItem(title: L("Tag"), children: model.tags.map { tag in
             RowMenuItem(title: "#" + tag.name) { model.batch(.tag(tag.name)) }
@@ -486,11 +488,22 @@ struct TaskRow: View {
         return items
     }
 
+    /// R129: the lists a task is moved to and, under them as a group of their own, the projects.
+    @MainActor
+    static func moveItems(_ model: AppModel, list: (TaskList) -> RowMenuItem, project: (TaskItem) -> RowMenuItem) -> [RowMenuItem] {
+        let lists = model.lists.filter { !$0.archived }.map(list)
+        guard !model.projects.isEmpty else { return lists }
+        return lists + [.divider, RowMenuItem(title: L("Projects"), isHeader: true)] + model.projects.map(project)
+    }
+
     /// The menu of the task. One description for both ways it is drawn: by SwiftUI for a row of
     /// the list and by AppKit for a subtask inside the row of its parent (`SubtaskMenuArea`).
-    private var menuItems: [RowMenuItem] {
-        if let batch = Self.batchItems(for: task, model) { return batch }
-        if inTrash {
+    private var menuItems: [RowMenuItem] { Self.menuItems(for: task, model) }
+
+    @MainActor
+    static func menuItems(for task: TaskItem, _ model: AppModel) -> [RowMenuItem] {
+        if let batch = batchItems(for: task, model) { return batch }
+        if task.deleted {
             return [RowMenuItem(title: L("Restore")) { model.perform { try $0.restoreTask(id: task.id) } }]
         }
         if task.isLog {
@@ -501,7 +514,7 @@ struct TaskRow: View {
             RowMenuItem(title: L("Tomorrow")) { model.setDue(task, shiftDate(date: Moment.today(), days: 1)) },
             RowMenuItem(title: L("In a week")) { model.setDue(task, shiftDate(date: Moment.today(), days: 7)) },
             RowMenuItem.divider,
-            RowMenuItem(title: L("Choose…")) { if !isExpanded { model.toggleExpanded(task.id) } },
+            RowMenuItem(title: L("Choose…")) { if !model.expanded.contains(task.id) { model.toggleExpanded(task.id) } },
         ]
         if task.due != nil { due.append(RowMenuItem(title: L("Clear due date")) { model.setDue(task, nil) }) }
         var items = [
@@ -511,11 +524,17 @@ struct TaskRow: View {
                     model.perform { try $0.setPriority(id: task.id, priority: priority) }
                 }
             }),
-            RowMenuItem(title: L("Move to list"), children: model.lists.filter { !$0.archived }.map { list in
+            RowMenuItem(title: L("Move to list"), children: moveItems(model, list: { list in
                 RowMenuItem(title: model.listName(list), disabled: task.parentId == nil && task.listId == list.id) {
                     model.perform { try $0.moveToList(id: task.id, listId: list.id) }
                 }
-            }),
+            }, project: { project in
+                // R129: what a drop onto a project passes over (R123) is not offered.
+                let refused = task.isProject || task.subtasksTotal > 0 || task.parentId == project.id
+                return RowMenuItem(title: project.title, disabled: refused) {
+                    model.perform { try $0.moveToProject(id: task.id, projectId: project.id) }
+                }
+            })),
             RowMenuItem(title: L("Add subtask")) { model.showSubtasks(task.id) },
         ]
         // R32: a project with tasks is not turned back; its tasks would become subtasks and lose their fields.
@@ -655,6 +674,8 @@ struct RowMenuItem {
     var disabled = false
     var destructive = false
     var isDivider = false
+    /// The title of a group of the items that follow it.
+    var isHeader = false
     /// The items of a submenu.
     var children: [RowMenuItem]?
     var action: () -> Void = {}
@@ -671,6 +692,8 @@ struct RowMenuItems: View {
             let item = items[index]
             if item.isDivider {
                 Divider()
+            } else if item.isHeader {
+                Text(item.title)
             } else if let children = item.children {
                 Menu(item.title) { RowMenuItems(items: children) }
             } else if let on = item.on {
@@ -747,6 +770,10 @@ final class SubtaskMenuView: NSView {
         for item in items {
             if item.isDivider {
                 menu.addItem(.separator())
+                continue
+            }
+            if item.isHeader {
+                menu.addItem(.sectionHeader(title: item.title))
                 continue
             }
             let entry = NSMenuItem(title: item.title, action: nil, keyEquivalent: "")

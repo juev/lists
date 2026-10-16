@@ -23,6 +23,7 @@ import UserNotifications
 /// a hidden app shows no panel), `preview` (prints whether the Quick Look panel is open) and `preview:close` (closes it),
 /// `inbox` (switches to the Inbox view), `open` (expands the selected task), `edit` (opens it with the caret in the title, the way Return does), `select:1` and `select:-1` (move the selection the way the arrow keys do),
 /// `pick:title` (selects a row the way a click does), `drag:title>target` (drops what a drag of that row carries on a row of the sidebar, R123),
+/// `movemenu` (prints the items of "Move to list" in the menu of the selected row, R129),
 /// `addsub:title` (adds a subtask to the selected task the way its field does on Return), `subtasks` (prints the lines of the selected task, or of the task
 /// the selected subtask belongs to: the title and the state of each, which of them is a subtask without a card, the one whose title is being edited,
 /// and the lines a search shows under its rows), `renamesub:old=new` (renames the subtask in its line: starts the edit the way Return on the selected
@@ -34,7 +35,7 @@ import UserNotifications
 /// that field without adding it), `draftsubedit:0=title` (corrects the typed line with that number) and `draftsubdrop:0` (removes it the way its button does); `draft` also prints the typed subtasks and the field,
 /// `due:2026-10-05` and `repeat:2` (give the new-task card a due date and the preset with that index, the way its popovers do),
 /// `due` alone (takes the due date away the way ⌫ in its popover does), `priority:3` (chooses the priority with that index in the card, 0 for none),
-/// `mklist:Name` (creates a list whose defaults for new tasks are the high priority and "due today"), `draftlist:Name` (chooses that list in the card, `draftlist:inbox` the Inbox), `start:2026-10-05` (gives the card a start date); `draft` also prints the due date, the priority, the tags and the list the card shows,
+/// `mklist:Name` (creates a list whose defaults for new tasks are the high priority and "due today"), `draftlist:Name` (chooses that list or project in the card, `draftlist:inbox` the Inbox), `start:2026-10-05` (gives the card a start date); `draft` also prints the due date, the priority, the tags and the list the card shows,
 /// `task` (prints the due date, the priority, the tags and the repeat of the selected task), `done` (completes it), `project` (makes it a project, or a task again, the way its menu does),
 /// `projects` (prints the projects of the sidebar with their "done/total"), `completeproject:Title` (completes that project the way its mark in the sidebar does, R126),
 /// `newproject:Title` (creates a project the way Create in the sheet of a new project does, R127),
@@ -182,7 +183,7 @@ enum DebugScript {
                     print("debug: draft files \(draft?.files.map(\.lastPathComponent) ?? []), start \(draft?.start ?? "none"), due \(draft?.due ?? "none")")
                     if let draft {
                         let model = AppModel.shared
-                        print("debug: draft shows due \(model.shownDue(draft) ?? "none"), priority \(model.shownPriority(draft).title), tags \(draft.tags), list \(model.list(draft.listId).map(model.listName) ?? "none")")
+                        print("debug: draft shows due \(model.shownDue(draft) ?? "none"), priority \(model.shownPriority(draft).title), tags \(draft.tags), list \(model.list(draft.listId).map(model.listName) ?? "none"), project \(draft.parentId.flatMap { id in model.projects.first { $0.id == id }?.title } ?? "none")")
                         print("debug: draft subtasks \(draft.subtasks), field \"\(draft.subtaskText)\", \(draft.subtasksShown ? "shown" : "not shown"), saves \(draft.typedSubtasks)")
                     }
                 case "code":
@@ -262,7 +263,8 @@ enum DebugScript {
                     let model = AppModel.shared
                     print("debug: picked \(model.selectedTasks.map(\.title)), several \(!model.picked.isEmpty), lead \(model.selectedTask?.title ?? "none")")
                 case "batch":
-                    // R117: `batch:complete`, `wont`, `delete`, `restore`, `due=2026-10-20`, `start=…`, `priority=high`, `move=List name`, `tag=name`.
+                    // R117: `batch:complete`, `wont`, `delete`, `restore`, `due=2026-10-20`, `start=…`, `priority=high`, `move=List name`, `tag=name`;
+                    // R129: `project=Project title`.
                     let model = AppModel.shared
                     let parts = argument.split(separator: "=", maxSplits: 1).map(String.init)
                     let value = parts.count > 1 ? parts[1] : ""
@@ -276,6 +278,7 @@ enum DebugScript {
                     case "priority": .priority(value == "high" ? .high : value == "medium" ? .medium : value == "low" ? .low : .none)
                     case "move": (value == "inbox" ? "inbox" : model.lists.first { $0.name == value }?.id).map { .move(listId: $0) }
                     case "tag": .tag(AppModel.cleanTag(value))
+                    case "project": model.projects.first { $0.title == value }.map { .project(id: $0.id) }
                     default: nil
                     }
                     print("debug: batch \(argument) changed \(action.map { model.batch($0) } ?? -1)")
@@ -299,6 +302,13 @@ enum DebugScript {
                     let model = AppModel.shared
                     let items = model.selectedTask.flatMap { TaskRow.batchItems(for: $0, model) }
                     print("debug: batch menu \(items.map { $0.filter { !$0.isDivider }.map { item in item.children.map { "\(item.title) ▸ \($0.count)" } ?? item.title } }.map(String.init(describing:)) ?? "none")")
+                case "movemenu":
+                    // R129: the items of "Move to list" in the menu a right click on the selected row builds, the one of several
+                    // selected rows or of the row alone: a header in brackets, an item that is not available with a minus.
+                    let model = AppModel.shared
+                    let items = model.selectedTask.map { TaskRow.menuItems(for: $0, model) } ?? []
+                    let move = items.first { $0.title == L("Move to list") }?.children ?? []
+                    print("debug: move menu \(move.filter { !$0.isDivider }.map { $0.isHeader ? "[\($0.title)]" : $0.disabled ? "-" + $0.title : $0.title })")
                 case "addsub":
                     let model = AppModel.shared
                     if let id = model.selection {
@@ -368,7 +378,14 @@ enum DebugScript {
                         try store.setListDefaults(id: id, priority: .high, dueToday: true)
                     }
                 case "draftlist":
-                    if let list = AppModel.shared.lists.first(where: { $0.name == argument || $0.id == argument }) { AppModel.shared.draft?.listId = list.id }
+                    if let list = AppModel.shared.lists.first(where: { $0.name == argument || $0.id == argument }) {
+                        AppModel.shared.draft?.listId = list.id
+                        AppModel.shared.draft?.parentId = nil
+                    } else if let project = AppModel.shared.projects.first(where: { $0.title == argument }) {
+                        // R129: a project chosen in the card, the way its choice in the menu of the list does.
+                        AppModel.shared.draft?.listId = project.listId
+                        AppModel.shared.draft?.parentId = project.id
+                    }
                 case "start": AppModel.shared.draft?.start = argument.isEmpty ? nil : argument
                 case "repeat":
                     if let index = Int(argument), Repeat.presets.indices.contains(index) { AppModel.shared.draft?.repeat = Repeat.presets[index].1 }

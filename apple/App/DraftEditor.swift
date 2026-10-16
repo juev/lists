@@ -19,7 +19,7 @@ struct TaskDraft: Equatable {
     var priorityChosen = false
     var tags: [String] = []
     var listId = "inbox"
-    /// Set when the task is typed inside a project: it becomes a subtask of it.
+    /// Set when the task is typed inside a project or the project is chosen in the card (R129): it becomes a task of it.
     var parentId: String?
     /// Attached once the task exists.
     var files: [URL] = []
@@ -263,7 +263,7 @@ struct DraftEditor: View {
     /// The strip at the bottom of the quick-entry panel: where the task goes, and the two ways out.
     private var strip: some View {
         HStack(spacing: 8) {
-            if draft.parentId == nil { listMenu(strong: true) }
+            listMenu(strong: true)
             Spacer(minLength: 8)
             Button(L("Cancel"), action: discard)
                 .buttonStyle(StripButton(fill: Color.secondary.opacity(0.55)))
@@ -357,13 +357,13 @@ struct DraftEditor: View {
             (.start, draft.start != nil), (.due, shownDue != nil), (.repeat, draft.repeat != nil), (.priority, shownPriority != .none),
         ]
         return Sides(
-            left: dated.filter(\.1).map(\.0) + draft.tags.map(CardChip.tag) + (draft.parentId == nil && !footer ? [.list] : []),
+            left: dated.filter(\.1).map(\.0) + draft.tags.map(CardChip.tag) + (footer ? [] : [.list]),
             right: dated.filter { !$0.1 }.map(\.0) + [.newTag] + (draft.subtasksShown ? [] : [.subtask]) + [.file])
     }
 
     /// The chips in the order they are drawn, which is the order Tab walks them in (R62).
     private var stops: [CardChip] {
-        sides.left + sides.right + (draft.parentId == nil && footer ? [.list] : [])
+        sides.left + sides.right + (footer ? [.list] : [])
     }
 
     private var keys: ChipKeys {
@@ -388,9 +388,20 @@ struct DraftEditor: View {
         }
     }
 
+    /// The lists and, under them as a group of their own, the projects (R129).
     private var listChoices: [MenuChoice] {
-        model.lists.filter { !$0.archived }.map { list in
-            MenuChoice(title: model.listName(list), on: draft.listId == list.id) { draft.listId = list.id }
+        let lists = model.lists.filter { !$0.archived }.map { list in
+            MenuChoice(title: model.listName(list), on: draft.parentId == nil && draft.listId == list.id) {
+                draft.listId = list.id
+                draft.parentId = nil
+            }
+        }
+        guard !model.projects.isEmpty else { return lists }
+        return lists + [.header(L("Projects"))] + model.projects.map { project in
+            MenuChoice(title: project.title, on: draft.parentId == project.id) {
+                draft.listId = project.listId
+                draft.parentId = project.id
+            }
         }
     }
 
@@ -485,19 +496,21 @@ struct DraftEditor: View {
         }
     }
 
-    /// The list the task goes to: a chip in the row, or the first thing in the strip of the quick-entry panel.
+    /// The list or the project the task goes to: a chip in the row, or the first thing in the strip of the quick-entry panel.
     private func listMenu(strong: Bool) -> some View {
         let list = model.list(draft.listId)
-        let name = list.map(model.listName) ?? L("Inbox")
+        let project = draft.parentId.flatMap { id in model.projects.first { $0.id == id } }
+        let name = project?.title ?? list.map(model.listName) ?? L("Inbox")
+        let symbol = project == nil ? list?.symbol ?? "tray" : "folder"
         return Menu {
             ChoiceItems(choices: listChoices)
         } label: {
             if strong {
-                Label(name, systemImage: list?.symbol ?? "tray")
+                Label(name, systemImage: symbol)
                     .font(AppFont.style(.callout, weight: .semibold))
                     .foregroundStyle(.secondary)
             } else {
-                Chip(symbol: "list.bullet", text: name)
+                Chip(symbol: project == nil ? "list.bullet" : "folder", text: name)
             }
         }
         .menuStyle(.button)

@@ -6,7 +6,7 @@ enum BatchAction {
     case due(String), start(String)
     case priority(Priority)
     case move(listId: String)
-    /// R123: into a project, at its end.
+    /// R123, R129: into a project, at its end.
     case project(id: String)
     case tag(String)
 
@@ -58,7 +58,7 @@ enum BatchAction {
         case .start(let value): try store.setStart(id: id, start: value)
         case .priority(let value): try store.setPriority(id: id, priority: value)
         case .move(let listId): try store.moveToList(id: id, listId: listId)
-        case .project(let project): try store.moveTask(id: id, listId: nil, parentId: project, after: store.subtasks(parentId: project).last?.id)
+        case .project(let project): try store.moveToProject(id: id, projectId: project)
         case .tag(let name): try store.addTag(id: id, tag: name)
         }
     }
