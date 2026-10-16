@@ -520,19 +520,20 @@ struct TaskRow: View {
         var items = [
             RowMenuItem(title: L("Due"), children: due),
             RowMenuItem(title: L("Priority"), children: Priority.all.map { priority in
+                // Through `batch`, as for several rows (R117): it registers the undo (#299).
                 RowMenuItem(title: priority.title, on: task.priority == priority) {
-                    model.perform { try $0.setPriority(id: task.id, priority: priority) }
+                    model.batch(.priority(priority), ids: [task.id])
                 }
             }),
             RowMenuItem(title: L("Move to list"), children: moveItems(model, list: { list in
                 RowMenuItem(title: model.listName(list), disabled: task.parentId == nil && task.listId == list.id) {
-                    model.perform { try $0.moveToList(id: task.id, listId: list.id) }
+                    model.batch(.move(listId: list.id), ids: [task.id])
                 }
             }, project: { project in
                 // R129: what a drop onto a project passes over (R123) is not offered.
                 let refused = task.isProject || task.subtasksTotal > 0 || task.parentId == project.id
                 return RowMenuItem(title: project.title, disabled: refused) {
-                    model.perform { try $0.moveToProject(id: task.id, projectId: project.id) }
+                    model.batch(.project(id: project.id), ids: [task.id])
                 }
             })),
             RowMenuItem(title: L("Add subtask")) { model.showSubtasks(task.id) },
