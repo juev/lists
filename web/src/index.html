@@ -343,6 +343,14 @@ function subLine(s, plain) {
     plain ? null : $("button", { class: "link danger", "aria-label": t("Delete"), title: t("Delete"), onclick: () => act("delete", { id }, t("Deleted"), () => act("restore", { id })) }, "×"));
 }
 
+// R129: the lists and, under them as a group of their own, the projects a task goes to. The value of a
+// project starts with "project:"; `refused` tells a project the task does not go into.
+function destinations(refused = () => false) {
+  const projects = state.overview.projects || [];
+  return [state.overview.lists.filter(l => !l.archived).map(l => $("option", { value: l.id }, listName(l.id))),
+    projects.length ? $("optgroup", { label: t("Projects") }, projects.map(p => $("option", { value: "project:" + p.id, disabled: refused(p) }, p.title))) : null];
+}
+
 // R118: the actions on the selected tasks, in place of the field of a new task. Only tasks of the trash
 // are restored and nothing else, only records of completed occurrences are deleted and nothing else.
 function selectionBar() {
@@ -358,8 +366,10 @@ function selectionBar() {
   if (!none && chosen.every(x => x.deleted)) return $("div", { id: "bar" }, button("Restore", "restore", "Restored"));
   if (!none && chosen.every(x => x.log)) return $("div", { id: "bar" }, button("Delete", "delete", "Deleted", "danger"));
   const date = (name, action) => $("label", { class: "chip" }, t(name), $("input", { type: "date", "aria-label": t(name), disabled: none, onchange: e => e.target.value && run(action, e.target.value, "Changed") }));
-  const lists = $("select", { "aria-label": t("Move to list"), disabled: none, onchange: e => e.target.value && run("move", e.target.value, "Moved") },
-    $("option", { value: "" }, t("Move to list")), state.overview.lists.filter(l => !l.archived).map(l => $("option", { value: l.id }, listName(l.id))));
+  const lists = $("select", { "aria-label": t("Move to list"), disabled: none, onchange: e => {
+    const v = e.target.value;
+    if (v) v.startsWith("project:") ? run("project", v.slice(8), "Moved") : run("move", v, "Moved");
+  } }, $("option", { value: "" }, t("Move to list")), destinations());
   const prio = $("select", { "aria-label": t("Priority"), disabled: none, onchange: e => e.target.value !== "" && run("priority", Number(e.target.value), "Changed") },
     $("option", { value: "" }, t("Priority")), ["No priority", "Low", "Medium", "High"].map((name, i) => $("option", { value: i }, t(name))));
   const tag = $("button", { class: "link", disabled: none, onclick: () => { const name = prompt(t("Tag")); if (name && name.trim()) run("tag", name, "Changed"); } }, t("Tag"));
@@ -504,8 +514,12 @@ function editor(d) {
     PRESETS.map(([name], i) => $("option", { value: i, selected: pi === i }, t(name))),
     x.repeat && pi < 0 ? $("option", { value: "custom", selected: true }, t("Custom")) : null);
   const tag = $("input", { type: "text", placeholder: "#" + t("Tag").toLowerCase(), style: "width:90px", onkeydown: e => { if (e.key === "Enter" && e.target.value.trim()) act("addTag", { id, value: e.target.value.trim() }); } });
-  const move = $("select", { "aria-label": t("Move to"), onchange: e => e.target.value && act("moveToList", { id, list: e.target.value }) },
-    $("option", { value: "" }, t("Move to") + "…"), state.overview.lists.filter(l => !l.archived).map(l => $("option", { value: l.id }, listName(l.id))));
+  const move = $("select", { "aria-label": t("Move to"), onchange: e => {
+    const v = e.target.value;
+    if (v) v.startsWith("project:") ? act("moveToProject", { id, project: v.slice(8) }) : act("moveToList", { id, list: v });
+  } }, $("option", { value: "" }, t("Move to") + "…"),
+    // What a drop onto a project passes over is not offered (R123).
+    destinations(p => x.project || x.subtasks > 0 || x.parent === p.id || x.id === p.id));
   const file = $("input", { type: "file", multiple: true, style: "display:none", onchange: async e => {
     for (const f of e.target.files) await api(`/api/upload?task=${encodeURIComponent(id)}&name=${encodeURIComponent(f.name)}`, { method: "POST", headers: { "X-Lists": "1" }, body: f });
     load();
