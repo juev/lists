@@ -195,6 +195,8 @@ impl Remote for WebDavRemote {
             405 | 501 => return copy_over(self, from, to),
             // The source is gone, or the folder of the target is missing (S43).
             404 | 409 => {}
+            // SFTPGo answers a MOVE into a missing folder with 403 (#304).
+            403 if self.folder_missing(to) => {}
             code => return Err(fail("MOVE", from, code)),
         }
         if !self.exists(from)? {

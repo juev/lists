@@ -559,3 +559,18 @@ fn s49_a_server_without_move_gets_copies() {
     assert_eq!(moved, before);
     assert_eq!(b.sync_attachments().unwrap().downloaded, 1);
 }
+
+#[test]
+fn s49_a_server_that_answers_403_for_a_missing_folder_gets_the_folders() {
+    let dav = start();
+    legacy(&dav);
+    std::fs::write(dav.root.path().join(".move-403"), "").unwrap();
+    let b = device();
+    connect(&b, &dav, "secret");
+    b.sync_now().unwrap();
+    let mut got = view(&b, Scope::Inbox);
+    got.sort();
+    assert_eq!(got, ["из журнала", "из снимка"]);
+    assert_eq!(tree(&dav.storage().join("v1")), ["vault.json"]);
+    assert_eq!(b.sync_attachments().unwrap().downloaded, 1);
+}

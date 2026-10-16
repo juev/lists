@@ -16,7 +16,8 @@
 //! `sync-collection` and `calendar-multiget` reports. `.no-ctag`, `.no-sync`
 //! and `.no-report` in the served root turn off the tag, the token with its
 //! report, and both reports. `.no-move` makes the server refuse MOVE with
-//! 405, as a server without it would.
+//! 405, as a server without it would. `.move-403` makes it answer a MOVE into
+//! a missing folder with 403 instead of 409, as SFTPGo does (#304).
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -296,7 +297,13 @@ fn handle(mut request: Request, root: &Path) {
                 _ if root.join(".no-move").exists() => 405,
                 None => 400,
                 Some(_) if current.is_none() => 404,
-                Some(target) if !target.parent().is_some_and(Path::is_dir) => 409,
+                Some(target) if !target.parent().is_some_and(Path::is_dir) => {
+                    if root.join(".move-403").exists() {
+                        403
+                    } else {
+                        409
+                    }
+                }
                 Some(target) => {
                     let existed = target.exists();
                     std::fs::rename(&path, &target).unwrap();
