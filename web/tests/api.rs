@@ -1086,3 +1086,70 @@ fn r125_a_task_of_a_project_comes_with_the_dates_it_goes_by() {
     assert_eq!(row["start"], "2030-01-01");
     assert_eq!(row["effectiveStart"], "2030-01-05");
 }
+
+#[test]
+fn r129_tasks_go_into_a_project_one_by_one_and_in_a_batch_and_are_taken_back() {
+    let web = web(None);
+    let add = |text: &str| {
+        call(&web, "", json!({ "op": "quickAdd", "text": text, "scope": "inbox" }))["id"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    let task = |id: &str| get(&web, "", &format!("/api/task?id={id}"))["task"].clone();
+    let home = call(&web, "", json!({ "op": "createList", "name": "Дом" }))["id"].clone();
+    let project = call(
+        &web,
+        "",
+        json!({ "op": "createProject", "title": "Ремонт", "scope": format!("list:{}", home.as_str().unwrap()) }),
+    )["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let (a, b, c) = (add("а"), add("б"), add("в"));
+    call(&web, "", json!({ "op": "addSubtask", "parent": c, "title": "строка" }));
+
+    // One task in, and out again by choosing a list.
+    call(&web, "", json!({ "op": "moveToProject", "id": a, "project": project }));
+    assert_eq!(
+        (task(&a)["parent"].as_str(), &task(&a)["list"]),
+        (Some(project.as_str()), &home)
+    );
+    call(&web, "", json!({ "op": "moveToList", "id": a, "list": home }));
+    assert!(task(&a)["parent"].is_null());
+    assert_eq!(task(&a)["list"], home);
+
+    // A batch passes over the task with a subtask, the project and its subtask line.
+    let line = get(&web, "", &format!("/api/task?id={c}"))["subtasks"][0]["id"]
+        .as_str()
+        .map(str::to_string);
+    assert!(line.is_some());
+    let mut ids = vec![a.clone(), b.clone(), c.clone(), project.clone()];
+    ids.extend(line);
+    let moved = call(
+        &web,
+        "",
+        json!({ "op": "batch", "action": "project", "value": project, "ids": ids }),
+    );
+    assert_eq!(moved["changed"], 2);
+    assert_eq!(task(&b)["parent"].as_str(), Some(project.as_str()));
+    assert!(task(&c)["parent"].is_null());
+    call(&web, "", json!({ "op": "batchBack", "steps": moved["backs"] }));
+    assert!(task(&b)["parent"].is_null());
+    assert_eq!(task(&b)["list"], "inbox");
+    assert_eq!(task(&a)["list"], home, "back to its former list");
+
+    // A list in the same batch takes a task out of the project; a subtask line is passed over.
+    call(&web, "", json!({ "op": "moveToProject", "id": b, "project": project }));
+    let out = call(
+        &web,
+        "",
+        json!({ "op": "batch", "action": "move", "value": home, "ids": ids }),
+    );
+    assert_eq!(
+        out["changed"], 2,
+        "а and the project are in the list already, the line stays"
+    );
+    assert_eq!(task(&c)["list"], home);
+    assert!(task(&b)["parent"].is_null());
+}

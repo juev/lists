@@ -2593,3 +2593,54 @@ fn r125_reminders_fire_on_the_inherited_due_date() {
         "the summary counts the task, not the project"
     );
 }
+
+#[test]
+fn r129_a_task_goes_into_a_project_at_its_end_and_out_of_it_into_a_list() {
+    let d = device();
+    let home = d.create_list("Дом".into()).unwrap();
+    let project = d
+        .create_task(NewTask {
+            title: "Ремонт".into(),
+            list_id: Some(home.id.clone()),
+            ..NewTask::default()
+        })
+        .unwrap();
+    d.set_project(project.id.clone(), true).unwrap();
+    d.quick_add_under("р".into(), project.id.clone()).unwrap();
+    let a = add(&d, "а");
+    d.set_due(a.id.clone(), Some("2026-10-07".into())).unwrap();
+
+    d.move_to_project(a.id.clone(), project.id.clone()).unwrap();
+    assert_eq!(
+        view(&d, Scope::Project { id: project.id.clone() }),
+        ["р", "а"],
+        "at the end"
+    );
+    let moved = d.task(a.id.clone()).unwrap();
+    assert_eq!(
+        (moved.parent_id.as_deref(), moved.list_id.as_str(), moved.due.as_deref()),
+        (Some(project.id.as_str()), home.id.as_str(), Some("2026-10-07")),
+        "a task of the project, in the project's list, with its fields"
+    );
+    // Again into the same project: nothing changes.
+    d.move_to_project(a.id.clone(), project.id.clone()).unwrap();
+    assert_eq!(view(&d, Scope::Project { id: project.id.clone() }), ["р", "а"]);
+
+    // A list out of the same picker takes it out of the project, also the project's own list.
+    d.move_to_list(a.id.clone(), home.id.clone()).unwrap();
+    let out = d.task(a.id.clone()).unwrap();
+    assert_eq!((out.parent_id, out.list_id), (None, home.id.clone()));
+    assert_eq!(view(&d, Scope::Project { id: project.id.clone() }), ["р"]);
+
+    // Refused: a project, a task with subtasks, a subtask, a task that is not a project as the target.
+    let other = add(&d, "Отпуск");
+    d.set_project(other.id.clone(), true).unwrap();
+    assert!(d.move_to_project(other.id.clone(), project.id.clone()).is_err());
+    let holder = add(&d, "с подзадачей");
+    let line = add_sub(&d, &holder, "строка");
+    assert!(d.move_to_project(holder.id.clone(), project.id.clone()).is_err());
+    assert!(d.move_to_project(line.id.clone(), project.id.clone()).is_err());
+    assert!(d.move_to_project(a.id.clone(), holder.id.clone()).is_err());
+    assert_eq!(d.task(holder.id).unwrap().parent_id, None);
+    assert_eq!(d.task(line.id).unwrap().title, "строка");
+}
