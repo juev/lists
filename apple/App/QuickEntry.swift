@@ -213,8 +213,23 @@ final class QuickEntryPanel: NSPanel {
     /// With `showLists` the person asked for Lists from the menu bar window: its windows come back. Otherwise
     /// an app that was hidden before the window opened is hidden again.
     func menuBarWindowClosed(showLists: Bool = false) {
+        let wasOpen = menuBarOpen
         menuBarOpen = false
         returnWindows(hide: !showLists)
+        // What was chosen in the window ends it: the window is closed the way a click on the item closes it.
+        if showLists && wasOpen { DispatchQueue.main.async { Self.menuBarButton?.performClick(nil) } }
+    }
+
+    /// The button of the menu bar item (R24).
+    static var menuBarButton: NSStatusBarButton? {
+        func button(in view: NSView) -> NSStatusBarButton? {
+            if let found = view as? NSStatusBarButton { return found }
+            return view.subviews.lazy.compactMap(button(in:)).first
+        }
+        return NSApp.windows
+            .filter { String(describing: type(of: $0)) == "NSStatusBarWindow" }
+            .compactMap { $0.contentView.flatMap(button(in:)) }
+            .first
     }
 
     /// Puts back what `setAsideWindowsOfHiddenApp` took away. With `hide` the app goes back to being hidden, as it
