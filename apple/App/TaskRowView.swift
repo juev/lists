@@ -13,7 +13,9 @@ final class TaskRowView: NSTableRowView {
     override func drawSelection(in dirtyRect: NSRect) {
         guard !isCard else { return }
         // The strip covers the content of the row and leaves the space the rows keep between them.
-        let strip = bounds.insetBy(dx: 0, dy: TaskTableMetrics.rowInset)
+        // The cell of an inset table starts past the edge of the row view; the strip follows the cell.
+        let cell = subviews.first { $0 is NSTableCellView }?.frame ?? bounds
+        let strip = NSRect(x: cell.minX, y: bounds.minY, width: cell.width, height: bounds.height).insetBy(dx: 0, dy: TaskTableMetrics.rowInset)
         NSColor.labelColor.withAlphaComponent(0.07).setFill()
         NSBezierPath(roundedRect: strip, xRadius: 6, yRadius: 6).fill()
     }

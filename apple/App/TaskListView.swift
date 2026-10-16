@@ -40,7 +40,8 @@ struct TaskListView: View {
                     look: "\(model.rowSpacing) \(model.textScale) \(model.fontDesign)",
                     focusRequests: model.listFocusRequests,
                     titleFocus: model.titleFocus,
-                    scope: model.scope)
+                    scope: model.scope,
+                    attachmentsArrived: model.attachmentsArrived)
             } else {
                 ScrollViewReader { proxy in
                     List {
