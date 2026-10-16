@@ -772,7 +772,30 @@ enum DebugScript {
                     print("debug: key window \(window.map { type(of: $0) }.map(String.init(describing:)) ?? "none"), first responder \(window?.firstResponder.map { String(describing: type(of: $0)) } ?? "none")\((window?.firstResponder as? NSTableView)?.style == .sourceList ? " (sidebar)" : "")\((window?.firstResponder as? NSText).map { " with \"\($0.string)\"" } ?? "")\(((window?.firstResponder as? NSTextView)?.delegate as? NSTextField).map { ", field \(Int($0.frame.width))x\(Int($0.frame.height))" } ?? "")")
                 case "rowshot":
                     // The row of the selected task drawn into a file, eight pixels to a point.
-                    if let task = AppModel.shared.selectedTask {
+                    if TaskTable.enabled, let task = AppModel.shared.selectedTask {
+                        // The cell of the task table (#308), in a light window that is never shown.
+                        let model = AppModel.shared
+                        let origin = model.mixesLists ? model.origin(of: task) : nil
+                        let size = NSSize(width: 320, height: TaskTableMetrics.taskRow(origin: origin != nil, spacing: model.rowSpacing))
+                        let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.borderless], backing: .buffered, defer: true)
+                        window.isReleasedWhenClosed = false
+                        window.appearance = NSAppearance(named: .aqua)
+                        let cell = TaskRowCell(frame: NSRect(origin: .zero, size: size))
+                        let page = FillView(frame: cell.frame)
+                        page.color = .white
+                        page.addSubview(cell)
+                        window.contentView = page
+                        cell.configure(task, origin: origin, dayInHeading: model.dayInHeading(task), model: model)
+                        cell.layoutSubtreeIfNeeded()
+                        if let image = NSBitmapImageRep(
+                            bitmapDataPlanes: nil, pixelsWide: Int(size.width) * 8, pixelsHigh: Int(size.height) * 8, bitsPerSample: 8,
+                            samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0) {
+                            image.size = size
+                            page.cacheDisplay(in: page.bounds, to: image)
+                            try? image.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: argument))
+                            print("debug: row drawn, \(image.pixelsWide)x\(image.pixelsHigh) pixels, text scale \(model.textScale), design \(model.fontDesign)")
+                        }
+                    } else if let task = AppModel.shared.selectedTask {
                         let row = TaskRow(task: task, depth: 0).environment(AppModel.shared)
                             .frame(width: 320).background(Color.white).environment(\.colorScheme, .light)
                         let renderer = ImageRenderer(content: row)
