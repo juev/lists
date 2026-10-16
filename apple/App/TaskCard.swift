@@ -529,11 +529,28 @@ final class TaskCard: NSView, NSTextViewDelegate {
         model.perform { try $0.setNotes(id: id, notes: text) }
     }
 
+    /// A card that leaves the window — closed by a click elsewhere, or the table drawn again — saves what was typed.
+    /// The text is taken now, before the table gives the card the stored task again, and written once the table is
+    /// done with its rows.
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        super.viewWillMove(toWindow: newWindow)
+        guard newWindow == nil, window != nil, !locked else { return }
+        let id = task.id
+        let (typedTitle, typedNotes) = (title.string, notes.string)
+        let (storedTitle, storedNotes) = (task.title, task.notes)
+        let value = typedTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard (!value.isEmpty && value != storedTitle) || typedNotes != storedNotes else { return }
+        DispatchQueue.main.async { [model] in
+            model.perform { store in
+                if !value.isEmpty, value != storedTitle { try store.setTitle(id: id, title: value) }
+                if typedNotes != storedNotes { try store.setNotes(id: id, notes: typedNotes) }
+            }
+        }
+    }
+
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         guard window == nil else { return }
-        // A card closed by a click elsewhere: what was typed is saved once the table is done with its rows.
-        DispatchQueue.main.async { self.commit(leaving: true) }
         popover?.close()
         Keyboard.cards.remove(task.id)
         #if DEBUG

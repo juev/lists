@@ -202,18 +202,40 @@ struct TaskTable: NSViewRepresentable {
             guard let table else { return }
             let lookChanged = new.look != look
             let wasOpen = Set(rows.filter(\.isCard).map(\.key))
-            if lookChanged || new.rows.map(\.key) != rows.map(\.key) {
+            if lookChanged {
                 rows = new.rows
                 look = new.look
                 pruneCards()
                 table.reloadData()
             } else if new.rows != rows {
-                // The same rows with new content. A row that opens or closes gets the other view and its height changes
-                // in an animation (R38); the others take the new content in place, so an open card keeps what is typed.
-                let changed = new.rows.indices.filter { new.rows[$0] != rows[$0] }
-                let reshaped = IndexSet(changed.filter { new.rows[$0].isCard != rows[$0].isCard })
+                // Rows that come and go are inserted and removed; the rows that stay keep their views, so an open card
+                // keeps what is being typed and the keyboard while a task leaves the view or arrives with a sync.
+                let old = rows
+                let oldKeys = old.map(\.key)
+                let newKeys = new.rows.map(\.key)
+                var removed = IndexSet()
+                var inserted = IndexSet()
+                if oldKeys != newKeys {
+                    for change in newKeys.difference(from: oldKeys) {
+                        switch change {
+                        case .remove(let offset, _, _): removed.insert(offset)
+                        case .insert(let offset, _, _): inserted.insert(offset)
+                        }
+                    }
+                }
                 rows = new.rows
                 pruneCards()
+                if !removed.isEmpty || !inserted.isEmpty {
+                    table.beginUpdates()
+                    table.removeRows(at: removed, withAnimation: [])
+                    table.insertRows(at: inserted, withAnimation: [])
+                    table.endUpdates()
+                }
+                // The rows that stayed with new content. A row that opens or closes gets the other view and its height
+                // changes in an animation (R38); the others take the new content in place.
+                let before = Dictionary(old.map { ($0.key, $0) }, uniquingKeysWith: { first, _ in first })
+                let changed = rows.indices.filter { !inserted.contains($0) && before[rows[$0].key] != rows[$0] }
+                let reshaped = IndexSet(changed.filter { before[rows[$0].key]?.isCard != rows[$0].isCard })
                 for index in changed where !reshaped.contains(index) { refresh(index) }
                 if !reshaped.isEmpty { table.reloadData(forRowIndexes: reshaped, columnIndexes: [0]) }
                 NSAnimationContext.runAnimationGroup { context in
