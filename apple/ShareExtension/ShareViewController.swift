@@ -47,7 +47,7 @@ final class ShareViewController: NSViewController {
     private func save(title: String, notes: String, listId: String, files: [URL]) -> String? {
         do {
             let store = try Storage.openStore()
-            let task = try store.createTask(new: NewTask(title: title, listId: listId, notes: notes))
+            let task = try store.createTask(new: NewTask(title: title, listId: listId, notes: notes, first: true))
             for file in files {
                 _ = try? store.addAttachment(taskId: task.id, path: file.path, name: nil)
             }

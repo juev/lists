@@ -122,11 +122,12 @@ internal fun typedSubtasks(lines: List<String>, field: String): List<String> =
 fun Store.createFrom(context: Context, draft: TaskDraft): TaskItem {
     val line = draft.title.trim()
     val parentId = draft.parentId
+    // R130: a new task goes first; the list has no selected task to go under.
     val task = when {
-        parentId != null && draft.parse -> quickAddUnder(line, parentId)
-        parentId != null -> createTask(NewTask(title = line, parentId = parentId))
-        draft.parse -> quickAdd(line, draft.listId)
-        else -> createTask(NewTask(title = line, listId = draft.listId))
+        parentId != null && draft.parse -> quickAddUnder(line, parentId, first = true)
+        parentId != null -> createTask(NewTask(title = line, parentId = parentId, first = true))
+        draft.parse -> quickAdd(line, draft.listId, first = true)
+        else -> createTask(NewTask(title = line, listId = draft.listId, first = true))
     }
     val notes = draft.notes.trim()
     if (notes.isNotEmpty()) setNotes(task.id, notes)

@@ -764,9 +764,9 @@ final class AppModel {
                 return try store.createTask(new: NewTask(title: line, parentId: parent))
             }
             if case .project(let id) = scope {
-                return try store.quickAddUnder(text: line, parentId: id)
+                return try store.quickAddUnder(text: line, parentId: id, first: true)
             }
-            let task = try store.quickAdd(text: line, listId: targetListId)
+            let task = try store.quickAdd(text: line, listId: targetListId, first: true)
             noteUsedList(task.listId)
             return task
         }
@@ -838,11 +838,12 @@ final class AppModel {
         let parse = parseQuickText
         let task: TaskItem? = perform { store in
             let created: TaskItem
+            // R130: a new task goes first in its list.
             switch (draft.parentId, parse) {
-            case (let parent?, true): created = try store.quickAddUnder(text: title, parentId: parent)
-            case (let parent?, false): created = try store.createTask(new: NewTask(title: title, parentId: parent))
-            case (nil, true): created = try store.quickAdd(text: title, listId: draft.listId)
-            case (nil, false): created = try store.createTask(new: NewTask(title: title, listId: draft.listId))
+            case (let parent?, true): created = try store.quickAddUnder(text: title, parentId: parent, first: true)
+            case (let parent?, false): created = try store.createTask(new: NewTask(title: title, parentId: parent, first: true))
+            case (nil, true): created = try store.quickAdd(text: title, listId: draft.listId, first: true)
+            case (nil, false): created = try store.createTask(new: NewTask(title: title, listId: draft.listId, first: true))
             }
             if !draft.notes.isEmpty { try store.setNotes(id: created.id, notes: draft.notes) }
             if let start = draft.start { try store.setStart(id: created.id, start: start) }

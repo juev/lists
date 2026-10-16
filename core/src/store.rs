@@ -1376,8 +1376,16 @@ impl Store {
         })
     }
 
-    /// Creates a task inside a project (or under any task) from one line of text.
-    pub fn quick_add_under(&self, text: String, parent_id: String) -> Result<TaskItem> {
+    /// Creates a task inside a project (or under any task) from one line of text. `first` and `after` place a
+    /// task of a project as in `NewTask` (R130); a subtask goes last whatever they say.
+    #[uniffi::method(default(first = false, after = None))]
+    pub fn quick_add_under(
+        &self,
+        text: String,
+        parent_id: String,
+        first: bool,
+        after: Option<String>,
+    ) -> Result<TaskItem> {
         self.write(|w| {
             // R10: under anything but a project the line is the title of a subtask, as it is typed.
             if !subtasks::is_project(w.tx, &parent_id)? {
@@ -1404,6 +1412,8 @@ impl Store {
                     due: parsed.due,
                     priority: (parsed.priority != Priority::None).then_some(parsed.priority),
                     tags: parsed.tags,
+                    first,
+                    after,
                     ..NewTask::default()
                 },
             )
@@ -1528,8 +1538,16 @@ impl Store {
         quickadd::parse(&text, today)
     }
 
-    /// Creates a task from one line of text. `list_id` is used unless the line names a list.
-    pub fn quick_add(&self, text: String, list_id: Option<String>) -> Result<TaskItem> {
+    /// Creates a task from one line of text. `list_id` is used unless the line names a list; `first` and
+    /// `after` place it as in `NewTask` (R130).
+    #[uniffi::method(default(first = false, after = None))]
+    pub fn quick_add(
+        &self,
+        text: String,
+        list_id: Option<String>,
+        first: bool,
+        after: Option<String>,
+    ) -> Result<TaskItem> {
         self.write(|w| {
             let parsed = quickadd::parse(&text, w.today());
             let mut title = parsed.title;
@@ -1549,6 +1567,8 @@ impl Store {
                     due: parsed.due,
                     priority: (parsed.priority != Priority::None).then_some(parsed.priority),
                     tags: parsed.tags,
+                    first,
+                    after,
                     ..NewTask::default()
                 },
             )
@@ -2329,6 +2349,7 @@ fn create_task(w: &mut Writer, new: NewTask) -> Result<TaskItem> {
     valid_moment(&new.start)?;
     valid_moment(&new.due)?;
     let id = new_id();
+    let place = (new.first, new.after.clone());
     let mut priority = new.priority;
     let mut due = new.due.filter(|d| !d.is_empty());
     match &new.parent_id {
@@ -2350,10 +2371,20 @@ fn create_task(w: &mut Writer, new: NewTask) -> Result<TaskItem> {
             }
             w.task(&id, "parent", json!(parent))?;
             w.task(&id, "list", json!(parent_task.list_id))?;
-            w.task(&id, "pos", json!(append_pos_in_parent(w.tx, parent)?))?;
+            // R130: a task of a project takes the place it asks for, a subtask goes last.
+            let asked = if subtasks::is_project(w.tx, parent)? {
+                placed(w, &place, Some(parent), &parent_task.list_id, &id)?
+            } else {
+                None
+            };
+            let pos = match asked {
+                Some(pos) => pos,
+                None => append_pos_in_parent(w.tx, parent)?,
+            };
+            w.task(&id, "pos", json!(pos))?;
         }
         None => {
-            let list_id = new.list_id.unwrap_or_else(|| INBOX_ID.to_string());
+            let list_id = new.list_id.clone().unwrap_or_else(|| INBOX_ID.to_string());
             let list = get_list(w.tx, &list_id)?;
             if priority.is_none() && list.default_priority != Priority::None {
                 priority = Some(list.default_priority);
@@ -2362,7 +2393,11 @@ fn create_task(w: &mut Writer, new: NewTask) -> Result<TaskItem> {
                 due = Some(w.today().format(DATE_FMT).to_string());
             }
             w.task(&id, "list", json!(list_id))?;
-            w.task(&id, "pos", json!(append_pos_in_list(w.tx, &list_id)?))?;
+            let pos = match placed(w, &place, None, &list_id, &id)? {
+                Some(pos) => pos,
+                None => append_pos_in_list(w.tx, &list_id)?,
+            };
+            w.task(&id, "pos", json!(pos))?;
         }
     }
     w.task(&id, "title", json!(title))?;
@@ -2385,6 +2420,39 @@ fn create_task(w: &mut Writer, new: NewTask) -> Result<TaskItem> {
     get_task(w.tx, &id)
 }
 
+/// R130: the position a new task asks for with `first` or `after`, among the siblings it will have;
+/// `None` when it asks for neither and goes last.
+fn placed(
+    w: &Writer,
+    place: &(bool, Option<String>),
+    parent: Option<&str>,
+    list_id: &str,
+    id: &str,
+) -> Result<Option<String>> {
+    let (first, after) = place;
+    if !first && after.is_none() {
+        return Ok(None);
+    }
+    let siblings = match parent {
+        Some(parent) => sibling_positions(w.tx, "eff_parent = ?1", parent, id)?,
+        None => sibling_positions(w.tx, "eff_list = ?1 AND eff_parent IS NULL", list_id, id)?,
+    };
+    let mut anchor = match after {
+        Some(after) => Some(get_task(w.tx, after)?),
+        None => None,
+    };
+    // Under a subtask the new task goes under its parent: a subtask is no sibling of a task.
+    if let Some(up) = anchor.as_ref().and_then(|a| a.parent_id.clone()) {
+        if parent != Some(up.as_str()) && !subtasks::is_project(w.tx, &up)? {
+            anchor = Some(get_task(w.tx, &up)?);
+        }
+    }
+    let below = anchor
+        .filter(|a| a.parent_id.as_deref() == parent && a.list_id == list_id)
+        .map(|a| a.id);
+    Ok(Some(pos_after(&siblings, below.as_deref())))
+}
+
 fn duplicate(w: &mut Writer, original: &TaskItem, parent: Option<String>) -> Result<String> {
     let copy = create_task(
         w,
@@ -2397,6 +2465,7 @@ fn duplicate(w: &mut Writer, original: &TaskItem, parent: Option<String>) -> Res
             due: original.due.clone(),
             priority: Some(original.priority),
             tags: original.tags.clone(),
+            ..NewTask::default()
         },
     )?;
     if original.is_project {
