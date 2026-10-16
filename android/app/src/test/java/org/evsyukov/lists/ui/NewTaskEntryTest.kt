@@ -60,6 +60,7 @@ class NewTaskEntryTest {
             repeat = rule
             priority = Priority.MEDIUM
             expanded = true
+            projectId = "p"
         }
         val back = NewTaskEntry.fromSaved(entry.toSaved())
         assertEquals("milk", back.text)
@@ -71,6 +72,7 @@ class NewTaskEntryTest {
         assertEquals(rule, back.repeat)
         assertEquals(Priority.MEDIUM, back.priority)
         assertEquals("work", back.listId)
+        assertEquals("p", back.projectId)
         assertTrue(back.expanded)
     }
 

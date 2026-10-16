@@ -23,9 +23,11 @@ class SelectionTest {
         done: String? = null,
         deleted: Boolean = false,
         isLog: Boolean = false,
+        isProject: Boolean = false,
+        subtasksTotal: UInt = 0u,
     ) = TaskItem(
         id, listId, parentId, null, id, "", start, due, priority, tags, repeat, null, done,
-        false, deleted, isLog, false, 0u, 0u, 0u, due, start,
+        false, deleted, isLog, isProject, subtasksTotal, 0u, 0u, due, start,
     )
 
     @Test
@@ -101,6 +103,22 @@ class SelectionTest {
         assertEquals(Step(Back.Place("inbox", null)), BatchAction.MoveTo("work").on(task()))
         // A subtask of a task in the same list still moves: it becomes a task of the list.
         assertEquals(Step(Back.Place("work", "p")), BatchAction.MoveTo("work").on(task(listId = "work", parentId = "p")))
+    }
+
+    @Test
+    fun r129_a_move_into_a_project_passes_over_what_a_drop_onto_it_does_and_is_taken_back() {
+        val into = BatchAction.MoveToProject("p")
+        assertEquals(Step(Back.Place("inbox", null)), into.on(task()))
+        // From another project: back to that one.
+        assertEquals(Step(Back.Place("work", "q")), into.on(task(listId = "work", parentId = "q")))
+        assertNull("the project itself", into.on(task(id = "p", isProject = true)))
+        assertNull("another project", into.on(task(isProject = true)))
+        assertNull("a task with subtasks", into.on(task(subtasksTotal = 2u)))
+        assertNull("a task already in the project", into.on(task(parentId = "p")))
+        assertNull(into.on(task(deleted = true)))
+        assertFalse(task(subtasksTotal = 1u).goesInto("p"))
+        assertTrue(task(parentId = "q").goesInto("p"))
+        assertEquals(BatchAction.MoveTo("work").done(), into.done())
     }
 
     @Test

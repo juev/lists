@@ -423,9 +423,11 @@ fun MainScreen(model: MainViewModel, onReminderSet: () -> Unit) {
     when (batchDialog) {
         "due" -> MomentDialog(str(R.string.due), null, onPick = { value -> value?.let { model.batch(BatchAction.Due(it)) } }) { batchDialog = null }
         "start" -> MomentDialog(str(R.string.start_title), null, onPick = { value -> value?.let { model.batch(BatchAction.Start(it)) } }) { batchDialog = null }
-        "list" -> {
-            val lists = state.lists.filter { !it.archived }
-            ChoiceDialog(str(R.string.move_to_list), lists.map { it.displayName() }, -1, { batchDialog = null }) { model.batch(BatchAction.MoveTo(lists[it].id)) }
+        "list" -> DestinationDialog(str(R.string.move_to_list), state.lists.filter { !it.archived }, state.projects, null, { batchDialog = null }) { to ->
+            when (to) {
+                is Destination.ToList -> model.batch(BatchAction.MoveTo(to.id))
+                is Destination.ToProject -> model.batch(BatchAction.MoveToProject(to.id))
+            }
         }
         "priority" -> ChoiceDialog(str(R.string.priority), priorities.map { it.title() }, -1, { batchDialog = null }) {
             model.batch(BatchAction.SetPriority(priorities[it]))
@@ -647,7 +649,7 @@ private suspend fun SnackbarHostState.offerRestore(): Boolean = coroutineScope {
 @Composable
 private fun NewTaskSheet(state: UiState, restored: NewTaskEntry?, onAdd: (TaskDraft) -> Unit, onDismiss: (NewTaskEntry) -> Unit) {
     val context = LocalContext.current
-    val entry = rememberSaveable(saver = NewTaskEntry.Saver) { restored ?: NewTaskEntry(listId = state.newTaskListId()) }
+    val entry = rememberSaveable(saver = NewTaskEntry.Saver) { restored ?: NewTaskEntry(listId = state.newTaskListId()).apply { projectId = (state.scope as? Scope.Project)?.id } }
     // No width limit: expanded, the card takes the whole screen (R64).
     ModalBottomSheet(
         onDismissRequest = { onDismiss(entry) },
@@ -660,6 +662,7 @@ private fun NewTaskSheet(state: UiState, restored: NewTaskEntry?, onAdd: (TaskDr
         NewTaskCard(
             lists = state.lists.filter { !it.archived },
             listId = entry.listId,
+            projects = state.projects,
             parse = EntryPrefs.parse(context),
             onSubmit = onAdd,
             modifier = Modifier.navigationBarsPadding().padding(start = 8.dp, end = 8.dp, bottom = 8.dp),
@@ -1027,12 +1030,31 @@ private fun TaskMenu(task: TaskItem, state: UiState, model: MainViewModel, onOpe
                 onClick = { run { model.act { it.setPriority(task.id, priority) } } },
             )
         }
-        sub == "list" -> state.lists.filter { !it.archived }.forEach { list ->
-            DropdownMenuItem(
-                text = { Text(list.displayName()) },
-                enabled = !(task.parentId == null && task.listId == list.id),
-                onClick = { run { model.act { it.moveToList(task.id, list.id) } } },
-            )
+        sub == "list" -> {
+            state.lists.filter { !it.archived }.forEach { list ->
+                DropdownMenuItem(
+                    text = { Text(list.displayName()) },
+                    enabled = !(task.parentId == null && task.listId == list.id),
+                    onClick = { run { model.act { it.moveToList(task.id, list.id) } } },
+                )
+            }
+            // R129: the projects, as a group of their own under the lists.
+            if (state.projects.isNotEmpty()) {
+                HorizontalDivider()
+                Text(
+                    str(R.string.projects),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                )
+                state.projects.forEach { project ->
+                    DropdownMenuItem(
+                        text = { Text(project.title) },
+                        enabled = task.goesInto(project.id),
+                        onClick = { run { model.act { it.moveToProject(task.id, project.id) } } },
+                    )
+                }
+            }
         }
         else -> {
             // R109: the way into the selection mode, with this task selected.

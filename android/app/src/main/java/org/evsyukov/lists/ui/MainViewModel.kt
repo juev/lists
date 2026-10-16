@@ -98,12 +98,11 @@ data class UiState(
         }
 
     /** R127: the list a new project goes to: that of the open project, otherwise the one a new task would take. */
-    fun newProjectListId(): String? =
-        (scope as? Scope.Project)?.let { open -> projects.firstOrNull { it.id == open.id }?.listId } ?: newTaskListId()
+    fun newProjectListId(): String? = newTaskListId()
 
-    /** The list a task added in the current view goes to; null under a project, where the parent decides. */
+    /** The list a task added in the current view goes to; under a project, the project's list. */
     fun newTaskListId(): String? = when (val s = scope) {
-        is Scope.Project -> null
+        is Scope.Project -> projects.firstOrNull { it.id == s.id }?.listId
         Scope.Inbox -> "inbox"
         is Scope.List -> s.id
         else -> EntryPrefs.defaultListId(ListsApp.instance)
@@ -294,11 +293,10 @@ class MainViewModel : ViewModel() {
     /** Adds what the new-task card collected. The view gives the task its place and nothing else (R75). */
     fun add(draft: TaskDraft) {
         if (draft.title.isBlank()) return
-        val scope = _state.value.scope
         act { store ->
             val context = ListsApp.instance
-            val task = store.createFrom(context, draft, parentId = (scope as? Scope.Project)?.id)
-            if (scope !is Scope.Project) EntryPrefs.noteUsedList(context, task.listId)
+            val task = store.createFrom(context, draft)
+            if (draft.parentId == null) EntryPrefs.noteUsedList(context, task.listId)
         }
     }
 

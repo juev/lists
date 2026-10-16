@@ -103,6 +103,8 @@ data class TaskDraft(
     val files: List<Uri>,
     /** The subtasks typed in the card (R113), in their order; the titles are taken as typed. */
     val subtasks: List<String> = emptyList(),
+    /** The project the task goes into (R129), chosen in the card or given by the view. */
+    val parentId: String? = null,
 )
 
 /**
@@ -117,8 +119,9 @@ internal fun typedSubtasks(lines: List<String>, field: String): List<String> =
  * What the fields say wins over what the title says; a due date the card only
  * preset yields to both.
  */
-fun Store.createFrom(context: Context, draft: TaskDraft, parentId: String? = null): TaskItem {
+fun Store.createFrom(context: Context, draft: TaskDraft): TaskItem {
     val line = draft.title.trim()
+    val parentId = draft.parentId
     val task = when {
         parentId != null && draft.parse -> quickAddUnder(line, parentId)
         parentId != null -> createTask(NewTask(title = line, parentId = parentId))
@@ -196,6 +199,8 @@ class NewTaskEntry(title: String = "", notes: String = "", listId: String? = nul
     /** Null until the person chooses: the default of the list shows through and follows the chosen list. */
     var priority by mutableStateOf<Priority?>(null)
     var listId by mutableStateOf(listId)
+    /** The project the task goes into (R129); its list is then [listId]. */
+    var projectId by mutableStateOf<String?>(null)
     /** Files picked in the card; they join the ones it was opened with. */
     var picked by mutableStateOf(emptyList<Uri>())
     /** The size chosen in portrait (R64). */
@@ -221,7 +226,7 @@ class NewTaskEntry(title: String = "", notes: String = "", listId: String? = nul
 
     internal fun toSaved(): ArrayList<Any?> = arrayListOf(
         text, note, taken, start, due, dueRemoved, repeat?.toSaved(), priority?.name, listId,
-        ArrayList(picked.map(Uri::toString)), expanded, ArrayList(subtasks), subtask, subtasksShown,
+        ArrayList(picked.map(Uri::toString)), expanded, ArrayList(subtasks), subtask, subtasksShown, projectId,
     )
 
     companion object {
@@ -238,6 +243,7 @@ class NewTaskEntry(title: String = "", notes: String = "", listId: String? = nul
             subtasks = saved[11] as List<String>
             subtask = saved[12] as String
             subtasksShown = saved[13] as Boolean
+            projectId = saved[14] as String?
         }
 
         /** Saved, not just remembered: the card keeps what was entered when the screen is turned (R63). */
@@ -267,6 +273,8 @@ internal fun hasContent(
 fun NewTaskCard(
     lists: List<TaskList>,
     listId: String?,
+    /** R129: offered under the lists, as a group of their own. */
+    projects: List<TaskItem>,
     parse: Boolean,
     onSubmit: (TaskDraft) -> Unit,
     modifier: Modifier = Modifier,
@@ -295,6 +303,7 @@ fun NewTaskCard(
     var repeat by entry::repeat
     var priority by entry::priority
     var chosenList by entry::listId
+    var chosenProject by entry::projectId
     var dialog by rememberSaveable { mutableStateOf<String?>(null) }
     var picked by entry::picked
     val pickFiles = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
@@ -317,7 +326,8 @@ fun NewTaskCard(
     }
 
     // What the task gets from its list unless the person chooses; shown like a chosen value, so that it can be changed or removed (R75).
-    val chosen = lists.firstOrNull { it.id == chosenList }
+    // A task of a project gets nothing from the project's list, as one typed in the project's view.
+    val chosen = lists.firstOrNull { it.id == chosenList }?.takeIf { chosenProject == null }
     val preset = presetDue(chosen?.defaultDueToday == true, start, today()).takeIf { due == null && !dueRemoved }
     val presetPriority = chosen?.defaultPriority?.takeIf { priority == null && it != Priority.NONE }
     // What the title says wins over an untouched preset (R41), and the icon says so.
@@ -331,7 +341,7 @@ fun NewTaskCard(
         onSubmit(
             TaskDraft(
                 text, note, start, due ?: preset, due == null && preset != null, dueRemoved, repeat, priority, chosenList, parse, attached,
-                typedSubtasks(entry.subtasks, entry.subtask),
+                typedSubtasks(entry.subtasks, entry.subtask), chosenProject,
             ),
         )
         if (!keepOpen) return
@@ -350,7 +360,8 @@ fun NewTaskCard(
         focus.requestFocus()
     }
 
-    val listName = chosenList?.let { id -> lists.firstOrNull { it.id == id }?.displayName() ?: str(R.string.inbox) }
+    val listName = chosenProject?.let { id -> projects.firstOrNull { it.id == id }?.title }
+        ?: chosenList?.let { id -> lists.firstOrNull { it.id == id }?.displayName() ?: str(R.string.inbox) }
 
     // One tree for both sizes: the title and the note stay the same fields, so the cursor stays where it was.
     Column(if (full) modifier.fillMaxHeight() else modifier) {
@@ -402,7 +413,7 @@ fun NewTaskCard(
                 FieldRow(Icons.Outlined.Flag, str(R.string.priority), shownPriority.takeIf { it != Priority.NONE }?.title()) { dialog = "priority" }
                 if (!entry.subtasksShown) FieldRow(Icons.Outlined.Checklist, str(R.string.subtask), null, showSubtasks)
                 FieldRow(Icons.Outlined.AttachFile, str(R.string.file_or_image), filesText) { pickFiles.launch("*/*") }
-                // Under a project there is nothing to choose: the parent decides the list.
+                // The list or the project the task goes to (R129).
                 if (listName != null) FieldRow(Icons.AutoMirrored.Outlined.List, str(R.string.list), listName) { dialog = "list" }
             } else {
                 FieldsRow(
@@ -438,7 +449,7 @@ fun NewTaskCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                // Under a project there is nothing to choose: the parent decides the list.
+                // The list or the project the task goes to (R129).
                 if (listName != null) {
                     Row(
                         Modifier.weight(1f, fill = false).clip(CircleShape).clickable(role = Role.Button) { dialog = "list" }.heightIn(min = 40.dp).padding(horizontal = 8.dp),
@@ -466,7 +477,12 @@ fun NewTaskCard(
         "due" -> MomentDialog(str(R.string.due), shownDue, onPick = { due = it; dueRemoved = it == null }) { dialog = null }
         "repeat" -> RepeatDialog(repeat, onPick = { repeat = it }) { dialog = null }
         "priority" -> ChoiceDialog(str(R.string.priority), priorities.map { it.title() }, priorities.indexOf(shownPriority), { dialog = null }) { priority = priorities[it] }
-        "list" -> ChoiceDialog(str(R.string.list), lists.map { it.displayName() }, lists.indexOfFirst { it.id == chosenList }, { dialog = null }) { chosenList = lists[it].id }
+        "list" -> DestinationDialog(str(R.string.list), lists, projects, chosenProject ?: chosenList, { dialog = null }) { to ->
+            when (to) {
+                is Destination.ToList -> { chosenList = to.id; chosenProject = null }
+                is Destination.ToProject -> { chosenList = to.listId; chosenProject = to.id }
+            }
+        }
     }
 }
 
