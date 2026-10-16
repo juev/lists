@@ -101,10 +101,16 @@ fn encode(header: &Header, changes: &[Change]) -> Result<Vec<u8>> {
     Ok(out)
 }
 
-/// S46: a snapshot goes to the storage compressed.
+/// S46: a snapshot goes to the storage compressed. S50: its header carries the
+/// time it was written, so that a tool showing that field does not show 1970.
 fn compress(data: &[u8]) -> Result<Vec<u8>> {
     use std::io::Write;
-    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    let mut encoder = flate2::GzBuilder::new()
+        .mtime(u32::try_from(now).unwrap_or(u32::MAX))
+        .write(Vec::new(), flate2::Compression::default());
     encoder.write_all(data)?;
     Ok(encoder.finish()?)
 }

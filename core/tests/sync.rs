@@ -10,6 +10,9 @@ use lists_core::sync::remote::{DirRemote, Remote};
 use lists_core::*;
 use tempfile::TempDir;
 
+/// The root of the storage (S49).
+const ROOT: &str = "lists/v1";
+
 fn sync(d: &Device, storage: &TempDir) -> SyncReport {
     d.sync_with(&DirRemote::new(storage.path())).unwrap()
 }
@@ -89,7 +92,7 @@ fn settle(a: &Device, b: &Device, storage: &TempDir) {
 }
 
 fn files(storage: &TempDir, dir: &str) -> Vec<String> {
-    let mut names: Vec<String> = std::fs::read_dir(storage.path().join("lists/v1").join(dir))
+    let mut names: Vec<String> = std::fs::read_dir(storage.path().join(ROOT).join(dir))
         .map(|entries| {
             entries
                 .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
@@ -256,7 +259,7 @@ fn s5_concurrent_moves_into_each_other_do_not_leave_a_cycle() {
                 .to_string(),
         ];
         std::fs::write(
-            storage.path().join(format!("lists/v1/log/{device}-0000000001.jsonl")),
+            storage.path().join(format!("{ROOT}/log/{device}-0000000001.jsonl")),
             lines.join("\n") + "\n",
         )
         .unwrap();
@@ -296,7 +299,7 @@ fn s42_what_an_earlier_version_sends_is_brought_to_the_rule_of_subtasks() {
         line(5, "deep", "pos", "m".into()),
     ];
     std::fs::write(
-        storage.path().join("lists/v1/log/cccccccccccc-0000000001.jsonl"),
+        storage.path().join(ROOT).join("log/cccccccccccc-0000000001.jsonl"),
         lines.join("\n") + "\n",
     )
     .unwrap();
@@ -325,7 +328,7 @@ fn s42_a_task_of_a_project_read_before_the_mark_of_its_project_keeps_its_fields(
         }
         let text = lines.join("\n") + if whole { "\n" } else { "" };
         std::fs::write(
-            storage.path().join(format!("lists/v1/log/{device}-0000000001.jsonl")),
+            storage.path().join(format!("{ROOT}/log/{device}-0000000001.jsonl")),
             text,
         )
         .unwrap();
@@ -529,7 +532,7 @@ fn s8_truncated_log_file_is_retried_not_skipped() {
     sync(&a, &storage);
 
     let name = files(&storage, "log").pop().unwrap();
-    let path = storage.path().join("lists/v1/log").join(&name);
+    let path = storage.path().join(ROOT).join("log").join(&name);
     let whole = std::fs::read(&path).unwrap();
     std::fs::write(&path, &whole[..whole.len() * 2 / 3]).unwrap();
 
@@ -551,7 +554,7 @@ fn s9_upload_interrupted_before_confirmation_is_repeated_identically() {
     add(&a, "задача");
     sync(&a, &storage);
     let name = files(&storage, "log").pop().unwrap();
-    let path = storage.path().join("lists/v1/log").join(&name);
+    let path = storage.path().join(ROOT).join("log").join(&name);
     let first = std::fs::read(&path).unwrap();
 
     // Nothing new locally: a second run must not rewrite or renumber anything.
@@ -628,7 +631,7 @@ fn own_files(storage: &TempDir, dir: &str, device: &str, suffix: &str) -> Vec<(S
         .into_iter()
         .filter(|f| f.starts_with(device) && f.ends_with(suffix))
         .map(|f| {
-            let size = std::fs::metadata(storage.path().join("lists/v1").join(dir).join(&f))
+            let size = std::fs::metadata(storage.path().join(ROOT).join(dir).join(&f))
                 .unwrap()
                 .len();
             (f, size)
@@ -712,7 +715,7 @@ fn s45_a_snapshot_follows_the_weight_of_the_log() {
 /// plain snapshots, `"v":1` in every header, format 1 in `vault.json`.
 fn to_format_1(storage: &TempDir) -> String {
     use std::io::Read;
-    let root = storage.path().join("lists/v1");
+    let root = storage.path().join(ROOT);
     for dir in ["log", "snap"] {
         for name in files(storage, dir).iter().filter(|n| n.ends_with(".jsonl")) {
             let path = root.join(dir).join(name);
@@ -737,7 +740,7 @@ fn to_format_1(storage: &TempDir) -> String {
 #[test]
 fn s46_a_storage_of_format_1_moves_to_format_2() {
     let storage = tempfile::tempdir().unwrap();
-    let root = storage.path().join("lists/v1");
+    let root = storage.path().join(ROOT);
     let (a, b, c) = (device(), device(), device());
     a.set_compact_after_for_tests(0);
     add(&a, "из снимка");
@@ -780,6 +783,35 @@ fn s46_a_storage_of_format_1_moves_to_format_2() {
 }
 
 #[test]
+fn s50_a_compressed_snapshot_carries_the_time_it_was_written() {
+    let storage = tempfile::tempdir().unwrap();
+    let b = device();
+    b.set_compact_after_for_tests(0);
+    add(&b, "задача");
+    let now = || {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+    };
+    let before = now();
+    sync(&b, &storage);
+    let after = now();
+
+    let [(name, _)] = &own_files(&storage, "snap", &b.device_id(), ".jsonl")[..] else {
+        panic!("{:?}", files(&storage, "snap"))
+    };
+    let data = std::fs::read(storage.path().join(ROOT).join("snap").join(name)).unwrap();
+    assert!(data.starts_with(&[0x1f, 0x8b]), "the snapshot is compressed");
+    // RFC 1952: MTIME is bytes 4-7 of the header, little-endian seconds since 1970.
+    let mtime = u64::from(u32::from_le_bytes(data[4..8].try_into().unwrap()));
+    assert!(
+        (before..=after).contains(&mtime),
+        "{mtime} not within {before}..={after}"
+    );
+}
+
+#[test]
 fn s12_joining_a_used_storage_merges_instead_of_replacing() {
     let storage = tempfile::tempdir().unwrap();
     let (a, c) = (device(), device());
@@ -806,7 +838,8 @@ fn s13_attachment_content_follows_the_record() {
     assert!(Path::new(
         &storage
             .path()
-            .join("lists/v1/blobs")
+            .join(ROOT)
+            .join("blobs")
             .join(&att.sha256[..2])
             .join(&att.sha256)
     )
@@ -840,7 +873,8 @@ fn s13_corrupted_attachment_content_is_not_stored() {
     std::fs::write(
         storage
             .path()
-            .join("lists/v1/blobs")
+            .join(ROOT)
+            .join("blobs")
             .join(&att.sha256[..2])
             .join(&att.sha256),
         b"tampered",
@@ -870,7 +904,7 @@ fn s34_the_fields_arrive_before_the_content() {
     let up = a.sync_now().unwrap();
     assert!(up.pushed > 0);
     assert_eq!((up.blobs_uploaded, up.blobs_downloaded), (0, 0));
-    assert!(!storage.path().join("lists/v1/blobs").exists());
+    assert!(!storage.path().join(ROOT).join("blobs").exists());
     let down = b.sync_now().unwrap();
     assert_eq!((down.blobs_uploaded, down.blobs_downloaded), (0, 0));
     assert_eq!(view(&b, Scope::Inbox), ["с файлом"]);
@@ -1027,8 +1061,8 @@ fn s34_content_that_cannot_move_does_not_fail_configured_sync() {
     let t = add(&a, "с файлом");
     let att = attach(&a, &t, "a.txt", b"content");
     // A file where the folder of this content has to be: the upload cannot succeed.
-    std::fs::create_dir_all(storage.path().join("lists/v1/blobs")).unwrap();
-    std::fs::write(storage.path().join("lists/v1/blobs").join(&att.sha256[..2]), b"").unwrap();
+    std::fs::create_dir_all(storage.path().join(ROOT).join("blobs")).unwrap();
+    std::fs::write(storage.path().join(ROOT).join("blobs").join(&att.sha256[..2]), b"").unwrap();
 
     assert!(a.sync_now().unwrap().pushed > 0);
     let pass = a.sync_attachments().unwrap();
@@ -1091,7 +1125,7 @@ fn s35_one_attachment_is_fetched_on_request() {
     assert_eq!(b.sync_status().unwrap().attachments_waiting, 1);
 
     // Asking for what is already here costs nothing and gives the same file.
-    std::fs::remove_dir_all(storage.path().join("lists/v1/blobs")).unwrap();
+    std::fs::remove_dir_all(storage.path().join(ROOT).join("blobs")).unwrap();
     assert_eq!(b.fetch_attachment(second.id).unwrap(), got);
     assert!(b.fetch_attachment(first.id).is_err());
     assert!(matches!(
@@ -1115,7 +1149,8 @@ fn s35_content_that_does_not_match_its_hash_is_not_fetched() {
     std::fs::write(
         storage
             .path()
-            .join("lists/v1/blobs")
+            .join(ROOT)
+            .join("blobs")
             .join(&att.sha256[..2])
             .join(&att.sha256),
         b"tampered",
@@ -1168,7 +1203,8 @@ fn r91_content_that_has_not_arrived_is_fetched_before_everything_is_saved() {
     std::fs::remove_file(
         storage
             .path()
-            .join("lists/v1/blobs")
+            .join(ROOT)
+            .join("blobs")
             .join(&absent.sha256[..2])
             .join(&absent.sha256),
     )
@@ -1188,9 +1224,9 @@ fn r91_content_that_has_not_arrived_is_fetched_before_everything_is_saved() {
 fn s14_newer_storage_format_stops_sync_but_not_local_work() {
     let storage = tempfile::tempdir().unwrap();
     let a = device();
-    std::fs::create_dir_all(storage.path().join("lists/v1")).unwrap();
+    std::fs::create_dir_all(storage.path().join(ROOT)).unwrap();
     std::fs::write(
-        storage.path().join("lists/v1/vault.json"),
+        storage.path().join(ROOT).join("vault.json"),
         br#"{"format":3,"vault":"x"}"#,
     )
     .unwrap();
@@ -1209,7 +1245,7 @@ fn s14_format_raised_while_the_app_runs_is_noticed_at_the_first_unreadable_file(
     settle(&a, &b, &storage);
 
     // Another device moved the storage on and wrote a file this version cannot read.
-    let root = storage.path().join("lists/v1");
+    let root = storage.path().join(ROOT);
     std::fs::write(root.join("vault.json"), br#"{"format":3,"vault":"x"}"#).unwrap();
     let next = format!("{}-{:010}.jsonl", a.device_id(), 2);
     std::fs::write(
@@ -1401,8 +1437,8 @@ fn s13_attachment_hash_from_the_storage_never_becomes_a_path() {
     // that points the attachment at it.
     let outside = b.data_dir().join("lists.sqlite");
     assert!(outside.exists());
-    let log = storage.path().join("lists/v1/log");
-    let snap = storage.path().join("lists/v1/snap");
+    let log = storage.path().join(ROOT).join("log");
+    let snap = storage.path().join(ROOT).join("snap");
     for dir in [log, snap] {
         for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
             let text = std::fs::read_to_string(entry.path()).unwrap();
@@ -1857,7 +1893,8 @@ fn on_device(d: &Device, sha256: &str) -> bool {
 fn in_storage(storage: &TempDir, sha256: &str) -> bool {
     storage
         .path()
-        .join("lists/v1/blobs")
+        .join(ROOT)
+        .join("blobs")
         .join(&sha256[..2])
         .join(sha256)
         .exists()
@@ -1921,7 +1958,7 @@ fn s47_a_run_that_did_not_read_everything_removes_nothing() {
         .into_iter()
         .rfind(|n| n.starts_with(&a.device_id()))
         .unwrap();
-    let path = storage.path().join("lists/v1/log").join(&name);
+    let path = storage.path().join(ROOT).join("log").join(&name);
     let whole = std::fs::read(&path).unwrap();
     std::fs::write(&path, &whole[..whole.len() / 2]).unwrap();
 
