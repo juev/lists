@@ -89,6 +89,8 @@ fn web(provider: &Provider, allow: &[&str]) -> Web {
         sync_password: None,
         push_server: None,
         push_token: None,
+        trust_proxy: false,
+        secure_cookie: false,
     })
     .unwrap();
     Web {
@@ -280,6 +282,8 @@ fn configuration_mistakes_stop_the_server_from_starting() {
         sync_password: None,
         push_server: None,
         push_token: None,
+        trust_proxy: false,
+        secure_cookie: false,
     };
     assert!(
         start(config("http://id.example.org", vec!["a@b.c".into()])).is_err(),
@@ -289,4 +293,20 @@ fn configuration_mistakes_stop_the_server_from_starting() {
         start(config("https://id.example.org", vec![])).is_err(),
         "an empty allow list would let every account in"
     );
+}
+
+#[test]
+fn r134_pending_sign_ins_are_capped() {
+    let idp = provider();
+    let web = web(&idp, &["me@example.org"]);
+    let first = begin(&web);
+    let second = begin(&web);
+    for _ in 0..999 {
+        begin(&web);
+    }
+    let refused = callback(&web, &first.0).unwrap_err();
+    assert_eq!(refused.0, 403);
+    assert!(refused.1.contains("unknown or has expired"), "{}", refused.1);
+    idp.identity.lock().unwrap().nonce = Some(second.1);
+    assert!(callback(&web, &second.0).unwrap().starts_with("lists_session="));
 }
