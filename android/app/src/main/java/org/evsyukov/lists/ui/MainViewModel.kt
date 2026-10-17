@@ -44,6 +44,9 @@ data class Editing(val task: TaskItem, val subtasks: List<TaskItem>, val attachm
 /** A message at the bottom of the screen, optionally with a way back. */
 data class Notice(val text: String, val undo: (suspend (Store) -> Unit)? = null)
 
+/** R131: the way back from any action on a task: the last action of the history of undo. */
+val UNDO: suspend (Store) -> Unit = { it.undo() }
+
 data class UiState(
     val lists: List<TaskList> = emptyList(),
     val tags: List<TagCount> = emptyList(),
@@ -67,6 +70,8 @@ data class UiState(
     val loaded: Boolean = false,
     /** R109: the tasks selected for an action on several at once; null while the selection mode is off. */
     val selection: Set<String>? = null,
+    /** R131: whether the menu of the bar offers Undo. */
+    val canUndo: Boolean = false,
 ) {
     val effectiveScope: Scope get() = search?.takeIf { it.isNotBlank() }?.let { Scope.Search(it) } ?: scope
 
@@ -179,6 +184,7 @@ class MainViewModel : ViewModel() {
                     keepDone = store.keepDone(),
                     newTaskList = store.newTaskList(),
                     inboxHidden = store.inboxHidden(),
+                    canUndo = store.canUndo(),
                     loaded = true,
                 )
             }
@@ -251,6 +257,16 @@ class MainViewModel : ViewModel() {
         }
     }
 
+    /**
+     * R131: a change of a task, with the bar that takes it back. An edit of the title or the notes goes
+     * through [act]: it is in the history as well, but brings no bar.
+     */
+    fun change(text: String = str(R.string.changed_notice), change: suspend (Store) -> Unit) =
+        act(Notice(text, UNDO), change)
+
+    /** R131: Undo in the menu of the bar, for when the bar is gone. */
+    fun undoLast() = act { it.undo() }
+
     fun select(scope: Scope) {
         _state.update { it.copy(scope = scope, search = null, selection = null) }
         viewModelScope.launch { reload() }
@@ -293,7 +309,7 @@ class MainViewModel : ViewModel() {
     /** Adds what the new-task card collected. The view gives the task its place and nothing else (R75). */
     fun add(draft: TaskDraft) {
         if (draft.title.isBlank()) return
-        act { store ->
+        change(str(R.string.created_notice)) { store ->
             val context = ListsApp.instance
             val task = store.createFrom(context, draft)
             if (draft.parentId == null) EntryPrefs.noteUsedList(context, task.listId)
@@ -302,32 +318,21 @@ class MainViewModel : ViewModel() {
 
     fun addSubtask(parent: String, title: String) {
         if (title.isBlank()) return
-        act { it.createTask(NewTask(title = title.trim(), parentId = parent)) }
+        change(str(R.string.created_notice)) { it.createTask(NewTask(title = title.trim(), parentId = parent)) }
     }
 
     fun toggleDone(task: TaskItem) {
-        if (task.done != null) return act { it.reopenTask(task.id) }
-        val atOnce = _state.value.keepDone == KeepDone.Seconds(0u)
-        val notice = when {
-            // A repeating task moves on and says so; with its record kept in view, the mark of the record
-            // takes the completion back, and the bar does only when nothing is kept (R68, R128).
-            task.repeat != null && atOnce -> Notice(str(R.string.moved_to_next)) { it.undoCloseTask(task.id) }
-            task.repeat != null -> Notice(str(R.string.moved_to_next))
-            // The task leaves at once, so the bar is the way back: for it and for the subtasks closed with it.
-            atOnce -> Notice(str(R.string.done_notice)) { it.undoCloseTask(task.id) }
-            // It stays in view, and its mark takes it back (R68).
-            else -> null
-        }
-        act(notice) { it.completeTask(task.id) }
+        if (task.done != null) return change { it.reopenTask(task.id) }
+        // The bar comes whatever R68 says (R131); a repeating task moves on and says so (R128).
+        change(str(if (task.repeat != null) R.string.moved_to_next else R.string.done_notice)) { it.completeTask(task.id) }
     }
 
     /**
      * R126: completes the project whatever the state of its tasks; its open tasks close with it (R11).
-     * The project leaves the drawer at once, so the bar is always the way back, whatever R68 says.
      */
     fun completeProject(project: TaskItem) {
         if (project.done != null) return
-        act(Notice(str(R.string.project_done_notice)) { it.undoCloseTask(project.id) }) { it.completeTask(project.id) }
+        change(str(R.string.project_done_notice)) { it.completeTask(project.id) }
     }
 
     /**
@@ -338,7 +343,8 @@ class MainViewModel : ViewModel() {
         val list = _state.value.newProjectListId()
         viewModelScope.launch {
             val result = withContext(Dispatchers.IO) { runCatching { Repo.store.createProject(title, list) } }
-            result.exceptionOrNull()?.let { e -> _state.update { it.copy(notice = Notice(describe(e))) } }
+            val notice = result.exceptionOrNull()?.let { e -> Notice(describe(e)) } ?: Notice(str(R.string.created_notice), UNDO)
+            _state.update { it.copy(notice = notice) }
             Repo.changed()
             result.getOrNull()?.let { select(Scope.Project(it.id)) }
         }
@@ -347,19 +353,12 @@ class MainViewModel : ViewModel() {
     /** Closes the task as "won't do" (R69); what follows is the same as after completing it. */
     fun wontDo(task: TaskItem) {
         if (task.done != null) return
-        val atOnce = _state.value.keepDone == KeepDone.Seconds(0u)
-        val notice = when {
-            task.repeat != null && atOnce -> Notice(str(R.string.moved_to_next)) { it.undoCloseTask(task.id) }
-            task.repeat != null -> Notice(str(R.string.moved_to_next))
-            atOnce -> Notice(str(R.string.wont_do_notice)) { it.undoCloseTask(task.id) }
-            else -> null
-        }
-        act(notice) { it.wontDoTask(task.id) }
+        change(str(if (task.repeat != null) R.string.moved_to_next else R.string.wont_do_notice)) { it.wontDoTask(task.id) }
     }
 
     fun delete(task: TaskItem) {
         if (editingId == task.id) open(task.parentId)
-        act(Notice(str(R.string.deleted)) { it.restoreTask(task.id) }) { it.deleteTask(task.id) }
+        change(str(R.string.deleted)) { it.deleteTask(task.id) }
     }
 
     /** R109: turns the selection mode on with this task selected. */
@@ -389,7 +388,7 @@ class MainViewModel : ViewModel() {
 
     /**
      * R109: one action on every selected task, in the order of the rows. The
-     * mode closes, and one bar takes the whole batch back.
+     * mode closes, and one bar takes the whole batch back (R131).
      */
     fun batch(action: BatchAction) {
         val state = _state.value
@@ -397,24 +396,25 @@ class MainViewModel : ViewModel() {
         val ids = state.shownIds.filter { it in selected }
         endSelection()
         viewModelScope.launch {
-            val backs = mutableListOf<Pair<String, Back>>()
             var changed = 0
             val result = withContext(Dispatchers.IO) {
-                runCatching {
-                    val store = Repo.store
-                    for (id in ids) {
-                        // Read anew: an action on a task may have changed its subtask that is selected too.
-                        val step = action.on(store.task(id)) ?: continue
-                        action.run(store, id)
-                        changed++
-                        step.back?.let { backs += id to it }
+                val store = Repo.store
+                store.beginGroup()
+                try {
+                    runCatching {
+                        for (id in ids) {
+                            // Read anew: an action on a task may have changed its subtask that is selected too.
+                            if (!action.appliesTo(store.task(id))) continue
+                            action.run(store, id)
+                            changed++
+                        }
                     }
+                } finally {
+                    store.endGroup()
                 }
             }
-            val undo: (suspend (Store) -> Unit)? =
-                if (backs.isEmpty()) null else { store -> backs.asReversed().forEach { (id, back) -> back.run(store, id) } }
             val text = result.exceptionOrNull()?.let(::describe) ?: str(action.done(), changed.toString())
-            _state.update { it.copy(notice = if (changed == 0 && result.isSuccess) null else Notice(text, undo)) }
+            _state.update { it.copy(notice = if (changed == 0 && result.isSuccess) null else Notice(text, UNDO.takeIf { changed > 0 })) }
             Repo.changed()
         }
     }

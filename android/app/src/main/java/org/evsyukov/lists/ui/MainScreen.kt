@@ -242,7 +242,7 @@ fun MainScreen(model: MainViewModel, onReminderSet: () -> Unit) {
                 onEditFilter = { editingFilter = it },
                 onNewFilter = { creatingFilter = true },
                 onNewProject = { creatingProject = true },
-                onProjectOff = { project -> model.act { it.setProject(project.id, false) } },
+                onProjectOff = { project -> model.change { it.setProject(project.id, false) } },
                 // The drawer closes so that the bar with Undo is in reach (R126).
                 onProjectDone = { project -> model.completeProject(project); scope.launch { drawer.close() } },
                 onSettings = { settings = true; scope.launch { drawer.close() } },
@@ -275,13 +275,20 @@ fun MainScreen(model: MainViewModel, onReminderSet: () -> Unit) {
                             IconButton(onClick = { model.search(null) }) { Icon(Icons.Outlined.Close, str(R.string.close_search)) }
                         }
                         SyncIcon(state, syncing, model::sync)
-                        state.configured?.let { configured ->
-                            ViewMenu {
-                                when (configured) {
-                                    is Configured.OfList -> editingList = configured.list
-                                    is Configured.OfFilter -> editingFilter = configured.filter
-                                }
-                            }
+                        val configured = state.configured
+                        // R131: Undo stays in the menu while there is something to take back, after the bar is gone.
+                        if (configured != null || state.canUndo) {
+                            ViewMenu(
+                                onUndo = model::undoLast.takeIf { state.canUndo },
+                                onConfigure = configured?.let {
+                                    {
+                                        when (it) {
+                                            is Configured.OfList -> editingList = it.list
+                                            is Configured.OfFilter -> editingFilter = it.filter
+                                        }
+                                    }
+                                },
+                            )
                         }
                     },
                 )
@@ -416,7 +423,7 @@ fun MainScreen(model: MainViewModel, onReminderSet: () -> Unit) {
         MomentDialog(
             title = str(R.string.due),
             value = task.due,
-            onPick = { value -> model.act { it.setDue(task.id, value) } },
+            onPick = { value -> model.change { it.setDue(task.id, value) } },
             onDismiss = { duePickerFor = null },
         )
     }
@@ -525,14 +532,15 @@ private fun SyncIcon(state: UiState, syncing: Boolean, onSync: () -> Unit) {
     }
 }
 
-/** R105: the menu of the open view; Configure opens the settings a long press on its row in the panel opens (R95). */
+/** R105: the menu of the open view; Configure opens the settings a long press on its row in the panel opens (R95). Undo takes back the last action (R131). */
 @Composable
-private fun ViewMenu(onConfigure: () -> Unit) {
+private fun ViewMenu(onUndo: (() -> Unit)?, onConfigure: (() -> Unit)?) {
     var menu by remember { mutableStateOf(false) }
     Box {
         IconButton(onClick = { menu = true }) { Icon(Icons.Outlined.MoreVert, str(R.string.more)) }
         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-            DropdownMenuItem(text = { Text(str(R.string.configure)) }, onClick = { menu = false; onConfigure() })
+            if (onUndo != null) DropdownMenuItem(text = { Text(str(R.string.undo)) }, onClick = { menu = false; onUndo() })
+            if (onConfigure != null) DropdownMenuItem(text = { Text(str(R.string.configure)) }, onClick = { menu = false; onConfigure() })
         }
     }
 }
@@ -1012,22 +1020,22 @@ private fun TaskMenu(task: TaskItem, state: UiState, model: MainViewModel, onOpe
     when {
         task.deleted -> {
             if (selectable) DropdownMenuItem(text = { Text(str(R.string.select)) }, onClick = { run { model.startSelection(task.id) } })
-            DropdownMenuItem(text = { Text(str(R.string.restore)) }, onClick = { run { model.act { it.restoreTask(task.id) } } })
+            DropdownMenuItem(text = { Text(str(R.string.restore)) }, onClick = { run { model.change { it.restoreTask(task.id) } } })
         }
         task.isLog -> {
             if (selectable) DropdownMenuItem(text = { Text(str(R.string.select)) }, onClick = { run { model.startSelection(task.id) } })
             DropdownMenuItem(text = { Text(str(R.string.delete_record)) }, onClick = { run { model.delete(task) } })
         }
         sub == "due" -> {
-            DropdownMenuItem(text = { Text(str(R.string.today)) }, onClick = { run { model.act { it.setDue(task.id, today()) } } })
-            DropdownMenuItem(text = { Text(str(R.string.tomorrow)) }, onClick = { run { model.act { it.setDue(task.id, plusDays(1)) } } })
-            DropdownMenuItem(text = { Text(str(R.string.in_a_week)) }, onClick = { run { model.act { it.setDue(task.id, plusDays(7)) } } })
-            if (task.due != null) DropdownMenuItem(text = { Text(str(R.string.clear_due)) }, onClick = { run { model.act { it.setDue(task.id, null) } } })
+            DropdownMenuItem(text = { Text(str(R.string.today)) }, onClick = { run { model.change { it.setDue(task.id, today()) } } })
+            DropdownMenuItem(text = { Text(str(R.string.tomorrow)) }, onClick = { run { model.change { it.setDue(task.id, plusDays(1)) } } })
+            DropdownMenuItem(text = { Text(str(R.string.in_a_week)) }, onClick = { run { model.change { it.setDue(task.id, plusDays(7)) } } })
+            if (task.due != null) DropdownMenuItem(text = { Text(str(R.string.clear_due)) }, onClick = { run { model.change { it.setDue(task.id, null) } } })
         }
         sub == "priority" -> priorities.forEach { priority ->
             DropdownMenuItem(
                 text = { Text(priority.title(), fontWeight = if (priority == task.priority) FontWeight.Bold else null) },
-                onClick = { run { model.act { it.setPriority(task.id, priority) } } },
+                onClick = { run { model.change { it.setPriority(task.id, priority) } } },
             )
         }
         sub == "list" -> {
@@ -1035,7 +1043,7 @@ private fun TaskMenu(task: TaskItem, state: UiState, model: MainViewModel, onOpe
                 DropdownMenuItem(
                     text = { Text(list.displayName()) },
                     enabled = !(task.parentId == null && task.listId == list.id),
-                    onClick = { run { model.act { it.moveToList(task.id, list.id) } } },
+                    onClick = { run { model.change { it.moveToList(task.id, list.id) } } },
                 )
             }
             // R129: the projects, as a group of their own under the lists.
@@ -1051,7 +1059,7 @@ private fun TaskMenu(task: TaskItem, state: UiState, model: MainViewModel, onOpe
                     DropdownMenuItem(
                         text = { Text(project.title) },
                         enabled = task.goesInto(project.id),
-                        onClick = { run { model.act { it.moveToProject(task.id, project.id) } } },
+                        onClick = { run { model.change { it.moveToProject(task.id, project.id) } } },
                     )
                 }
             }
@@ -1066,10 +1074,10 @@ private fun TaskMenu(task: TaskItem, state: UiState, model: MainViewModel, onOpe
             if (task.offersProjectSwitch()) {
                 DropdownMenuItem(
                     text = { Text(str(if (task.isProject) R.string.project_off else R.string.project_on)) },
-                    onClick = { run { model.act { it.setProject(task.id, !task.isProject) } } },
+                    onClick = { run { model.change { it.setProject(task.id, !task.isProject) } } },
                 )
             }
-            DropdownMenuItem(text = { Text(str(R.string.duplicate)) }, onClick = { run { model.act { it.duplicateTask(task.id) } } })
+            DropdownMenuItem(text = { Text(str(R.string.duplicate)) }, onClick = { run { model.change(str(R.string.created_notice)) { it.duplicateTask(task.id) } } })
             if (task.done == null) {
                 DropdownMenuItem(text = { Text(str(R.string.wont_do)) }, onClick = { run { model.wontDo(task) } })
             }
