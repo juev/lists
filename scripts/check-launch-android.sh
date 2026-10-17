@@ -18,7 +18,16 @@ serial="${2:?usage: check-launch-android.sh <apk> <serial>}"
 package=org.evsyukov.lists
 adb=(adb -s "$serial")
 
-"${adb[@]}" root >/dev/null
+# Right after boot adbd may still be restarting and refuse the call ("unable to connect for root:
+# closed", #364): a few attempts before giving up.
+for attempt in 1 2 3 4 5 6; do
+    if out="$("${adb[@]}" root 2>&1)"; then break; fi
+    if [ "$attempt" = 6 ]; then
+        echo "launch: adb root failed: $out" >&2
+        exit 1
+    fi
+    sleep 5
+done
 "${adb[@]}" wait-for-device
 "${adb[@]}" uninstall "$package" >/dev/null 2>&1 || true
 "${adb[@]}" install "$apk" >/dev/null
