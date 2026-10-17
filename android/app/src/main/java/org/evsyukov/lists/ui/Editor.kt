@@ -1184,24 +1184,17 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
     fun save(config: SyncConfig, side: SyncSide) {
         testing = true
         scope.launch {
-            // Replacing a side waits for a run that is under way: not on the main thread.
-            val joined = withContext(Dispatchers.IO) { runCatching { Repo.store.joinStorage(config, side) } }
+            val sender = enabled && pushSignIn && pushServer.isNotEmpty()
+            // S52: the model carries it to the end when the settings are closed meanwhile.
+            val joined = model.joinStorage(
+                config, side, SyncSecrets(password.takeIf { enabled }, pushServer.takeIf { sender }, pushToken.takeIf { sender }),
+            )
             testing = false
-            joined.mapCatching {
-                Secrets.save(context, password.takeIf { enabled })
-                Repo.store.setSyncPassword(password.takeIf { enabled })
-                val sender = enabled && pushSignIn && pushServer.isNotEmpty()
-                Repo.store.setPushSendServer(pushServer.takeIf { sender })
-                Secrets.save(context, pushToken.takeIf { sender }, Secrets.PUSH_TOKEN)
-                Repo.store.setPushToken(pushToken.takeIf { sender })
-                pushRefused = false
-            }
+            joined
                 .onSuccess {
                     error = null
                     tested = null
-                    // With sync switched off nothing runs, so the main screen would keep its icon and the pull (R67).
-                    Repo.revision.update { it + 1 }
-                    model.sync()
+                    pushRefused = false
                     if (enabled) Background.askOnce(context)
                 }
                 .onFailure { error = describe(it) }
