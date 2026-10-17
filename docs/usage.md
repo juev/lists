@@ -106,7 +106,7 @@ On Android the end date of a repeat cannot be set; the web interface offers the 
 
 ## Quick entry
 
-One line becomes a task. Recognized parts are removed from the title and shown as chips before saving. Nothing has to be typed as text, though: the quick-entry window carries the same fields as the task card, and a value set in a field wins over one read from the title. Recognition can be turned off in Settings; the title is then kept as typed. Files can be added there too: on Android the paperclip in the card picks any number of them.
+One line becomes a task. Recognized parts are removed from the title and shown as chips before saving. Nothing has to be typed as text, though: the quick-entry window carries the same fields as the task card, and a value set in a field wins over one read from the title. Recognition can be turned off in Settings; the title is then kept as typed. Files can be added there too: on Android the paperclip in the card picks any number of them. A task that cannot be saved is not half saved: the card stays open with everything typed and the error is shown, so Save can be tried again. A file that could not be attached is named in the message, and the task is kept without it.
 
 | Typed | Meaning |
 |---|---|
@@ -300,7 +300,7 @@ The apps for macOS and Android keep backups of your data on the device. A backup
 
 Settings → Backups:
 
-- **Create backups**: never, every 24 hours (the default) or every 48 hours. A backup is made when the app runs: at start and with the runs of sync.
+- **Create backups**: never, every 24 hours (the default) or every 48 hours. A backup is made when the app runs: at start and with the runs of sync. On Android a background job looks once an hour as well and needs no network, so the backups come in time on a device that stays offline with the app closed.
 - **Keep at most**: 5 (the default), 10, 20 or 30. After a new backup the oldest ones over that number are removed.
 - **Create backup now** makes one at once. A device that has no tasks and no lists of its own yet makes no automatic backup.
 - Each backup in the list can be restored, saved as a copy to a place you choose, or deleted.
