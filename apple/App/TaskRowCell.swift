@@ -94,13 +94,14 @@ final class TaskMarkButton: NSButton {
 
     func configure(_ task: TaskItem, model: AppModel) {
         self.task = task
-        let symbol = task.wont ? "xmark.square.fill" : task.done != nil ? "checkmark.square.fill" : "square"
+        // The mark of a record of a repeat takes its completion back while it can (R128, R133); after that it is a repeat icon.
+        let history = task.isLog && !task.undoable
+        let symbol = history ? "repeat" : task.wont ? "xmark.square.fill" : task.done != nil ? "checkmark.square.fill" : "square"
         // R94: the mark is as quiet as the icons of the fields; R72: a little smaller than the text.
         image = .symbol(symbol, AppFont.native(.callout), weight: .light)
         contentTintColor = task.done != nil ? .secondaryLabelColor : .tertiaryLabelColor
-        // The record of a repeat kept in a view of tasks takes its completion back (R128); in the journal it is history.
-        isEnabled = !(task.deleted || (task.isLog && (model.scope == .completed || model.scope == .wontDo)))
-        setAccessibilityLabel(task.done != nil ? L("Reopen") : L("Complete"))
+        isEnabled = !(task.deleted || history)
+        setAccessibilityLabel(history ? L("Repeat") : task.done != nil ? L("Reopen") : L("Complete"))
         sizeToFit()
     }
 

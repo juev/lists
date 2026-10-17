@@ -1024,6 +1024,8 @@ final class AppModel {
     }
 
     func toggleDone(_ task: TaskItem) {
+        // R133: a record whose completion can no longer be taken back is history.
+        if task.isLog && !task.undoable { return }
         if task.done != nil {
             perform { try $0.reopenTask(id: task.id) }
             return
