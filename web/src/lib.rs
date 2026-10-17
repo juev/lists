@@ -7,6 +7,7 @@
 
 mod notify;
 mod oidc;
+mod tokens;
 mod webpush;
 
 use std::collections::{HashMap, VecDeque};
@@ -98,6 +99,7 @@ struct App {
     /// Set by a change, cleared by the sync thread.
     dirty: AtomicBool,
     notifier: notify::Notifier,
+    tokens: tokens::Tokens,
 }
 
 pub struct Running {
@@ -692,6 +694,57 @@ impl App {
     /// Counts a login attempt as failed until it succeeds, so that attempts made at the same
     /// time cannot check more passwords than the limit allows. Returns how many the client
     /// has within the window, or how long it is still refused.
+    /// R152: how long the client is still refused, without counting this as an attempt.
+    fn refused(&self, client: &str) -> Option<Duration> {
+        let mut failures = self.failures.lock().unwrap_or_else(|p| p.into_inner());
+        let times = failures.get_mut(client)?;
+        while times.front().is_some_and(|t| t.elapsed() >= LOGIN_WINDOW) {
+            times.pop_front();
+        }
+        (times.len() >= LOGIN_LIMIT).then(|| LOGIN_WINDOW.saturating_sub(times[0].elapsed()))
+    }
+
+    /// R151, R152: the token a request carries, or the answer that turns it away. Unlike a
+    /// password, a token is counted as an attempt only once it has failed: it is 256 random bits,
+    /// and requests a script makes at once must not refuse each other.
+    fn token_caller(
+        &self,
+        request: &Request,
+        method: &Method,
+        path: &str,
+        secret: &str,
+    ) -> Result<tokens::Caller, Reply> {
+        let client = self.client(request);
+        let too_many = |wait: Duration| {
+            fail(429, "too many requests").with_header(header("Retry-After", &(wait.as_secs() + 1).to_string()))
+        };
+        if let Some(wait) = self.refused(&client) {
+            return Err(too_many(wait));
+        }
+        let Some(caller) = self.tokens.check(secret) else {
+            let count = self.attempt(&client).unwrap_or(LOGIN_LIMIT);
+            eprintln!(
+                "lists-web: a request with an unknown API token from {client} ({count} failures in the last minute)"
+            );
+            return Err(fail(401, "unknown or revoked token"));
+        };
+        if let Err(wait) = self.tokens.allow(&caller.id) {
+            eprintln!(
+                "lists-web: the API token \"{}\" made more than {} requests in a minute",
+                caller.name,
+                tokens::LIMIT
+            );
+            return Err(too_many(wait));
+        }
+        if path == "/api/logout" || path.starts_with("/api/tokens") || path.starts_with("/api/notifications") {
+            return Err(fail(403, "this needs a session of the web interface"));
+        }
+        if caller.scope == tokens::Scope::Read && !matches!(method, Method::Get | Method::Head) {
+            return Err(fail(403, "this token may only read"));
+        }
+        Ok(caller)
+    }
+
     fn attempt(&self, client: &str) -> Result<usize, Duration> {
         let mut failures = self.failures.lock().unwrap_or_else(|p| p.into_inner());
         if let Some(times) = failures.get_mut(client) {
@@ -868,13 +921,32 @@ impl App {
         if !path.starts_with("/api/") {
             return fail(404, "not found");
         }
-        if !self.authorized(request) {
+        // R151: a script comes with a token instead of a cookie.
+        let bearer = request
+            .headers()
+            .iter()
+            .find(|h| h.field.equiv("Authorization"))
+            .and_then(|h| h.value.as_str().strip_prefix("Bearer ").map(|t| t.trim().to_string()));
+        let caller = match bearer {
+            Some(secret) => match self.token_caller(request, &method, &path, &secret) {
+                Ok(caller) => Some(caller),
+                Err(reply) => return reply,
+            },
+            None => None,
+        };
+        if caller.is_none() && !self.authorized(request) {
             return fail(401, "login required");
         }
         // A cross-site form cannot set this header; together with SameSite it rules out CSRF.
-        if method == Method::Post && !request.headers().iter().any(|h| h.field.equiv("X-Lists")) {
+        // A token is not sent by the browser on its own, so it needs no such guard.
+        if caller.is_none() && method == Method::Post && !request.headers().iter().any(|h| h.field.equiv("X-Lists")) {
             return fail(400, "missing X-Lists header");
         }
+        // R131: each session and each token has a history of its own.
+        let actor = match &caller {
+            Some(caller) => format!("token:{}", caller.id),
+            None => self.session(request).unwrap_or_default(),
+        };
         // R135: today and the time of day are the browser's. A request that does not give its zone
         // is answered in the server's, as before.
         let zone = request
@@ -966,7 +1038,6 @@ impl App {
                         let _ = std::fs::remove_dir_all(&dir);
                         return Ok(r);
                     }
-                    let actor = self.session(request).unwrap_or_default();
                     let added = self.store.as_actor(&actor, || {
                         self.store
                             .add_attachment(task, file.to_string_lossy().into_owned(), Some(name))
@@ -1006,9 +1077,23 @@ impl App {
                     let args: Value =
                         serde_json::from_slice(&body).map_err(|e| AppError::Invalid { msg: e.to_string() })?;
                     let op = text_arg(&args, "op")?;
-                    // R131: each session has a history of its own.
-                    let actor = self.session(request).unwrap_or_default();
                     json_reply(200, self.store.as_actor(&actor, || self.call(&op, &args))?)
+                }
+                (Method::Get, "/api/tokens") => json_reply(200, self.tokens.list()),
+                (Method::Post, "/api/tokens") => {
+                    let args = match Self::json_body(request) {
+                        Ok(v) => v,
+                        Err(r) => return Ok(r),
+                    };
+                    json_reply(200, self.tokens.create(&args)?)
+                }
+                (Method::Post, "/api/tokens/revoke") => {
+                    let args = match Self::json_body(request) {
+                        Ok(v) => v,
+                        Err(r) => return Ok(r),
+                    };
+                    let known = self.tokens.revoke(args["id"].as_str().unwrap_or_default())?;
+                    json_reply(200, json!({ "ok": true, "known": known }))
                 }
                 (Method::Get, "/api/notifications/key") => {
                     json_reply(200, json!({ "key": self.notifier.public_key() }))
@@ -1240,6 +1325,7 @@ pub fn start(config: Config) -> Result<Running, Box<dyn std::error::Error>> {
         Path::new(&data_dir),
         config.vapid_subject.unwrap_or_else(|| VAPID_SUBJECT.into()),
     )?;
+    let tokens = tokens::Tokens::open(Path::new(&data_dir))?;
     // R140: the limits of this server: what the environment gives, or the defaults. The environment
     // is the only place they are set here, so a removed variable brings its default back.
     store.set_attachment_limits(AttachmentLimits {
@@ -1264,6 +1350,7 @@ pub fn start(config: Config) -> Result<Running, Box<dyn std::error::Error>> {
         failures: Mutex::new(HashMap::new()),
         dirty: AtomicBool::new(true),
         notifier,
+        tokens,
     });
 
     // R134: a thread for each request, as tiny_http has one for each connection, so a

@@ -1700,3 +1700,139 @@ fn r147_r148_notifications_over_the_api() {
         "an unsubscribed browser gets nothing"
     );
 }
+
+/// R150–R152: the status and the answer of a request made with `token`.
+fn with_token(web: &Web, token: &str, method: &str, path: &str, body: Option<Value>) -> (u16, Value, Option<String>) {
+    let request =
+        ureq::request(method, &format!("{}{path}", web.base)).set("Authorization", &format!("Bearer {token}"));
+    let result = match body {
+        Some(body) => request.send_json(body),
+        None => request.call(),
+    };
+    let response = match result {
+        Ok(r) => r,
+        Err(ureq::Error::Status(_, r)) => r,
+        Err(e) => panic!("{e}"),
+    };
+    let retry = response.header("Retry-After").map(str::to_string);
+    (response.status(), response.into_json().unwrap_or(Value::Null), retry)
+}
+
+fn make_token(web: &Web, cookie: &str, name: &str, scope: &str) -> String {
+    ureq::post(&format!("{}/api/tokens", web.base))
+        .set("Cookie", cookie)
+        .set("X-Lists", "1")
+        .send_json(json!({ "name": name, "scope": scope }))
+        .unwrap()
+        .into_json::<Value>()
+        .unwrap()["token"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+#[test]
+fn r150_r151_tokens_read_write_and_are_revoked() {
+    let web = web(Some("secret"));
+    let cookie = login(&web, "secret").unwrap();
+    let reader = make_token(&web, &cookie, "скрипт", "read");
+    let writer = make_token(&web, &cookie, "ярлык", "write");
+    let listed = get(&web, &cookie, "/api/tokens");
+    assert_eq!(
+        listed
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| (t["name"].as_str().unwrap(), t["scope"].as_str().unwrap()))
+            .collect::<Vec<_>>(),
+        [("скрипт", "read"), ("ярлык", "write")]
+    );
+    assert!(listed[0].get("token").is_none() && listed[0].get("hash").is_none());
+
+    assert_eq!(with_token(&web, &reader, "GET", "/api/overview", None).0, 200);
+    assert_eq!(with_token(&web, &reader, "GET", "/api/tasks?scope=today", None).0, 200);
+    let refused = with_token(
+        &web,
+        &reader,
+        "POST",
+        "/api/call",
+        Some(json!({ "op": "quickAdd", "text": "нет" })),
+    );
+    assert_eq!(refused.0, 403);
+
+    // No cookie and no X-Lists: a token is not sent by a browser on its own.
+    let (code, made, _) = with_token(
+        &web,
+        &writer,
+        "POST",
+        "/api/call",
+        Some(json!({ "op": "quickAdd", "text": "из ярлыка", "scope": "inbox" })),
+    );
+    assert_eq!(code, 200, "{made}");
+    // The browser makes a change of its own; the token's undo takes back the token's change.
+    call(
+        &web,
+        &cookie,
+        json!({ "op": "quickAdd", "text": "из браузера", "scope": "inbox" }),
+    );
+    assert_eq!(
+        with_token(&web, &writer, "POST", "/api/call", Some(json!({ "op": "undo" }))).0,
+        200
+    );
+    let titles: Vec<String> = get(&web, &cookie, "/api/tasks?scope=inbox")
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["title"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(titles, ["из браузера"]);
+
+    for (method, path, body) in [
+        ("GET", "/api/tokens", None),
+        ("POST", "/api/tokens", Some(json!({ "name": "ещё", "scope": "write" }))),
+        ("POST", "/api/logout", Some(json!({}))),
+        ("POST", "/api/notifications/subscribe", Some(json!({}))),
+    ] {
+        assert_eq!(with_token(&web, &writer, method, path, body).0, 403, "{method} {path}");
+    }
+    assert!(get(&web, &cookie, "/api/tokens")[1]["used"].is_string());
+
+    let id = get(&web, &cookie, "/api/tokens")[1]["id"].as_str().unwrap().to_string();
+    let revoked: Value = ureq::post(&format!("{}/api/tokens/revoke", web.base))
+        .set("Cookie", &cookie)
+        .set("X-Lists", "1")
+        .send_json(json!({ "id": id }))
+        .unwrap()
+        .into_json()
+        .unwrap();
+    assert_eq!(revoked["known"], true);
+    assert_eq!(with_token(&web, &writer, "GET", "/api/overview", None).0, 401);
+    assert_eq!(with_token(&web, &reader, "GET", "/api/overview", None).0, 200);
+}
+
+#[test]
+fn r152_tokens_are_limited_and_wrong_ones_count_as_failed_logins() {
+    let web = web(Some("secret"));
+    let cookie = login(&web, "secret").unwrap();
+    let token = make_token(&web, &cookie, "много", "read");
+    for i in 0..600 {
+        assert_eq!(
+            with_token(&web, &token, "GET", "/api/counts-not-there", None).0,
+            404,
+            "request {i}"
+        );
+    }
+    let (code, _, retry) = with_token(&web, &token, "GET", "/api/overview", None);
+    assert_eq!(code, 429);
+    assert!(retry.is_some_and(|s| s.parse::<u64>().is_ok_and(|s| (1..=61).contains(&s))));
+
+    for _ in 0..5 {
+        assert_eq!(with_token(&web, "lists_wrong", "GET", "/api/overview", None).0, 401);
+    }
+    assert_eq!(with_token(&web, "lists_wrong", "GET", "/api/overview", None).0, 429);
+    assert_eq!(
+        login(&web, "secret"),
+        None,
+        "the password login of that client waits as well"
+    );
+}
