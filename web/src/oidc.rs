@@ -42,6 +42,8 @@ pub struct Oidc {
 }
 
 const PENDING_TTL: Duration = Duration::from_secs(600);
+/// R134: how many sign-ins may be under way at once; a new one pushes out the oldest.
+const MAX_PENDING: usize = 1000;
 
 fn random() -> String {
     format!("{}{}", uuid::Uuid::new_v4().simple(), uuid::Uuid::new_v4().simple())
@@ -158,6 +160,12 @@ impl Oidc {
         ]);
         let mut pending = self.pending.lock().unwrap_or_else(|p| p.into_inner());
         pending.retain(|_, p| p.created.elapsed() < PENDING_TTL);
+        if pending.len() >= MAX_PENDING {
+            let oldest = pending.iter().min_by_key(|(_, p)| p.created).map(|(s, _)| s.clone());
+            if let Some(oldest) = oldest {
+                pending.remove(&oldest);
+            }
+        }
         pending.insert(
             state,
             Pending {

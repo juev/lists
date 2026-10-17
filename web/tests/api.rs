@@ -15,18 +15,25 @@ fn web(password: Option<&str>) -> Web {
 }
 
 fn web_syncing(password: Option<&str>, sync: SyncConfig) -> Web {
+    web_configured(password, |c| c.sync = sync)
+}
+
+fn web_configured(password: Option<&str>, change: impl FnOnce(&mut Config)) -> Web {
     let dir = tempfile::tempdir().unwrap();
-    let running = start(Config {
+    let mut config = Config {
         data_dir: dir.path().to_string_lossy().into_owned(),
         listen: "127.0.0.1:0".into(),
         password: password.map(str::to_string),
         oidc: None,
-        sync,
+        sync: SyncConfig::Off,
         sync_password: None,
         push_server: None,
         push_token: None,
-    })
-    .unwrap();
+        trust_proxy: false,
+        secure_cookie: false,
+    };
+    change(&mut config);
+    let running = start(config).unwrap();
     Web {
         base: format!("http://{}", running.addr),
         _dir: dir,
@@ -1206,4 +1213,166 @@ fn r130_quick_add_puts_the_task_first() {
         .map(|t| t["title"].as_str().unwrap())
         .collect();
     assert_eq!(titles, ["п2", "п1"]);
+}
+
+#[test]
+fn r134_wrong_passwords_do_not_hold_the_server() {
+    let web = web(Some("secret"));
+    let started = std::time::Instant::now();
+    let tries: Vec<_> = (0..4)
+        .map(|_| {
+            let base = web.base.clone();
+            std::thread::spawn(move || {
+                status(ureq::post(&format!("{base}/api/login")).send_json(json!({ "password": "wrong" })))
+            })
+        })
+        .collect();
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    assert_eq!(status(ureq::get(&format!("{}/", web.base)).call()), 200);
+    let page = started.elapsed();
+    let codes: Vec<u16> = tries.into_iter().map(|t| t.join().unwrap()).collect();
+    assert_eq!(codes, [401; 4]);
+    assert!(page < std::time::Duration::from_millis(400), "the page took {page:?}");
+    assert!(
+        started.elapsed() < std::time::Duration::from_millis(400),
+        "a wrong password is answered at once"
+    );
+}
+
+/// Sends the head of a login that promises a body and never sends it. tiny_http reads
+/// a body up to 1 KB itself before handing the request over, so this one is larger.
+/// It comes from another client, since an attempt counts as failed until it succeeds.
+fn unfinished_login(web: &Web) -> std::net::TcpStream {
+    use std::io::Write;
+    let mut stream = std::net::TcpStream::connect(web.base.trim_start_matches("http://")).unwrap();
+    stream
+        .write_all(b"POST /api/login HTTP/1.1\r\nHost: lists\r\nContent-Type: application/json\r\nX-Forwarded-For: 203.0.113.9\r\nContent-Length: 2000\r\n\r\n{")
+        .unwrap();
+    stream
+}
+
+fn login_from(web: &Web, password: &str, forwarded: Option<&str>) -> ureq::Response {
+    let mut request = ureq::post(&format!("{}/api/login", web.base));
+    if let Some(address) = forwarded {
+        request = request.set("X-Forwarded-For", address);
+    }
+    match request.send_json(json!({ "password": password })) {
+        Ok(r) => r,
+        Err(ureq::Error::Status(_, r)) => r,
+        Err(e) => panic!("{e}"),
+    }
+}
+
+#[test]
+fn r134_unfinished_bodies_do_not_hold_the_server() {
+    let web = web_configured(Some("secret"), |c| c.trust_proxy = true);
+    let streams: Vec<_> = (0..8).map(|_| unfinished_login(&web)).collect();
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    let started = std::time::Instant::now();
+    let agent = ureq::AgentBuilder::new()
+        .timeout(std::time::Duration::from_secs(2))
+        .build();
+    assert_eq!(status(agent.get(&format!("{}/", web.base)).call()), 200);
+    assert!(login(&web, "secret").is_some());
+    assert!(
+        started.elapsed() < std::time::Duration::from_millis(500),
+        "took {:?}",
+        started.elapsed()
+    );
+    drop(streams);
+}
+
+#[test]
+fn r134_a_login_body_is_small() {
+    let web = web(Some("secret"));
+    let big = "x".repeat(5000);
+    assert_eq!(
+        status(ureq::post(&format!("{}/api/login", web.base)).send_json(json!({ "password": big }))),
+        413
+    );
+    assert!(login(&web, "secret").is_some(), "a refused body counts as no failure");
+}
+
+#[test]
+fn r134_failed_logins_are_limited_per_client() {
+    let web = web(Some("secret"));
+    for _ in 0..5 {
+        assert_eq!(login_from(&web, "wrong", None).status(), 401);
+    }
+    let refused = login_from(&web, "secret", None);
+    assert_eq!(refused.status(), 429, "the right password is not checked either");
+    let wait: u64 = refused.header("Retry-After").unwrap().parse().unwrap();
+    assert!((1..=60).contains(&wait), "Retry-After: {wait}");
+    assert_eq!(
+        login_from(&web, "secret", Some("203.0.113.7")).status(),
+        429,
+        "without LISTS_TRUST_PROXY the header is not believed"
+    );
+}
+
+#[test]
+fn r134_behind_a_proxy_the_client_is_the_forwarded_address() {
+    let web = web_configured(Some("secret"), |c| c.trust_proxy = true);
+    for _ in 0..5 {
+        assert_eq!(
+            login_from(&web, "wrong", Some("198.51.100.1, 203.0.113.7")).status(),
+            401
+        );
+    }
+    assert_eq!(login_from(&web, "secret", Some("203.0.113.7")).status(), 429);
+    assert_eq!(
+        login_from(&web, "secret", Some("203.0.113.7, 203.0.113.8")).status(),
+        200,
+        "the address the proxy appended is the last one"
+    );
+    assert_eq!(
+        login_from(&web, "secret", None).status(),
+        200,
+        "no header: the connection's address"
+    );
+}
+
+#[test]
+fn r134_a_good_login_clears_the_count() {
+    let web = web(Some("secret"));
+    for _ in 0..4 {
+        assert_eq!(login_from(&web, "wrong", None).status(), 401);
+    }
+    assert_eq!(login_from(&web, "secret", None).status(), 200);
+    for _ in 0..4 {
+        assert_eq!(login_from(&web, "wrong", None).status(), 401);
+    }
+    assert_eq!(login_from(&web, "secret", None).status(), 200);
+}
+
+#[test]
+fn r134_the_cookie_is_secure_over_https() {
+    let plain = web(Some("secret"));
+    let cookie = login_from(&plain, "secret", None)
+        .header("Set-Cookie")
+        .unwrap()
+        .to_string();
+    assert!(!cookie.contains("Secure"), "{cookie}");
+    let secure = web_configured(Some("secret"), |c| c.secure_cookie = true);
+    let cookie = login_from(&secure, "secret", None)
+        .header("Set-Cookie")
+        .unwrap()
+        .to_string();
+    assert!(cookie.ends_with("; Secure") && cookie.contains("HttpOnly"), "{cookie}");
+}
+
+#[test]
+fn r134_concurrent_guesses_do_not_pass_the_limit() {
+    let web = web(Some("secret"));
+    let tries: Vec<_> = (0..20)
+        .map(|_| {
+            let base = web.base.clone();
+            std::thread::spawn(move || {
+                status(ureq::post(&format!("{base}/api/login")).send_json(json!({ "password": "wrong" })))
+            })
+        })
+        .collect();
+    let codes: Vec<u16> = tries.into_iter().map(|t| t.join().unwrap()).collect();
+    assert_eq!(codes.iter().filter(|c| **c == 401).count(), 5, "{codes:?}");
+    assert_eq!(codes.iter().filter(|c| **c == 429).count(), 15, "{codes:?}");
 }

@@ -7,7 +7,7 @@
 
 mod oidc;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::io::Read;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -37,6 +37,13 @@ const COOKIE: &str = "lists_session";
 /// Request bodies above this are refused; it bounds one uploaded attachment.
 const MAX_BODY: usize = 64 * 1024 * 1024;
 const SESSION_TTL: Duration = Duration::from_secs(30 * 24 * 3600);
+/// R134: a login carries a password and nothing more.
+const LOGIN_MAX_BODY: usize = 4 * 1024;
+/// R134: this many failed logins within `LOGIN_WINDOW` and the client is refused until the window frees up.
+const LOGIN_LIMIT: usize = 5;
+const LOGIN_WINDOW: Duration = Duration::from_secs(60);
+/// R134: how many clients' failed logins are remembered at most.
+const LOGIN_CLIENTS: usize = 10_000;
 
 pub struct Config {
     pub data_dir: String,
@@ -52,6 +59,10 @@ pub struct Config {
     pub push_server: Option<String>,
     /// Access token for that server, when it requires sign-in (S27).
     pub push_token: Option<String>,
+    /// R134: the client is the last address of `X-Forwarded-For`, which a reverse proxy appends.
+    pub trust_proxy: bool,
+    /// R134: the session cookie is `Secure`, for a server the browser reaches over HTTPS.
+    pub secure_cookie: bool,
 }
 
 struct App {
@@ -60,6 +71,10 @@ struct App {
     oidc: Option<oidc::Oidc>,
     /// Session token → when it stops being valid.
     sessions: Mutex<HashMap<String, Instant>>,
+    trust_proxy: bool,
+    secure_cookie: bool,
+    /// Client → when its failed logins within `LOGIN_WINDOW` were, oldest first.
+    failures: Mutex<HashMap<String, VecDeque<Instant>>>,
     /// Set by a change, cleared by the sync thread.
     dirty: AtomicBool,
 }
@@ -629,13 +644,56 @@ impl App {
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .insert(token.clone(), Instant::now() + SESSION_TTL);
+        let secure = if self.secure_cookie { "; Secure" } else { "" };
         header(
             "Set-Cookie",
             &format!(
-                "{COOKIE}={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age={}",
+                "{COOKIE}={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age={}{secure}",
                 SESSION_TTL.as_secs()
             ),
         )
+    }
+
+    /// Who is asking, for counting failed logins (R134).
+    fn client(&self, request: &Request) -> String {
+        let forwarded = self
+            .trust_proxy
+            .then(|| request.headers().iter().find(|h| h.field.equiv("X-Forwarded-For")))
+            .flatten()
+            .and_then(|h| h.value.as_str().rsplit(',').next().map(|a| a.trim().to_string()))
+            .filter(|a| !a.is_empty());
+        forwarded
+            .or_else(|| request.remote_addr().map(|a| a.ip().to_string()))
+            .unwrap_or_default()
+    }
+
+    /// Counts a login attempt as failed until it succeeds, so that attempts made at the same
+    /// time cannot check more passwords than the limit allows. Returns how many the client
+    /// has within the window, or how long it is still refused.
+    fn attempt(&self, client: &str) -> Result<usize, Duration> {
+        let mut failures = self.failures.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(times) = failures.get_mut(client) {
+            while times.front().is_some_and(|t| t.elapsed() >= LOGIN_WINDOW) {
+                times.pop_front();
+            }
+            if times.len() >= LOGIN_LIMIT {
+                return Err(LOGIN_WINDOW.saturating_sub(times[0].elapsed()));
+            }
+        } else if failures.len() >= LOGIN_CLIENTS {
+            failures.retain(|_, times| times.back().is_some_and(|t| t.elapsed() < LOGIN_WINDOW));
+            if failures.len() >= LOGIN_CLIENTS {
+                let oldest = failures
+                    .iter()
+                    .min_by_key(|(_, times)| times.back().copied())
+                    .map(|(c, _)| c.clone());
+                if let Some(oldest) = oldest {
+                    failures.remove(&oldest);
+                }
+            }
+        }
+        let times = failures.entry(client.to_string()).or_default();
+        times.push_back(Instant::now());
+        Ok(times.len())
     }
 
     fn authorized(&self, request: &Request) -> bool {
@@ -643,16 +701,20 @@ impl App {
     }
 
     fn body(request: &mut Request) -> Result<Vec<u8>, Reply> {
-        if request.body_length().is_some_and(|n| n > MAX_BODY) {
+        Self::body_within(request, MAX_BODY)
+    }
+
+    fn body_within(request: &mut Request, limit: usize) -> Result<Vec<u8>, Reply> {
+        if request.body_length().is_some_and(|n| n > limit) {
             return Err(fail(413, "too large"));
         }
         let mut data = Vec::new();
         request
             .as_reader()
-            .take(MAX_BODY as u64 + 1)
+            .take(limit as u64 + 1)
             .read_to_end(&mut data)
             .map_err(|e| fail(400, e.to_string()))?;
-        if data.len() > MAX_BODY {
+        if data.len() > limit {
             return Err(fail(413, "too large"));
         }
         Ok(data)
@@ -678,7 +740,18 @@ impl App {
             (Method::Get, "/icon-192.png") => return reply(200, "image/png", ICON_192),
             (Method::Get, "/icon-512.png") => return reply(200, "image/png", ICON_512),
             (Method::Post, "/api/login") => {
-                let body = match Self::body(request) {
+                if request.body_length().is_some_and(|n| n > LOGIN_MAX_BODY) {
+                    return fail(413, "too large");
+                }
+                let client = self.client(request);
+                let count = match self.attempt(&client) {
+                    Ok(count) => count,
+                    Err(wait) => {
+                        return fail(429, "too many failed logins")
+                            .with_header(header("Retry-After", &(wait.as_secs() + 1).to_string()))
+                    }
+                };
+                let body = match Self::body_within(request, LOGIN_MAX_BODY) {
                     Ok(b) => b,
                     Err(r) => return r,
                 };
@@ -690,10 +763,14 @@ impl App {
                     _ => false,
                 };
                 if !correct {
-                    // Slows down guessing.
-                    std::thread::sleep(Duration::from_millis(800));
+                    // Guessing is slowed down by the limit, not by holding the thread.
+                    eprintln!("lists-web: failed login from {client} ({count} in the last minute)");
+                    if count == LOGIN_LIMIT {
+                        eprintln!("lists-web: logins from {client} are refused for a minute: too many failed attempts");
+                    }
                     return fail(401, "wrong password");
                 }
+                self.failures.lock().unwrap_or_else(|p| p.into_inner()).remove(&client);
                 return json_reply(200, json!({ "ok": true })).with_header(self.open_session());
             }
             (Method::Get, "/auth/methods") => {
@@ -914,15 +991,26 @@ pub fn start(config: Config) -> Result<Running, Box<dyn std::error::Error>> {
         password: config.password,
         oidc: config.oidc.map(oidc::Oidc::new).transpose()?,
         sessions: Mutex::new(HashMap::new()),
+        trust_proxy: config.trust_proxy,
+        secure_cookie: config.secure_cookie,
+        failures: Mutex::new(HashMap::new()),
         dirty: AtomicBool::new(true),
     });
 
-    for _ in 0..4 {
-        let (server, app) = (server.clone(), app.clone());
+    // R134: a thread for each request, as tiny_http has one for each connection, so a
+    // request whose body never arrives holds only its own. The rest of a body that was
+    // not read is drained when the request is dropped, on the thread that had it.
+    // There is no read timeout: tiny_http does not reach the connections, and one on the
+    // listening socket makes accept fail on Linux, which stops the server for good.
+    {
+        let app = app.clone();
         std::thread::spawn(move || {
             while let Ok(mut request) = server.recv() {
-                let response = app.handle(&mut request);
-                let _ = request.respond(response);
+                let app = app.clone();
+                let _ = std::thread::Builder::new().spawn(move || {
+                    let response = app.handle(&mut request);
+                    let _ = request.respond(response);
+                });
             }
         });
     }

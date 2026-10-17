@@ -7,7 +7,8 @@
 //! LISTS_OIDC_CLIENT_ID=…       the redirect address to register is <LISTS_WEB_URL>/auth/callback
 //! LISTS_OIDC_CLIENT_SECRET=…   leave out for a public client; PKCE is used either way
 //! LISTS_OIDC_ALLOW=a@b.c,…     e-mail addresses or subject ids that may sign in (required with OIDC)
-//! LISTS_WEB_URL=https://…      this server's address as the browser sees it
+//! LISTS_WEB_URL=https://…      this server's address as the browser sees it; https:// makes the session cookie Secure
+//! LISTS_TRUST_PROXY=1          take the client's address from X-Forwarded-For, set by a reverse proxy in front
 //! LISTS_WEB_LISTEN=127.0.0.1:8080
 //! LISTS_WEB_DATA=./lists-data   where this device keeps its copy
 //! LISTS_SYNC=webdav|caldav|folder|off
@@ -69,6 +70,8 @@ fn main() {
         sync_password: env("LISTS_SYNC_PASSWORD"),
         push_server: env("LISTS_PUSH_SERVER"),
         push_token: env("LISTS_PUSH_TOKEN"),
+        trust_proxy: env("LISTS_TRUST_PROXY").as_deref() == Some("1"),
+        secure_cookie: env("LISTS_WEB_URL").is_some_and(|u| u.to_ascii_lowercase().starts_with("https://")),
     };
     match start(config) {
         Ok(running) => {
