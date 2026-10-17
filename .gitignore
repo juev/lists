@@ -25,3 +25,8 @@ dist/
 
 # Tracked here although the global gitignore excludes it
 !/AGENTS.md
+
+# Passwords for compose.yaml; .env.example is the template
+.env
+.env.*
+!.env.example
