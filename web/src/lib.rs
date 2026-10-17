@@ -5,7 +5,9 @@
 //! WebDAV or CalDAV server on another origin, so this is what makes Lists
 //! reachable from a phone without a native app.
 
+mod notify;
 mod oidc;
+mod webpush;
 
 use std::collections::{HashMap, VecDeque};
 use std::io::{Read, Seek, SeekFrom, Write};
@@ -28,6 +30,8 @@ use tiny_http::{Header, Method, Request, Response, ResponseBox, Server};
 
 const INDEX: &str = include_str!("index.html");
 const MANIFEST: &str = include_str!("manifest.json");
+/// R144, R147: shows the notifications and keeps the page for when the server cannot be reached.
+const SERVICE_WORKER: &str = include_str!("sw.js");
 const ICON: &str = include_str!("icon.svg");
 // Bitmaps for what cannot use the SVG: the iOS home screen, the install
 // prompt, and browsers that only take a PNG for the tab.
@@ -74,7 +78,12 @@ pub struct Config {
     pub max_file: Option<u64>,
     /// R140: the most all live attachments of one task may weigh; `None` keeps the default.
     pub max_task: Option<u64>,
+    /// R146: the contact push services see in the VAPID token, `mailto:` or `https:`.
+    pub vapid_subject: Option<String>,
 }
+
+/// R146: what the token says when nothing is configured; Apple refuses a token without a contact.
+const VAPID_SUBJECT: &str = "https://github.com/juev/lists";
 
 struct App {
     store: Arc<Store>,
@@ -88,6 +97,7 @@ struct App {
     failures: Mutex<HashMap<String, VecDeque<Instant>>>,
     /// Set by a change, cleared by the sync thread.
     dirty: AtomicBool,
+    notifier: notify::Notifier,
 }
 
 pub struct Running {
@@ -716,6 +726,12 @@ impl App {
         Self::body_within(request, MAX_BODY)
     }
 
+    /// A small JSON body, as the notification calls send.
+    fn json_body(request: &mut Request) -> Result<Value, Reply> {
+        let body = Self::body_within(request, 16 * 1024)?;
+        serde_json::from_slice(&body).map_err(|e| fail(400, e.to_string()))
+    }
+
     fn body_within(request: &mut Request, limit: usize) -> Result<Vec<u8>, Reply> {
         if request.body_length().is_some_and(|n| n > limit) {
             return Err(fail(413, "too large"));
@@ -779,6 +795,11 @@ impl App {
             // server answers, so it needs no session.
             (Method::Get, "/healthz") => return reply(200, "text/plain; charset=utf-8", "ok"),
             (Method::Get, "/manifest.json") => return reply(200, "application/manifest+json", MANIFEST),
+            // A new version of the page reaches the browser through a new worker, so it is never cached.
+            (Method::Get, "/sw.js") => {
+                return reply(200, "text/javascript; charset=utf-8", SERVICE_WORKER)
+                    .with_header(header("Cache-Control", "no-cache"))
+            }
             (Method::Get, "/icon.svg") => return reply(200, "image/svg+xml", ICON),
             (Method::Get, "/icon-32.png") | (Method::Get, "/favicon.ico") => return reply(200, "image/png", ICON_32),
             (Method::Get, "/icon-180.png") | (Method::Get, "/apple-touch-icon.png") => {
@@ -989,6 +1010,39 @@ impl App {
                     let actor = self.session(request).unwrap_or_default();
                     json_reply(200, self.store.as_actor(&actor, || self.call(&op, &args))?)
                 }
+                (Method::Get, "/api/notifications/key") => {
+                    json_reply(200, json!({ "key": self.notifier.public_key() }))
+                }
+                (Method::Post, "/api/notifications/subscribe") => {
+                    let args = match Self::json_body(request) {
+                        Ok(v) => v,
+                        Err(r) => return Ok(r),
+                    };
+                    json_reply(200, json!({ "settings": self.notifier.subscribe(&args)? }))
+                }
+                (Method::Post, "/api/notifications/unsubscribe") => {
+                    let args = match Self::json_body(request) {
+                        Ok(v) => v,
+                        Err(r) => return Ok(r),
+                    };
+                    let known = self
+                        .notifier
+                        .unsubscribe(args["endpoint"].as_str().unwrap_or_default())?;
+                    json_reply(200, json!({ "ok": true, "known": known }))
+                }
+                (Method::Post, "/api/notifications/test") => {
+                    let args = match Self::json_body(request) {
+                        Ok(v) => v,
+                        Err(r) => return Ok(r),
+                    };
+                    let endpoint = args["endpoint"].as_str().unwrap_or_default();
+                    match self.notifier.test(endpoint, chrono::Utc::now()) {
+                        Some(notify::Sent::Ok) => json_reply(200, json!({ "ok": true })),
+                        Some(notify::Sent::Gone) => fail(410, "the browser no longer has this subscription"),
+                        Some(notify::Sent::Failed(e)) => fail(502, e),
+                        None => fail(404, "this browser is not subscribed"),
+                    }
+                }
                 (Method::Post, "/api/logout") => {
                     if let Some(token) = self.session(request) {
                         self.sessions.lock().unwrap_or_else(|p| p.into_inner()).remove(&token);
@@ -1179,7 +1233,13 @@ pub fn check_health(listen: &str) -> Result<(), String> {
 
 /// Opens the store, starts the HTTP workers and the sync thread, and returns.
 pub fn start(config: Config) -> Result<Running, Box<dyn std::error::Error>> {
+    let data_dir = config.data_dir.clone();
     let store = Store::open(config.data_dir)?;
+    // After the store, which makes the folder.
+    let notifier = notify::Notifier::open(
+        Path::new(&data_dir),
+        config.vapid_subject.unwrap_or_else(|| VAPID_SUBJECT.into()),
+    )?;
     // R140: the limits of this server: what the environment gives, or the defaults. The environment
     // is the only place they are set here, so a removed variable brings its default back.
     store.set_attachment_limits(AttachmentLimits {
@@ -1203,6 +1263,7 @@ pub fn start(config: Config) -> Result<Running, Box<dyn std::error::Error>> {
         secure_cookie: config.secure_cookie,
         failures: Mutex::new(HashMap::new()),
         dirty: AtomicBool::new(true),
+        notifier,
     });
 
     // R134: a thread for each request, as tiny_http has one for each connection, so a
@@ -1231,6 +1292,15 @@ pub fn start(config: Config) -> Result<Running, Box<dyn std::error::Error>> {
             if app.store.wait_for_nudge() {
                 app.dirty.store(true, Ordering::Relaxed);
             }
+        });
+    }
+
+    // R144: what came due is sent every half minute. The first look only marks the start.
+    {
+        let app = app.clone();
+        std::thread::spawn(move || loop {
+            app.notifier.tick(&app.store, chrono::Utc::now());
+            std::thread::sleep(Duration::from_secs(30));
         });
     }
 

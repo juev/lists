@@ -21,6 +21,7 @@
 //! LISTS_PUSH_TOKEN=tk_…         access token for that server, when it requires sign-in
 //! LISTS_MAX_FILE_MB=512         R140: the largest attachment this server takes; 0 means no limit
 //! LISTS_MAX_TASK_MB=2048        R140: the most all attachments of one task may take here; 0 means no limit
+//! LISTS_VAPID_SUBJECT=mailto:…  R146: the contact push services see for this server; LISTS_WEB_URL by default
 //! ```
 //!
 //! `lists-web healthcheck` asks the server on LISTS_WEB_LISTEN whether it answers and exits
@@ -95,6 +96,7 @@ fn main() {
         secure_cookie: env("LISTS_WEB_URL").is_some_and(|u| u.to_ascii_lowercase().starts_with("https://")),
         max_file: megabytes("LISTS_MAX_FILE_MB"),
         max_task: megabytes("LISTS_MAX_TASK_MB"),
+        vapid_subject: env("LISTS_VAPID_SUBJECT").or_else(|| env("LISTS_WEB_URL")),
     };
     match start(config) {
         Ok(running) => {
