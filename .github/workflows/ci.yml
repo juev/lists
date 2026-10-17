@@ -50,6 +50,26 @@ jobs:
       NDK_VERSION: 28.2.13676358
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # A pull request is checked out as a merge commit: its first parent is the base branch.
+          fetch-depth: 2
+      # The release APK takes three of the job's six minutes, and only a change to the app, the
+      # core it bundles or the build can break it. A pull request that touches none of them skips
+      # it; a push to main always runs it, so a tag is never the first release build.
+      - name: Check whether the change reaches the release APK
+        id: release
+        run: |
+          changed=''
+          if [[ "$GITHUB_EVENT_NAME" == 'pull_request' ]]; then
+            changed="$(git diff --name-only HEAD^1 HEAD)"
+          fi
+          if [[ "$GITHUB_EVENT_NAME" != 'pull_request' ]] ||
+            grep -qE '^(android/|core/|rust-toolchain\.toml$|scripts/(build|check-launch)-android\.sh$|\.github/workflows/ci\.yml$)' <<< "$changed"; then
+            echo 'check=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'The change does not reach the release APK: its build and start are skipped'
+            echo 'check=false' >> "$GITHUB_OUTPUT"
+          fi
       - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
@@ -83,17 +103,20 @@ jobs:
       # time, not a build error. The APK is built as published, but for the x86_64 emulator and
       # signed with the debug key; the tag workflow builds the signed arm64 one.
       - name: Build the release APK for the emulator
+        if: steps.release.outputs.check == 'true'
         working-directory: android
         env:
           LISTS_ANDROID_ABIS: x86_64
           LISTS_RELEASE_DEBUG_SIGNING: '1'
         run: ./gradlew --quiet assembleRelease
       - name: Enable KVM
+        if: steps.release.outputs.check == 'true'
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
       - name: Start the release APK
+        if: steps.release.outputs.check == 'true'
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
           api-level: 36
