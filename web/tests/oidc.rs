@@ -94,6 +94,7 @@ fn web(provider: &Provider, allow: &[&str]) -> Web {
         secure_cookie: false,
         max_file: None,
         max_task: None,
+        vapid_subject: None,
     })
     .unwrap();
     Web {
@@ -290,6 +291,7 @@ fn configuration_mistakes_stop_the_server_from_starting() {
         secure_cookie: false,
         max_file: None,
         max_task: None,
+        vapid_subject: None,
     };
     assert!(
         start(config("http://id.example.org", vec!["a@b.c".into()])).is_err(),

@@ -34,6 +34,7 @@ fn web_configured(password: Option<&str>, change: impl FnOnce(&mut Config)) -> W
         secure_cookie: false,
         max_file: None,
         max_task: None,
+        vapid_subject: None,
     };
     change(&mut config);
     let running = start(config).unwrap();
@@ -1601,4 +1602,101 @@ fn s58_the_server_opens_an_encrypted_storage_with_the_passphrase_it_is_given() {
     call(&web, "", json!({ "op": "sync" }));
     let path = format!("/api/task?id={}", task.id);
     assert_eq!(get(&web, "", &path)["task"]["title"], "под замком");
+}
+
+#[test]
+fn r145_r146_notifications_over_the_api() {
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    use base64::Engine;
+    use p256::elliptic_curve::sec1::ToEncodedPoint;
+
+    let web = web(Some("secret"));
+    let sw = ureq::get(&format!("{}/sw.js", web.base)).call().unwrap();
+    assert!(
+        sw.content_type().contains("javascript"),
+        "the worker is served without a session"
+    );
+    assert_eq!(
+        status(ureq::get(&format!("{}/api/notifications/key", web.base)).call()),
+        401
+    );
+    let cookie = login(&web, "secret").unwrap();
+    let key = get(&web, &cookie, "/api/notifications/key")["key"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let key = URL_SAFE_NO_PAD.decode(key).unwrap();
+    assert!(p256::PublicKey::from_sec1_bytes(&key).is_ok() && key.len() == 65);
+
+    let browser = p256::SecretKey::random(&mut rand_core::OsRng);
+    let subscription = |endpoint: &str| {
+        json!({
+            "endpoint": endpoint,
+            "keys": {
+                "p256dh": URL_SAFE_NO_PAD.encode(browser.public_key().to_encoded_point(false).as_bytes()),
+                "auth": URL_SAFE_NO_PAD.encode([1u8; 16]),
+            },
+            "zone": "Europe/Moscow", "offset": 180,
+        })
+    };
+    // The status and the answer.
+    let post = |path: &str, body: Value| -> (u16, Value) {
+        match ureq::post(&format!("{}{path}", web.base))
+            .set("Cookie", &cookie)
+            .set("X-Lists", "1")
+            .send_json(body)
+        {
+            Ok(r) => (r.status(), r.into_json().unwrap()),
+            Err(ureq::Error::Status(code, r)) => (code, r.into_json().unwrap()),
+            Err(e) => panic!("{e}"),
+        }
+    };
+    let (code, answer) = post(
+        "/api/notifications/subscribe",
+        subscription("https://push.example.net/a"),
+    );
+    assert_eq!(code, 200);
+    assert_eq!(
+        answer["settings"],
+        json!({ "leads": [0], "allDay": "09:00", "summary": null })
+    );
+    assert_eq!(
+        post(
+            "/api/notifications/subscribe",
+            subscription("http://push.example.net/a")
+        )
+        .0,
+        400
+    );
+    assert_eq!(
+        status(
+            ureq::post(&format!("{}/api/notifications/subscribe", web.base))
+                .set("Cookie", &cookie)
+                .send_json(subscription("https://push.example.net/a"))
+        ),
+        400,
+        "without X-Lists"
+    );
+    assert_eq!(
+        post(
+            "/api/notifications/test",
+            json!({ "endpoint": "https://push.example.net/other" })
+        )
+        .0,
+        404
+    );
+    let (_, gone) = post(
+        "/api/notifications/unsubscribe",
+        json!({ "endpoint": "https://push.example.net/a" }),
+    );
+    assert_eq!(gone["known"], true);
+    assert_eq!(
+        post(
+            "/api/notifications/test",
+            json!({ "endpoint": "https://push.example.net/a" })
+        )
+        .0,
+        404,
+        "an unsubscribed browser gets nothing"
+    );
 }
