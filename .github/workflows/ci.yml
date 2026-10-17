@@ -54,6 +54,14 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
+      - name: Install ktlint
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/ktlint" https://github.com/pinterest/ktlint/releases/download/1.8.0/ktlint
+          echo "a3fd620207d5c40da6ca789b95e7f823c54e854b7fade7f613e91096a3706d75  $RUNNER_TEMP/ktlint" | sha256sum --check --strict
+          chmod +x "$RUNNER_TEMP/ktlint"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      - name: Lint the Kotlin
+        run: make android-lint
       - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
       - name: Install Android SDK packages
         run: |
