@@ -155,6 +155,7 @@ import uniffi.lists_core.LogLevel
 import uniffi.lists_core.Priority
 import uniffi.lists_core.Repeat
 import uniffi.lists_core.SavedFilter
+import uniffi.lists_core.Scope
 import uniffi.lists_core.SortMode
 import uniffi.lists_core.Store
 import uniffi.lists_core.SyncConfig
@@ -1193,6 +1194,16 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
             model.importFrom(context, uri)
         }
     }
+    // R155, R156: whether Markdown, and the list, of the export on its way to a file.
+    var exporting by remember { mutableStateOf<Pair<Boolean, String?>?>(null) }
+    val saveExport = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
+        val what = exporting
+        exporting = null
+        if (uri != null && what != null) {
+            onDismiss()
+            model.exportTo(context, uri, what.first, what.second)
+        }
+    }
 
     // S36: the storage being joined while the person chooses a side, and the side that waits for a confirmation.
     var joining by remember { mutableStateOf<SyncConfig?>(null) }
@@ -1240,6 +1251,7 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
                             }
                             HorizontalDivider(Modifier.padding(vertical = 8.dp))
                             SettingRow(str(R.string.import_file), "") { pickImport.launch(arrayOf("*/*")) }
+                            SettingRow(str(R.string.export_file), "") { choosing = "export" }
                         }
                         "general" -> {
                             SettingRow(str(R.string.appearance), lookLabels[LookPrefs.choices.indexOf(LookPrefs.appearance(context))]) { choosing = "appearance" }
@@ -1522,6 +1534,21 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
     }
     when (choosing) {
         "backups" -> BackupsDialog(model) { choosing = null }
+        "export" -> {
+            val list = when (val scope = state.scope) {
+                is Scope.Inbox -> "inbox"
+                is Scope.List -> scope.id
+                else -> null
+            }
+            val choices = listOf(false to null, true to null) + if (list == null) emptyList() else listOf(false to list, true to list)
+            val labels = listOf(str(R.string.export_all_json), str(R.string.export_all_markdown)) +
+                if (list == null) emptyList() else listOf(str(R.string.export_list_json), str(R.string.export_list_markdown))
+            ChoiceDialog(str(R.string.export_file), labels, -1, { choosing = null }) {
+                val (markdown, chosen) = choices[it]
+                exporting = markdown to chosen
+                saveExport.launch("Lists-${java.time.LocalDate.now()}.${if (markdown) "md" else "json"}")
+            }
+        }
         "appearance" -> ChoiceDialog(str(R.string.appearance), lookLabels, LookPrefs.choices.indexOf(LookPrefs.appearance(context)), { choosing = null }) {
             LookPrefs.setAppearance(context, LookPrefs.choices[it])
         }
