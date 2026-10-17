@@ -36,7 +36,8 @@ import UserNotifications
 /// that field without adding it), `draftsubedit:0=title` (corrects the typed line with that number) and `draftsubdrop:0` (removes it the way its button does); `draft` also prints the typed subtasks and the field,
 /// `due:2026-10-05` and `repeat:2` (give the new-task card a due date and the preset with that index, the way its popovers do),
 /// `due` alone (takes the due date away the way ⌫ in its popover does), `priority:3` (chooses the priority with that index in the card, 0 for none),
-/// `mklist:Name` (creates a list whose defaults for new tasks are the high priority and "due today"), `draftlist:Name` (chooses that list or project in the card, `draftlist:inbox` the Inbox), `start:2026-10-05` (gives the card a start date); `draft` also prints the due date, the priority, the tags and the list the card shows,
+/// `mklist:Name` (creates a list whose defaults for new tasks are the high priority and "due today"), `draftlist:Name` (chooses that list or project in the card, `draftlist:inbox` the Inbox), `start:2026-10-05` (gives the card a start date), `drafttag:name` (adds a tag to the card, `drafttag` alone takes them all away),
+/// `alert` (prints the message the main window shows and the title of the open card of a new task, and dismisses the message); `draft` also prints the due date, the priority, the tags and the list the card shows,
 /// `task` (prints the due date, the priority, the tags and the repeat of the selected task), `done` (completes it), `project` (makes it a project, or a task again, the way its menu does),
 /// `projects` (prints the projects of the sidebar with their "done/total"), `completeproject:Title` (completes that project the way its mark in the sidebar does, R126),
 /// `newproject:Title` (creates a project the way Create in the sheet of a new project does, R127),
@@ -431,6 +432,11 @@ enum DebugScript {
                         AppModel.shared.draft?.listId = project.listId
                         AppModel.shared.draft?.parentId = project.id
                     }
+                case "drafttag":
+                    if argument.isEmpty { AppModel.shared.draft?.tags = [] } else { AppModel.shared.draft?.tags.append(argument) }
+                case "alert":
+                    print("debug: alert \(AppModel.shared.alert ?? "none"), draft \(AppModel.shared.draft.map { "\"\($0.title)\"" } ?? "none")")
+                    AppModel.shared.alert = nil
                 case "start": AppModel.shared.draft?.start = argument.isEmpty ? nil : argument
                 case "repeat":
                     if let index = Int(argument), Repeat.presets.indices.contains(index) { AppModel.shared.draft?.repeat = Repeat.presets[index].1 }
