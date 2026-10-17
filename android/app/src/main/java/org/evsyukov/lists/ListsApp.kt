@@ -7,10 +7,10 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
-import android.content.res.Configuration
 import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.os.Build
 import android.os.StrictMode
 import android.provider.Settings
@@ -40,13 +40,13 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import uniffi.lists_core.AppException
 import uniffi.lists_core.LogLevel
-import uniffi.lists_core.finishPushes
 import uniffi.lists_core.NotificationKind
 import uniffi.lists_core.NotifySettings
 import uniffi.lists_core.PlannedNotification
 import uniffi.lists_core.Store
 import uniffi.lists_core.SyncConfig
 import uniffi.lists_core.SyncReport
+import uniffi.lists_core.finishPushes
 import java.io.File
 import java.time.LocalDateTime
 import java.time.ZoneId

@@ -1,14 +1,14 @@
 package org.evsyukov.lists
 
-import java.io.File
-import javax.xml.parsers.DocumentBuilderFactory
-import kotlin.math.abs
-import kotlin.math.hypot
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.w3c.dom.Element
+import java.io.File
+import javax.xml.parsers.DocumentBuilderFactory
+import kotlin.math.abs
+import kotlin.math.hypot
 
 /** The launcher icon against the masks a launcher may put on it. */
 class AdaptiveIconTest {

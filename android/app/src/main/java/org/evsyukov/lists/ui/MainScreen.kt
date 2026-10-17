@@ -1,28 +1,22 @@
 package org.evsyukov.lists.ui
 
+import android.database.ContentObserver
+import android.os.Handler
+import android.os.Looper
+import android.provider.CalendarContract
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.animate
-import androidx.compose.foundation.gestures.Orientation
-import androidx.compose.foundation.gestures.draggable
-import androidx.compose.foundation.gestures.rememberDraggableState
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.ui.draw.scale
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.unit.IntOffset
-import androidx.compose.foundation.layout.offset
-import kotlin.math.roundToInt
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -31,7 +25,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -41,9 +37,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -108,8 +105,11 @@ import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -119,12 +119,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.input.pointer.PointerEventPass
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.input.pointer.positionChange
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
@@ -132,63 +129,66 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.toColorInt
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import org.evsyukov.lists.R
-import android.database.ContentObserver
-import android.os.Handler
-import android.os.Looper
-import android.provider.CalendarContract
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.runtime.DisposableEffect
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
-import org.evsyukov.lists.DayEvent
-import org.evsyukov.lists.LookPrefs
-import org.evsyukov.lists.SystemCalendars
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
-import java.time.Duration
-import java.time.LocalDateTime
+import kotlinx.coroutines.launch
+import org.evsyukov.lists.DayEvent
 import org.evsyukov.lists.EntryPrefs
-import org.evsyukov.lists.str
+import org.evsyukov.lists.LookPrefs
+import org.evsyukov.lists.R
 import org.evsyukov.lists.Repo
-import org.evsyukov.lists.fromStore
+import org.evsyukov.lists.SystemCalendars
 import org.evsyukov.lists.dateLabel
 import org.evsyukov.lists.dayOf
 import org.evsyukov.lists.displayName
+import org.evsyukov.lists.fromStore
 import org.evsyukov.lists.marks
 import org.evsyukov.lists.plusDays
 import org.evsyukov.lists.priorities
 import org.evsyukov.lists.rowDate
+import org.evsyukov.lists.str
 import org.evsyukov.lists.title
 import org.evsyukov.lists.today
-import kotlinx.coroutines.launch
-import kotlin.math.abs
 import uniffi.lists_core.Priority
 import uniffi.lists_core.QuickParse
 import uniffi.lists_core.SavedFilter
 import uniffi.lists_core.Scope
 import uniffi.lists_core.TaskItem
 import uniffi.lists_core.TaskList
+import java.time.Duration
+import java.time.LocalDateTime
+import kotlin.math.abs
+import kotlin.math.roundToInt
 
 fun parseColor(hex: String): Color? = runCatching { Color(hex.toColorInt()) }.getOrNull()
 
@@ -879,37 +879,37 @@ fun TaskRow(
         if (!subtask) PriorityBar(task.priority, tall = origin != null)
         // The title gives way to the marks and the date: it is what gets the ellipsis (R73).
         Column(Modifier.weight(1f)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                task.title,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                textDecoration = if (done && !subtask) TextDecoration.LineThrough else null,
-                color = when {
-                    !done -> MaterialTheme.colorScheme.onSurface
-                    subtask -> MaterialTheme.colorScheme.outline
-                    else -> MaterialTheme.colorScheme.onSurfaceVariant
-                },
-                modifier = Modifier.weight(1f, fill = false),
-            )
-            Marks(task)
-        }
-        // R72: under the title, the list of the task in its colour and the project of a task of a project.
-        // Only a task of a project is a row with a parent: a subtask is never a row of a view (R12).
-        if (origin != null) {
-            Text(
-                buildAnnotatedString {
-                    origin.list?.let { name ->
-                        withStyle(SpanStyle(color = origin.color?.let(::parseColor) ?: MaterialTheme.colorScheme.primary)) { append(name) }
-                    }
-                    origin.project?.let { append(if (origin.list == null) it else " – $it") }
-                },
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.outline,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    task.title,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    textDecoration = if (done && !subtask) TextDecoration.LineThrough else null,
+                    color = when {
+                        !done -> MaterialTheme.colorScheme.onSurface
+                        subtask -> MaterialTheme.colorScheme.outline
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                Marks(task)
+            }
+            // R72: under the title, the list of the task in its colour and the project of a task of a project.
+            // Only a task of a project is a row with a parent: a subtask is never a row of a view (R12).
+            if (origin != null) {
+                Text(
+                    buildAnnotatedString {
+                        origin.list?.let { name ->
+                            withStyle(SpanStyle(color = origin.color?.let(::parseColor) ?: MaterialTheme.colorScheme.primary)) { append(name) }
+                        }
+                        origin.project?.let { append(if (origin.list == null) it else " – $it") }
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.outline,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
         val scope = state.effectiveScope
         val dayInHeading = scope == Scope.Upcoming || (scope == Scope.Today && task.effectiveDue?.let(::dayOf) == today())
@@ -999,20 +999,20 @@ private fun SelectionBar(enabled: Boolean, actions: SelectionActions, onAction: 
             } else if (actions == SelectionActions.DeleteRecords) {
                 TextButton(onClick = { onAction("delete") }, modifier = Modifier.padding(horizontal = 8.dp)) { Text(str(R.string.delete), color = MaterialTheme.colorScheme.error) }
             } else
-            Row(Modifier.padding(horizontal = 12.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                IconButton(enabled = enabled, onClick = { onAction("complete") }) { Icon(Icons.Outlined.Check, str(R.string.complete)) }
-                IconButton(enabled = enabled, onClick = { onAction("due") }) { Icon(Icons.Outlined.CalendarMonth, str(R.string.due)) }
-                IconButton(enabled = enabled, onClick = { onAction("list") }) { Icon(Icons.AutoMirrored.Outlined.DriveFileMove, str(R.string.move_to_list)) }
-                IconButton(enabled = enabled, onClick = { onAction("delete") }) { Icon(Icons.Outlined.Delete, str(R.string.delete)) }
-                Box {
-                    IconButton(enabled = enabled, onClick = { more = true }) { Icon(Icons.Outlined.MoreHoriz, str(R.string.more)) }
-                    DropdownMenu(expanded = more, onDismissRequest = { more = false }) {
-                        for ((action, title) in listOf("start" to R.string.start, "priority" to R.string.priority, "tag" to R.string.tag, "wont" to R.string.wont_do)) {
-                            DropdownMenuItem(text = { Text(str(title)) }, onClick = { more = false; onAction(action) })
+                Row(Modifier.padding(horizontal = 12.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    IconButton(enabled = enabled, onClick = { onAction("complete") }) { Icon(Icons.Outlined.Check, str(R.string.complete)) }
+                    IconButton(enabled = enabled, onClick = { onAction("due") }) { Icon(Icons.Outlined.CalendarMonth, str(R.string.due)) }
+                    IconButton(enabled = enabled, onClick = { onAction("list") }) { Icon(Icons.AutoMirrored.Outlined.DriveFileMove, str(R.string.move_to_list)) }
+                    IconButton(enabled = enabled, onClick = { onAction("delete") }) { Icon(Icons.Outlined.Delete, str(R.string.delete)) }
+                    Box {
+                        IconButton(enabled = enabled, onClick = { more = true }) { Icon(Icons.Outlined.MoreHoriz, str(R.string.more)) }
+                        DropdownMenu(expanded = more, onDismissRequest = { more = false }) {
+                            for ((action, title) in listOf("start" to R.string.start, "priority" to R.string.priority, "tag" to R.string.tag, "wont" to R.string.wont_do)) {
+                                DropdownMenuItem(text = { Text(str(title)) }, onClick = { more = false; onAction(action) })
+                            }
                         }
                     }
                 }
-            }
         }
     }
 }

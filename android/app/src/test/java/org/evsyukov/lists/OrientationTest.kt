@@ -1,10 +1,10 @@
 package org.evsyukov.lists
 
-import java.io.File
-import javax.xml.parsers.DocumentBuilderFactory
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import org.w3c.dom.Element
+import java.io.File
+import javax.xml.parsers.DocumentBuilderFactory
 
 /** R77: which windows the manifest holds in portrait. */
 class OrientationTest {

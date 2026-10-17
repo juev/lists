@@ -2,9 +2,9 @@ package org.evsyukov.lists
 
 import android.app.Activity
 import android.content.Context
+import kotlinx.coroutines.launch
 import org.unifiedpush.android.connector.FailedReason
 import org.unifiedpush.android.connector.PushService
-import kotlinx.coroutines.launch
 import org.unifiedpush.android.connector.UnifiedPush
 import org.unifiedpush.android.connector.data.PushEndpoint
 import org.unifiedpush.android.connector.data.PushMessage

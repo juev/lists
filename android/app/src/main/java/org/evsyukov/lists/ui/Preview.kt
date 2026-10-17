@@ -2,7 +2,6 @@ package org.evsyukov.lists.ui
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.graphics.Color as AndroidColor
 import android.graphics.Matrix
 import android.graphics.pdf.PdfRenderer
 import android.media.ExifInterface
@@ -67,6 +66,7 @@ import org.evsyukov.lists.str
 import uniffi.lists_core.Attachment
 import java.io.File
 import kotlin.math.max
+import android.graphics.Color as AndroidColor
 
 /** What the app shows by itself (R54); everything else goes to another app. */
 enum class PreviewKind { IMAGE, PDF }
