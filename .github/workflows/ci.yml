@@ -66,6 +66,29 @@ jobs:
       - uses: gradle/actions/setup-gradle@v6
       - name: Build the debug APK
         run: make android
+      # The release goes through R8, and a rule missing from proguard-rules.pro is a crash at run
+      # time, not a build error. The APK is built as published, but for the x86_64 emulator and
+      # signed with the debug key; the tag workflow builds the signed arm64 one.
+      - name: Build the release APK for the emulator
+        working-directory: android
+        env:
+          LISTS_ANDROID_ABIS: x86_64
+          LISTS_RELEASE_DEBUG_SIGNING: '1'
+        run: ./gradlew --quiet assembleRelease
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Start the release APK
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 36
+          target: google_apis
+          arch: x86_64
+          emulator-options: -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect
+          disable-animations: true
+          script: ./scripts/check-launch-android.sh android/app/build/outputs/apk/release/app-release.apk emulator-5554
       - name: Check that the build changed no tracked file
         run: ./scripts/check-clean-tree.sh
 
