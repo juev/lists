@@ -430,3 +430,236 @@ fn i10_a_tag_that_does_not_fit_a_register_is_not_imported() {
     let task = d.tasks(Scope::All).unwrap().remove(0);
     assert_eq!(task.tags, [fits], "the tag that fits is imported, the other one is not");
 }
+
+/// R155: the JSON export of `d` with ids replaced by names, in an order that does not depend on them.
+fn exported(d: &Store, dir: &std::path::Path) -> serde_json::Value {
+    let file = dir.join(format!("export-{}.json", uuid::Uuid::now_v7().simple()));
+    d.export_json(file.to_string_lossy().into_owned(), None).unwrap();
+    let mut v: serde_json::Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+    let names: std::collections::HashMap<String, String> = v["lists"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|l| {
+            (
+                l["id"].as_str().unwrap().to_string(),
+                l["name"].as_str().unwrap().to_string(),
+            )
+        })
+        .collect();
+    let titles: std::collections::HashMap<String, String> = v["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| {
+            (
+                t["id"].as_str().unwrap().to_string(),
+                t["title"].as_str().unwrap().to_string(),
+            )
+        })
+        .collect();
+    let name = |id: &serde_json::Value| {
+        id.as_str()
+            .map(|i| names.get(i).cloned().unwrap_or_else(|| i.to_string()))
+    };
+    let mut lists: Vec<serde_json::Value> = v["lists"].as_array().unwrap().clone();
+    for l in &mut lists {
+        l["id"] = serde_json::json!(null);
+    }
+    let mut tasks: Vec<serde_json::Value> = v["tasks"].as_array().unwrap().clone();
+    for t in &mut tasks {
+        t["id"] = serde_json::json!(null);
+        t["list"] = serde_json::json!(name(&t["list"]));
+        t["parent"] = serde_json::json!(t["parent"].as_str().map(|p| titles[p].clone()));
+    }
+    let mut filters: Vec<serde_json::Value> = v["filters"].as_array().unwrap().clone();
+    for f in &mut filters {
+        f["id"] = serde_json::json!(null);
+        let ids: Vec<serde_json::Value> = f["spec"]["list_ids"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .iter()
+            .map(|i| serde_json::json!(name(i)))
+            .collect();
+        f["spec"]["list_ids"] = serde_json::json!(ids);
+    }
+    let key = |x: &serde_json::Value| x.to_string();
+    lists.sort_by_key(key);
+    tasks.sort_by_key(key);
+    filters.sort_by_key(key);
+    v["lists"] = serde_json::json!(lists);
+    v["tasks"] = serde_json::json!(tasks);
+    v["filters"] = serde_json::json!(filters);
+    v["exported"] = serde_json::json!(null);
+    v
+}
+
+#[test]
+fn r155_i11_an_export_imported_into_an_empty_device_gives_the_same_data_and_a_second_import_changes_nothing() {
+    let a = device();
+    let home = a.create_list("Дом".into()).unwrap();
+    a.set_list_sort(home.id.clone(), SortMode::Due).unwrap();
+    a.set_list_color(home.id.clone(), "#379417".into()).unwrap();
+    let old = a.create_list("Архив".into()).unwrap();
+    let x = a
+        .create_task(NewTask {
+            title: "а".into(),
+            list_id: Some(home.id.clone()),
+            notes: "строка\n\n- [ ] пункт".into(),
+            due: Some("2026-10-07T18:30".into()),
+            start: Some("2026-10-06".into()),
+            ..NewTask::default()
+        })
+        .unwrap();
+    a.set_remind(x.id.clone(), Some("2026-10-07T18:00".into())).unwrap();
+    a.set_priority(x.id.clone(), Priority::High).unwrap();
+    a.add_tag(x.id.clone(), "дом".into()).unwrap();
+    a.add_tag(x.id.clone(), "срочно".into()).unwrap();
+    let sub = add_sub(&a, &x, "а1");
+    a.complete_task(sub.id).unwrap();
+    add_sub(&a, &x, "а2");
+    let wont = a
+        .create_task(NewTask {
+            title: "б".into(),
+            list_id: Some(home.id.clone()),
+            ..NewTask::default()
+        })
+        .unwrap();
+    a.wont_do_task(wont.id).unwrap();
+    let weekly = a
+        .create_task(NewTask {
+            title: "в".into(),
+            list_id: Some(old.id.clone()),
+            due: Some("2026-10-08".into()),
+            ..NewTask::default()
+        })
+        .unwrap();
+    a.set_repeat(
+        weekly.id,
+        Some(Repeat {
+            freq: Freq::Weekly,
+            interval: 2,
+            weekdays: vec![1, 4],
+            monthday: None,
+            nth: None,
+            nth_weekday: None,
+            from_done: false,
+            count: Some(5),
+            until: None,
+        }),
+    )
+    .unwrap();
+    let project = a.create_project("Ремонт".into(), None).unwrap();
+    a.create_task(NewTask {
+        title: "краска".into(),
+        parent_id: Some(project.id.clone()),
+        ..NewTask::default()
+    })
+    .unwrap();
+    a.set_list_archived(old.id, true).unwrap();
+    a.create_filter(
+        "Срочное".into(),
+        FilterSpec {
+            list_ids: vec![home.id],
+            min_priority: Priority::High,
+            ..FilterSpec::default()
+        },
+    )
+    .unwrap();
+
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("Lists.json");
+    a.export_json(file.to_string_lossy().into_owned(), None).unwrap();
+    let raw: serde_json::Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+    assert_eq!(
+        (raw["format"].as_str(), raw["version"].as_u64()),
+        (Some("lists"), Some(1))
+    );
+
+    let b = device();
+    let report = b.import_file(file.to_string_lossy().into_owned()).unwrap();
+    assert_eq!((report.source.as_str(), report.lists, report.tasks), ("Lists", 2, 7));
+    assert!(
+        report.notes.iter().any(|n| n.contains("1 saved filter")),
+        "{:?}",
+        report.notes
+    );
+    assert_eq!(exported(&b, dir.path()), exported(&a, dir.path()));
+
+    b.import_file(file.to_string_lossy().into_owned()).unwrap();
+    assert_eq!(
+        exported(&b, dir.path()),
+        exported(&a, dir.path()),
+        "a second import changes nothing"
+    );
+    assert_eq!(b.lists().unwrap().len(), 3, "the inbox and two lists, not four");
+}
+
+#[test]
+fn r155_one_list_and_a_newer_version_of_the_format() {
+    let a = device();
+    let home = a.create_list("Дом".into()).unwrap();
+    a.create_task(NewTask {
+        title: "дома".into(),
+        list_id: Some(home.id.clone()),
+        ..NewTask::default()
+    })
+    .unwrap();
+    add(&a, "во входящих");
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("one.json");
+    a.export_json(file.to_string_lossy().into_owned(), Some(home.id))
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+    assert_eq!(v["lists"].as_array().unwrap().len(), 1);
+    assert_eq!(v["tasks"].as_array().unwrap().len(), 1);
+    assert_eq!(v["tasks"][0]["title"], "дома");
+    assert!(a
+        .export_json(file.to_string_lossy().into_owned(), Some("nope".into()))
+        .is_err());
+
+    std::fs::write(&file, r#"{"format":"lists","version":2,"lists":[],"tasks":[]}"#).unwrap();
+    let refused = a
+        .import_file(file.to_string_lossy().into_owned())
+        .unwrap_err()
+        .to_string();
+    assert!(refused.contains("update the app"), "{refused}");
+}
+
+#[test]
+fn r156_markdown_lays_out_lists_tasks_notes_and_subtasks() {
+    let a = device();
+    let home = a.create_list("Дом".into()).unwrap();
+    let x = a
+        .create_task(NewTask {
+            title: "Купить краску".into(),
+            list_id: Some(home.id.clone()),
+            notes: "белую\nдве банки".into(),
+            due: Some("2026-10-07T18:30".into()),
+            ..NewTask::default()
+        })
+        .unwrap();
+    a.set_priority(x.id.clone(), Priority::High).unwrap();
+    a.add_tag(x.id.clone(), "дом".into()).unwrap();
+    let sub = add_sub(&a, &x, "кисть");
+    a.complete_task(sub.id).unwrap();
+    let wont = a
+        .create_task(NewTask {
+            title: "Обои".into(),
+            list_id: Some(home.id.clone()),
+            ..NewTask::default()
+        })
+        .unwrap();
+    a.wont_do_task(wont.id).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("Lists.md");
+    a.export_markdown(file.to_string_lossy().into_owned(), None).unwrap();
+    let text = std::fs::read_to_string(&file).unwrap();
+    assert_eq!(
+        text,
+        "# Lists, 2026-10-05\n\n## Inbox\n\nNo tasks.\n\n## Дом\n\n\
+         - [ ] Купить краску — due 2026-10-07 18:30 · high priority · #дом\n  белую\n  две банки\n  - [x] кисть\n\
+         - [x] ~~Обои~~ — won't do\n"
+    );
+}

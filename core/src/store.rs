@@ -751,7 +751,7 @@ fn task_from_row(r: &Row) -> rusqlite::Result<TaskItem> {
     })
 }
 
-fn query_tasks(conn: &Connection, tail: &str, args: &[&str]) -> Result<Vec<TaskItem>> {
+pub(crate) fn query_tasks(conn: &Connection, tail: &str, args: &[&str]) -> Result<Vec<TaskItem>> {
     let sql = format!("SELECT {TASK_COLUMNS} FROM tasks t {tail}");
     let mut stmt = conn.prepare_cached(&sql)?;
     let rows = stmt.query_map(params_from_iter(args.iter()), task_from_row)?;
