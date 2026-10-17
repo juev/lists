@@ -1,19 +1,39 @@
 import AppKit
 import SwiftUI
 
+/// Where a backup to restore comes from.
+private enum BackupSource: Sendable {
+    case file(String)
+    case storage(device: String, name: String)
+}
+
+extension StorageBackup {
+    /// Where the copy lies in the storage, unique among all of them.
+    var path: String { "\(device)/\(name)" }
+}
+
 /// The backups of this Mac in the settings (R88–R90): the schedule, the number
 /// to keep, the backups themselves and restoring from one of them or from a file.
+/// With WebDAV or a folder, the copies in the sync storage as well (R154).
 struct BackupsSection: View {
     @Environment(AppModel.self) private var model
 
-    /// What is to be restored: a backup of the list, or a file picked outside the app.
-    private struct Restore { let path: String; let label: String }
+    /// What is to be restored: a backup of the list or a file picked outside the app,
+    /// or a copy in the sync storage.
+    private struct Restore: Sendable {
+        let source: BackupSource
+        let label: String
+    }
 
     @State private var settings = BackupSettings(everyHours: 24, keep: 5)
     @State private var backups: [Backup] = []
     @State private var restoring: Restore?
     @State private var busy = false
     @State private var message: String?
+    @State private var storage: StorageBackupStatus?
+    /// `nil` while the storage is being asked.
+    @State private var stored: [StorageBackup]?
+    @State private var storageMessage: String?
 
     private static let sizes: ByteCountFormatter = {
         let formatter = ByteCountFormatter()
@@ -27,6 +47,81 @@ struct BackupsSection: View {
     }
 
     var body: some View {
+        Group {
+            local
+            if let storage, storage.available { inStorage(storage) }
+        }
+        .onAppear(perform: load)
+        .confirmationDialog(
+            L("Replace everything with the backup?"),
+            isPresented: Binding(get: { restoring != nil }, set: { if !$0 { restoring = nil } }),
+            titleVisibility: .visible,
+            presenting: restoring
+        ) { what in
+            // S40: with sync on, what the storage holds has to be settled in the same step.
+            if synced {
+                Button(L("Restore and merge with the storage"), role: .destructive) { restore(what, overStorage: false) }
+                Button(L("Restore and replace the data of the storage"), role: .destructive) { restore(what, overStorage: true) }
+            } else {
+                Button(L("Restore"), role: .destructive) { restore(what, overStorage: false) }
+            }
+            Button(L("Cancel"), role: .cancel) {}
+        } message: { what in
+            Text(L("All tasks, lists and filters on this Mac are replaced with what the backup %@ holds. The present state is saved as a backup first.", what.label))
+        }
+    }
+
+    /// R154: the switch, the last copy or why it failed, and the copies of every device.
+    private func inStorage(_ status: StorageBackupStatus) -> some View {
+        Section(L("In the Sync Storage")) {
+            Toggle(L("Keep copies in the sync storage"), isOn: Binding(
+                get: { status.enabled },
+                set: { on in
+                    do {
+                        try model.store?.setStorageBackups(enabled: on)
+                    } catch {
+                        storageMessage = describe(error)
+                    }
+                    load()
+                }))
+            Text(L("A copy in the storage holds the tasks and the lists; the attachments are in the storage already. It is made on the schedule above, with the next sync."))
+                .font(AppFont.style(.caption)).foregroundStyle(.secondary)
+            if status.enabled {
+                if let error = status.error {
+                    Text(L("The last copy did not reach the storage: %@", error))
+                        .font(AppFont.style(.caption)).foregroundStyle(.red).textSelection(.enabled)
+                } else if let last = status.last {
+                    Text(L("Last copy in the storage: %@", Moment.label(last))).font(AppFont.style(.caption))
+                } else {
+                    Text(L("No copy in the storage yet.")).font(AppFont.style(.caption)).foregroundStyle(.secondary)
+                }
+            }
+            if let storageMessage {
+                Text(storageMessage).font(AppFont.style(.caption)).foregroundStyle(.secondary).textSelection(.enabled)
+            }
+            if let stored {
+                if stored.isEmpty {
+                    Text(L("No copies in the storage.")).foregroundStyle(.secondary)
+                }
+                // Two devices may name a copy alike: the folder tells them apart.
+                ForEach(stored, id: \.path) { copy in
+                    HStack {
+                        Text(Moment.label(copy.created))
+                        Text(copy.thisDevice ? L("this Mac") : L("another device")).foregroundStyle(.secondary)
+                        Spacer()
+                        Button(L("Restore…")) {
+                            restoring = Restore(source: .storage(device: copy.device, name: copy.name), label: Moment.label(copy.created))
+                        }
+                        .disabled(busy)
+                    }
+                }
+            } else {
+                ProgressView().controlSize(.small)
+            }
+        }
+    }
+
+    private var local: some View {
         Section(L("Backups")) {
             Picker(L("Create backups"), selection: Binding(
                 get: { settings.everyHours },
@@ -61,7 +156,7 @@ struct BackupsSection: View {
                     Spacer()
                     Text(Self.sizes.string(fromByteCount: Int64(backup.size))).foregroundStyle(.secondary)
                     Menu {
-                        Button(L("Restore…")) { restoring = Restore(path: backup.path, label: Moment.label(backup.created)) }
+                        Button(L("Restore…")) { restoring = Restore(source: .file(backup.path), label: Moment.label(backup.created)) }
                         Button(L("Save a Copy…")) { saveCopy(backup) }
                         Button(L("Delete"), role: .destructive) { run { try $0.deleteBackup(name: backup.name) } }
                     } label: {
@@ -74,30 +169,24 @@ struct BackupsSection: View {
                 }
             }
         }
-        .onAppear(perform: load)
-        .confirmationDialog(
-            L("Replace everything with the backup?"),
-            isPresented: Binding(get: { restoring != nil }, set: { if !$0 { restoring = nil } }),
-            titleVisibility: .visible,
-            presenting: restoring
-        ) { what in
-            // S40: with sync on, what the storage holds has to be settled in the same step.
-            if synced {
-                Button(L("Restore and merge with the storage"), role: .destructive) { restore(what, overStorage: false) }
-                Button(L("Restore and replace the data of the storage"), role: .destructive) { restore(what, overStorage: true) }
-            } else {
-                Button(L("Restore"), role: .destructive) { restore(what, overStorage: false) }
-            }
-            Button(L("Cancel"), role: .cancel) {}
-        } message: { what in
-            Text(L("All tasks, lists and filters on this Mac are replaced with what the backup %@ holds. The present state is saved as a backup first.", what.label))
-        }
     }
 
     private func load() {
         guard let store = model.store else { return }
         settings = (try? store.backupSettings()) ?? settings
         backups = (try? store.backups()) ?? []
+        storage = try? store.storageBackupStatus()
+        guard storage?.available == true else { return }
+        // The list asks the storage, which may be slow or away.
+        Task {
+            let result = await Task.detached { Result { try store.storageBackups() } }.value
+            switch result {
+            case .success(let found): stored = found
+            case .failure(let error):
+                stored = []
+                storageMessage = describe(error)
+            }
+        }
     }
 
     private func save(_ changed: BackupSettings) {
@@ -127,12 +216,18 @@ struct BackupsSection: View {
     }
 
     private func restore(_ what: Restore, overStorage: Bool) {
-        let path = what.path
+        let source = what.source
         run(done: L("Restored from %@.", what.label), then: {
             // The lists and the next sync start from the restored data.
             model.reload()
             model.syncNow()
-        }) { try $0.restoreBackup(path: path, overStorage: overStorage) }
+        }) { store in
+            switch source {
+            case .file(let path): try store.restoreBackup(path: path, overStorage: overStorage)
+            case .storage(let device, let name):
+                try store.restoreStorageBackup(device: device, name: name, overStorage: overStorage)
+            }
+        }
     }
 
     private func chooseFile() {
@@ -140,7 +235,7 @@ struct BackupsSection: View {
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
         guard panel.runModal() == .OK, let picked = panel.url else { return }
-        restoring = Restore(path: picked.path, label: picked.lastPathComponent)
+        restoring = Restore(source: .file(picked.path), label: picked.lastPathComponent)
     }
 
     private func saveCopy(_ backup: Backup) {

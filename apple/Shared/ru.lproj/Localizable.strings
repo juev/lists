@@ -392,6 +392,15 @@
 "Restore from File…" = "Восстановить из файла…";
 "No backups yet." = "Копий пока нет.";
 "Restore…" = "Восстановить…";
+"In the Sync Storage" = "В хранилище синхронизации";
+"Keep copies in the sync storage" = "Хранить копии в хранилище синхронизации";
+"A copy in the storage holds the tasks and the lists; the attachments are in the storage already. It is made on the schedule above, with the next sync." = "В копии в хранилище задачи и списки; вложения в хранилище уже есть. Копия создаётся по расписанию выше, при следующей синхронизации.";
+"The last copy did not reach the storage: %@" = "Последняя копия не попала в хранилище: %@";
+"Last copy in the storage: %@" = "Последняя копия в хранилище: %@";
+"No copy in the storage yet." = "В хранилище копий этого Mac пока нет.";
+"No copies in the storage." = "В хранилище копий нет.";
+"this Mac" = "этот Mac";
+"another device" = "другое устройство";
 "Save a Copy…" = "Сохранить копию…";
 "Actions for the backup" = "Действия с копией";
 "Replace everything with the backup?" = "Заменить всё содержимым копии?";
