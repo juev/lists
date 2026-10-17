@@ -1024,7 +1024,18 @@ impl Store {
                     |r| r.get(0),
                 )?;
                 let mut spec = spec.clone();
-                spec.list_ids = spec.list_ids.iter().filter_map(|l| list_id.get(l).cloned()).collect();
+                // The inbox of the file is the inbox here; a list the file does not have is dropped.
+                spec.list_ids = spec
+                    .list_ids
+                    .iter()
+                    .filter_map(|l| {
+                        if l == INBOX_ID {
+                            Some(l.clone())
+                        } else {
+                            list_id.get(l).cloned()
+                        }
+                    })
+                    .collect();
                 w.set(KIND_FILTER, &id, "name", json!(name.trim()))?;
                 w.set(KIND_FILTER, &id, "spec", serde_json::to_value(&spec)?)?;
                 if !exists {
