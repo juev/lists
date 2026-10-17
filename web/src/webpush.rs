@@ -51,7 +51,8 @@ fn encrypt_with(
     if auth.len() != 16 {
         return Err("the browser secret is not 16 bytes".into());
     }
-    if plain.len() + 1 + 16 > RECORD_SIZE as usize {
+    // Push services take at most 4096 bytes of body: the header of 86 bytes, the record and its tag.
+    if 86 + plain.len() + 1 + 16 > RECORD_SIZE as usize {
         return Err("the message does not fit one record".into());
     }
     let as_public = sender.public_key().to_encoded_point(false);
