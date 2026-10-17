@@ -24,6 +24,9 @@ object Secrets {
     /** Where the access token of the ntfy server is kept (S27). */
     const val PUSH_TOKEN = "push_token"
 
+    /** Where the passphrase of an encrypted storage is kept (S58). */
+    const val PASSPHRASE = "passphrase"
+
     private fun key(): SecretKey {
         val store = KeyStore.getInstance(KEYSTORE).apply { load(null) }
         (store.getKey(ALIAS, null) as? SecretKey)?.let { return it }

@@ -63,7 +63,7 @@ data class UiState(
     /** R22: the subtasks a search found a task by, shown as lines under its row. */
     val found: Map<String, List<TaskItem>> = emptyMap(),
     val editing: Editing? = null,
-    val sync: SyncStatus = SyncStatus(false, 0u, 0u, null, null),
+    val sync: SyncStatus = SyncStatus(false, 0u, 0u, null, null, false),
     val notice: Notice? = null,
     /** How long a completed task stays in its view; shared by all devices (R68). */
     val keepDone: KeepDone = KeepDone.Seconds(5u),
@@ -150,8 +150,11 @@ fun describe(error: Throwable): String = when (error) {
     else -> error.message ?: error.toString()
 }
 
-/** What the settings of sync keep outside the database: the password of the storage and the sign-in for sending nudges. */
-data class SyncSecrets(val password: String?, val pushServer: String?, val pushToken: String?)
+/**
+ * What the settings of sync keep outside the database: the password and the passphrase of the storage (S58)
+ * and the sign-in for sending nudges.
+ */
+data class SyncSecrets(val password: String?, val pushServer: String?, val pushToken: String?, val passphrase: String?)
 
 /**
  * #320: whether tasks read for the state `read` may be shown in the state `now`: the same view and the same
@@ -500,13 +503,20 @@ class MainViewModel : ViewModel() {
         val job = viewModelScope.async(Dispatchers.IO) {
             val context = ListsApp.instance
             val store = Repo.store
-            val before = SyncSecrets(Secrets.load(context), runCatching { store.pushSendServer() }.getOrNull(), Secrets.load(context, Secrets.PUSH_TOKEN))
+            val before = SyncSecrets(
+                Secrets.load(context),
+                runCatching { store.pushSendServer() }.getOrNull(),
+                Secrets.load(context, Secrets.PUSH_TOKEN),
+                Secrets.load(context, Secrets.PASSPHRASE),
+            )
             fun keep(s: SyncSecrets) {
                 Secrets.save(context, s.password)
                 store.setSyncPassword(s.password)
                 store.setPushSendServer(s.pushServer)
                 Secrets.save(context, s.pushToken, Secrets.PUSH_TOKEN)
                 store.setPushToken(s.pushToken)
+                Secrets.save(context, s.passphrase, Secrets.PASSPHRASE)
+                store.setSyncPassphrase(s.passphrase)
             }
             // Replacing a side waits for a run that is under way: not on the main thread.
             runCatching {
@@ -521,6 +531,31 @@ class MainViewModel : ViewModel() {
             }
         }
         joining = job
+        return job.await()
+    }
+
+    /** R145: encrypting the storage or changing its passphrase, under way. */
+    private var sealing: Job? = null
+
+    /**
+     * R145: encrypts the saved storage with [passphrase], or gives it a new one, in the scope of the model:
+     * encrypting takes as long as a sync with every attachment, and closing the settings does not cut it
+     * short. The passphrase is kept where the password is once the core has taken it.
+     */
+    suspend fun sealStorage(encrypt: Boolean, passphrase: String): Result<Unit> {
+        if (sealing?.isActive == true || joining?.isActive == true) {
+            return Result.failure(IllegalStateException(str(R.string.sync_still_saving)))
+        }
+        val job = viewModelScope.async(Dispatchers.IO) {
+            runCatching {
+                val store = Repo.store
+                if (encrypt) store.encryptStorage(passphrase) else store.changeStoragePassphrase(passphrase)
+                Secrets.save(ListsApp.instance, passphrase, Secrets.PASSPHRASE)
+                Repo.revision.update { it + 1 }
+                sync()
+            }
+        }
+        sealing = job
         return job.await()
     }
 }
