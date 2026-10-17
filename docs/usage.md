@@ -231,6 +231,10 @@ On Android 13 and newer a notification arrives at its minute only when "Alarms &
 
 Some phones delay notifications even with "Alarms & reminders" allowed: on a OnePlus with Android 16 they came minutes late all the same. For such a phone turn on Settings → Notifications → "Reminders as alarms". Lists then sets each reminder the way an alarm clock does, which the phone leaves on time. The system may show an alarm icon in the status bar and the time of the next reminder where it shows the next alarm; on the OnePlus neither appeared. The switch is off by default, works only while "Alarms & reminders" is allowed, belongs to the device and does not sync.
 
+## Scripts and automation
+
+The web server can be reached from Shortcuts, Tasker, Raycast or a script with an API token instead of the password. "API tokens…" in the side panel of the web interface makes one: give it a name and choose "Read" or "Read and write". The token is shown once, so copy it then. Revoke a token in the same list when a script no longer needs it. The requests and the operations a token reaches are described in [api.md](api.md).
+
 ## Calendar events in Today
 
 Today can show the events of the day from the calendars of the device, in a muted block above the tasks. It is off until you turn it on, each device has its own setting, and it does not sync:

@@ -133,7 +133,7 @@ Caddy passes the client's address in `X-Forwarded-For`, which `LISTS_TRUST_PROXY
 
 ## Backup and updates
 
-The whole state is the `/data` volume, including the notification key and the subscriptions of the browsers. With sync configured it is a copy of what the storage holds, and a lost volume is rebuilt on the next sync; without sync it is the only copy, so back it up. CalDAV is the exception: the shared settings and an attachment over 5 MB do not travel through it and exist on the volume only.
+The whole state is the `/data` volume, including the notification key, the subscriptions of the browsers and the API tokens. With sync configured it is a copy of what the storage holds, and a lost volume is rebuilt on the next sync; without sync it is the only copy, so back it up. CalDAV is the exception: the shared settings and an attachment over 5 MB do not travel through it and exist on the volume only.
 
 Before a new version changes how the data is stored, the server puts a backup of the data into `/data/backups`. It is an ordinary backup of Lists, and the app for macOS or Android restores from it; the server has no command for that.
 
@@ -150,6 +150,10 @@ The web interface sends the notifications of the apps through Web Push: reminder
 A browser takes notifications only from a page opened over HTTPS, so the server has to sit behind the reverse proxy below; `localhost` works too. On iPhone and iPad, add Lists to the Home Screen first (iOS 16.4 or newer) and turn the notifications on there. The server reaches the push service of the browser (Google, Mozilla, Apple) over outbound HTTPS.
 
 The message is encrypted for the browser, so the push service sees neither the title nor the due date. The server signs its requests with a key it makes on first start and keeps in `/data/web-push-key`; the subscriptions live in `/data/web-push.json`. Losing the key means every browser has to turn notifications on again. The server looks for due notifications every 30 seconds and sends each once. A notification whose time passed while the server was down is not sent.
+
+## API tokens
+
+Scripts reach the server with an API token instead of the password: "API tokens…" in the side panel makes one, with the scope "Read" or "Read and write". The token is shown once. The server keeps its SHA-256 in `/data/api-tokens.json`, so a lost token cannot be shown again: revoke it and make a new one. The API a token reaches is described in [api.md](api.md).
 
 ## Time zone
 
