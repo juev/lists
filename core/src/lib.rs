@@ -20,6 +20,7 @@ mod recur;
 mod store;
 mod subtasks;
 pub mod sync;
+mod undo;
 
 pub use backup::{Backup, BackupSettings};
 pub use error::{AppError, Result};

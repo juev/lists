@@ -445,6 +445,29 @@ fn s7_same_occurrence_completed_on_two_devices_is_recorded_once() {
 }
 
 #[test]
+fn r131_undo_leaves_a_task_changed_on_another_device_and_reaches_it() {
+    let storage = tempfile::tempdir().unwrap();
+    let (a, b) = (device(), device());
+    let tasks: Vec<TaskItem> = ["а", "б", "в"].iter().map(|t| add(&a, t)).collect();
+    a.begin_group();
+    for t in &tasks {
+        a.set_due(t.id.clone(), Some("2026-10-12".into())).unwrap();
+    }
+    a.end_group();
+    settle(&a, &b, &storage);
+    assert!(!b.can_undo(), "the history stays on its device");
+    b.set_due(tasks[1].id.clone(), Some("2026-11-01".into())).unwrap();
+    settle(&a, &b, &storage);
+
+    assert_eq!(a.undo().unwrap(), 2);
+    settle(&a, &b, &storage);
+    for d in [&a, &b] {
+        let due = |i: usize| d.task(tasks[i].id.clone()).unwrap().due;
+        assert_eq!((due(0), due(1), due(2)), (None, Some("2026-11-01".into()), None));
+    }
+}
+
+#[test]
 fn s44_undo_of_a_completed_repeat_reaches_the_other_device() {
     let storage = tempfile::tempdir().unwrap();
     let (a, b) = (device(), device());
