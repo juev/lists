@@ -759,15 +759,18 @@ final class AppModel {
     // MARK: Writing
 
     /// Runs a change, then refreshes what is on screen and queues a sync. What the change puts into
-    /// the history of undo of the core is one step of ⌘Z, under `name` in the Edit menu (R131).
+    /// the history of undo of the core is one step of ⌘Z, under `name` in the Edit menu (R131). A change made `whole`
+    /// that fails is taken back at once, as undo would do it, and leaves no step.
     @discardableResult
-    func perform<T>(named name: String? = nil, _ change: (Store) throws -> T) -> T? {
+    func perform<T>(named name: String? = nil, whole: Bool = false, _ change: (Store) throws -> T) -> T? {
         guard let store else { return nil }
         let revision = store.undoRevision()
         store.beginGroup()
         let result = Result { try change(store) }
         store.endGroup()
-        if store.undoRevision() != revision {
+        if whole, case .failure = result, store.undoRevision() != revision {
+            if (try? store.undo()) != nil { scheduleSync() }
+        } else if store.undoRevision() != revision {
             undoManager?.registerUndo(withTarget: self) { model in
                 model.perform { try $0.undo() }
             }
@@ -851,14 +854,17 @@ final class AppModel {
     }
 
     /// Closes the card of a new task the way Esc does: a task with a title is created, an empty card is dropped.
-    func finishDraft() {
-        guard let open = draft else { return }
+    /// R139: a card whose task could not be created stays open, and the result is false.
+    @discardableResult
+    func finishDraft() -> Bool {
+        guard let open = draft else { return true }
         if open.isBlank {
             open.files.forEach(IncomingFiles.discard)
-        } else {
-            save(open)
+        } else if save(open) == nil {
+            return false
         }
         draft = nil
+        return true
     }
 
     /// Creates the task of a draft. What the fields say wins over what the
@@ -868,8 +874,9 @@ final class AppModel {
         let title = draft.title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty else { return nil }
         let parse = parseQuickText
-        // R37: Esc keeps the task of the card, so ⌘Z is the way to take a new task back: it goes to the trash.
-        let task: TaskItem? = perform(named: L("New Task")) { store in
+        // R37: Esc keeps the task of the card, so ⌘Z is the way to take a new task back: it goes to the trash. R139: a task
+        // that failed half way goes there at once, so that saving again makes no twin.
+        let task: TaskItem? = perform(named: L("New Task"), whole: true) { store in
             let created: TaskItem
             // R130: a new task goes first in its list, or right under the task that was selected when the card opened.
             let after = draft.after
@@ -967,11 +974,11 @@ final class AppModel {
         if let draft, !draft.isBlank {
             // The table takes the row of the new task first and the open card on the next
             // turn: both in one update make it call back into its delegate.
-            finishDraft()
+            guard finishDraft() else { return }
             DispatchQueue.main.async { self.expand(id) }
             return
         }
-        finishDraft()
+        guard finishDraft() else { return }
         selection = id
         closeCards(except: id)
         expanded.insert(id)
@@ -1074,8 +1081,7 @@ final class AppModel {
 
     /// Shows a task in its list, expanded, with every ancestor expanded too.
     func reveal(_ id: String) {
-        guard let store, var task = try? store.task(id: id) else { return }
-        finishDraft()
+        guard let store, var task = try? store.task(id: id), finishDraft() else { return }
         search = ""
         searchOpen = false
         scope = task.listId == "inbox" ? .inbox : .list(id: task.listId)

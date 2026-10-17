@@ -625,8 +625,17 @@ final class DraftCard: NSView, NSTextViewDelegate, NSTextFieldDelegate {
         let done = draft
         if done.isBlank {
             done.files.forEach(IncomingFiles.discard)
-        } else {
-            model.save(done)
+        } else if model.save(done) == nil {
+            // R139: what was typed stays for another try. The main window shows the error itself; the panel and the menu
+            // bar window, which have no place for it, show it over the card.
+            if !escSaves, let window, let message = model.alert {
+                model.alert = nil
+                let alert = NSAlert()
+                alert.messageText = L("That did not work")
+                alert.informativeText = message
+                alert.beginSheetModal(for: window)
+            }
+            return
         }
         finish()
     }
