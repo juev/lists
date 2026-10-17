@@ -18,8 +18,9 @@ const KEY_FILE: &str = "web-push-key";
 const MAX_ZONE_MINUTES: i64 = 14 * 60;
 /// A list this long is not one person's browsers; it only bounds the file.
 const MAX_BROWSERS: usize = 100;
-/// A title longer than this is cut, so that the message fits one record (RFC 8291).
-const MAX_TITLE: usize = 1000;
+/// A title longer than this many bytes is cut: push services take at most 4096 bytes of body,
+/// the header of RFC 8291 and the escapes of JSON included.
+const MAX_TITLE: usize = 1500;
 /// A notification that could not reach the browser within this time is of no use.
 const TTL_SECONDS: &str = "3600";
 /// After a long pause, as a machine that slept, only the last minutes are looked at again.
@@ -405,7 +406,11 @@ fn payload(n: &PlannedNotification) -> Value {
         NotificationKind::Due => "due",
         NotificationKind::Summary => "summary",
     };
-    let title: String = n.title.chars().take(MAX_TITLE).collect();
+    let mut end = n.title.len().min(MAX_TITLE);
+    while !n.title.is_char_boundary(end) {
+        end -= 1;
+    }
+    let title = &n.title[..end];
     json!({ "key": n.key, "kind": kind, "title": title, "due": n.due, "task": n.task_id, "count": n.count })
 }
 
@@ -668,6 +673,25 @@ mod tests {
             Some(Sent::Failed(e)) => assert!(!e.contains("secret-token"), "{e}"),
             other => panic!("{other:?}"),
         }
+    }
+
+    #[test]
+    fn r144_a_long_title_still_fits_a_push_message() {
+        let n = PlannedNotification {
+            key: "task:x".into(),
+            kind: NotificationKind::Reminder,
+            at: "2026-10-05T10:00".into(),
+            task_id: Some("x".repeat(36)),
+            title: "\"😀".repeat(2000),
+            due: Some("2026-10-05T10:00".into()),
+            count: 0,
+        };
+        let plain = payload(&n).to_string();
+        let browser = Client::new();
+        let public = browser.key.public_key().to_encoded_point(false);
+        let body = encrypt(public.as_bytes(), &browser.auth, plain.as_bytes()).unwrap();
+        assert!(body.len() <= 4096, "{}", body.len());
+        assert!(browser.read(&body)["title"].as_str().unwrap().starts_with("\"😀"));
     }
 
     #[test]
