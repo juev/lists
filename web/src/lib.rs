@@ -111,18 +111,6 @@ fn same_secret(a: &str, b: &str) -> bool {
     Sha256::digest(a.as_bytes()) == Sha256::digest(b.as_bytes())
 }
 
-/// The calls a batch takes its change back with (R118).
-const BACK_OPS: [&str; 8] = [
-    "undoClose",
-    "restore",
-    "delete",
-    "setDue",
-    "setStart",
-    "setPriority",
-    "place",
-    "removeTag",
-];
-
 fn priority_from(n: i64) -> Priority {
     match n {
         1 => Priority::Low,
@@ -347,9 +335,16 @@ impl App {
     }
 
     /// R118: one action on several tasks, in the order they were given. A task the action does not
-    /// apply to is passed over. The answer holds how many tasks were changed and the steps that
-    /// take the change back, one for each task that can be taken back.
+    /// apply to is passed over. The answer holds how many tasks were changed; one undo takes them
+    /// all back (R131).
     fn batch(&self, a: &Value) -> Result<Value, AppError> {
+        self.store.begin_group();
+        let out = self.batch_steps(a);
+        self.store.end_group();
+        out
+    }
+
+    fn batch_steps(&self, a: &Value) -> Result<Value, AppError> {
         let s = &self.store;
         let action = text_arg(a, "action")?;
         let ids: Vec<String> = a
@@ -376,23 +371,21 @@ impl App {
                 .as_ref()
                 .is_some_and(|parent| s.task(parent.clone()).is_ok_and(|p| !p.is_project))
         };
-        let (mut changed, mut backs) = (0, Vec::new());
+        let mut changed = 0;
         for id in ids {
             // Read anew: a task that is gone by now is passed over.
             let Ok(task) = s.task(id.clone()) else { continue };
             // A task in the trash is only restored, and a record of a completed occurrence only deleted.
-            let back = if task.deleted {
+            if task.deleted {
                 if action != "restore" {
                     continue;
                 }
                 s.restore_task(id.clone())?;
-                Some(json!({ "op": "delete", "id": id }))
             } else if task.is_log {
                 if action != "delete" {
                     continue;
                 }
                 s.delete_task(id.clone())?;
-                Some(json!({ "op": "restore", "id": id }))
             } else {
                 match action.as_str() {
                     "complete" | "wontDo" => {
@@ -404,12 +397,9 @@ impl App {
                         } else {
                             s.wont_do_task(id.clone())?;
                         }
-                        // A repeating task that moved on gets its dates back the same way (R128).
-                        Some(json!({ "op": "undoClose", "id": id }))
                     }
                     "delete" => {
                         s.delete_task(id.clone())?;
-                        Some(json!({ "op": "restore", "id": id }))
                     }
                     "due" => {
                         let due = need("the date")?;
@@ -417,7 +407,6 @@ impl App {
                             continue;
                         }
                         s.set_due(id.clone(), Some(due))?;
-                        Some(json!({ "op": "setDue", "id": id, "value": task.due }))
                     }
                     "start" => {
                         let start = need("the date")?;
@@ -425,14 +414,12 @@ impl App {
                             continue;
                         }
                         s.set_start(id.clone(), Some(start))?;
-                        Some(json!({ "op": "setStart", "id": id, "value": task.start }))
                     }
                     "priority" => {
                         if task.priority == priority {
                             continue;
                         }
                         s.set_priority(id.clone(), priority)?;
-                        Some(json!({ "op": "setPriority", "id": id, "value": priority_to(task.priority) }))
                     }
                     "move" => {
                         let list = need("the list")?;
@@ -440,7 +427,6 @@ impl App {
                             continue;
                         }
                         s.move_to_list(id.clone(), list)?;
-                        Some(json!({ "op": "place", "id": id, "list": task.list_id, "parent": task.parent_id }))
                     }
                     // R129: the skips of a drop onto a project (R123).
                     "project" => {
@@ -454,22 +440,19 @@ impl App {
                             continue;
                         }
                         s.move_to_project(id.clone(), project)?;
-                        Some(json!({ "op": "place", "id": id, "list": task.list_id, "parent": task.parent_id }))
                     }
                     "tag" => {
                         if tag.is_empty() || task.tags.contains(&tag) {
                             continue;
                         }
                         s.add_tag(id.clone(), tag.clone())?;
-                        Some(json!({ "op": "removeTag", "id": id, "value": tag }))
                     }
                     _ => continue,
                 }
-            };
+            }
             changed += 1;
-            backs.extend(back);
         }
-        Ok(json!({ "changed": changed, "backs": backs }))
+        Ok(json!({ "changed": changed }))
     }
 
     fn call(&self, op: &str, a: &Value) -> Result<Value, AppError> {
@@ -538,25 +521,9 @@ impl App {
                 }
                 "moveToList" => s.move_to_list(id()?, text_arg(a, "list")?).map(|_| done)?,
                 "moveToProject" => s.move_to_project(id()?, text_arg(a, "project")?).map(|_| done)?,
-                // Back to a list and a project a batch took the task from; it comes first there.
-                "place" => s
-                    .move_task(id()?, Some(text_arg(a, "list")?), optional(a, "parent"), None)
-                    .map(|_| done)?,
                 "batch" => self.batch(a)?,
-                // R118: the steps a batch handed out, the last one first.
-                "batchBack" => {
-                    let steps = a.get("steps").and_then(Value::as_array).cloned().unwrap_or_default();
-                    for step in steps.iter().rev() {
-                        let op = step.get("op").and_then(Value::as_str).unwrap_or_default();
-                        if !BACK_OPS.contains(&op) {
-                            return Err(AppError::Invalid {
-                                msg: format!("not a step of a batch: {op}"),
-                            });
-                        }
-                        self.call(op, step)?;
-                    }
-                    done
-                }
+                // R131: the last action of this session, however many tasks it changed.
+                "undo" => json!({ "changed": s.undo()? }),
                 "duplicate" => task_json(&s.duplicate_task(id()?)?),
                 "createList" => list_json(&s.create_list(text_arg(a, "name")?)?),
                 "renameList" => s.rename_list(id()?, text_arg(a, "value")?).map(|_| done)?,
@@ -855,9 +822,11 @@ impl App {
                     std::fs::create_dir_all(&dir).map_err(|e| AppError::Storage { msg: e.to_string() })?;
                     let file = dir.join("upload");
                     std::fs::write(&file, data).map_err(|e| AppError::Storage { msg: e.to_string() })?;
-                    let added = self
-                        .store
-                        .add_attachment(task, file.to_string_lossy().into_owned(), Some(name));
+                    let actor = self.session(request).unwrap_or_default();
+                    let added = self.store.as_actor(&actor, || {
+                        self.store
+                            .add_attachment(task, file.to_string_lossy().into_owned(), Some(name))
+                    });
                     let _ = std::fs::remove_dir_all(&dir);
                     self.dirty.store(true, Ordering::Relaxed);
                     json_reply(200, attachment_json(&added?))
@@ -893,7 +862,9 @@ impl App {
                     let args: Value =
                         serde_json::from_slice(&body).map_err(|e| AppError::Invalid { msg: e.to_string() })?;
                     let op = text_arg(&args, "op")?;
-                    json_reply(200, self.call(&op, &args)?)
+                    // R131: each session has a history of its own.
+                    let actor = self.session(request).unwrap_or_default();
+                    json_reply(200, self.store.as_actor(&actor, || self.call(&op, &args))?)
                 }
                 (Method::Post, "/api/logout") => {
                     if let Some(token) = self.session(request) {
