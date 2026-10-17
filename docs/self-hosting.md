@@ -20,7 +20,7 @@ The container listens on port 8080, keeps its data in `/data` and runs as user 1
 
 The image holds only the server, linked statically, and a minimal init; there is no shell inside, so `docker exec` has nothing to run.
 
-The repository carries a ready [`compose.yaml`](../compose.yaml) that reads its settings from an `.env` file: the version of the image (`LISTS_VERSION`), the port, the password and the settings of WebDAV sync and of the push server. The other variables (`LISTS_SYNC_PATH`, `LISTS_WEB_URL`, `LISTS_PUSH_TOKEN`, `LISTS_OIDC_*`) are not passed on by it and need a line of their own under `environment`. A Compose file of your own, syncing through WebDAV:
+The repository carries a ready [`compose.yaml`](../compose.yaml) that reads its settings from an `.env` file: the version of the image (`LISTS_VERSION`), the port, the password and the settings of WebDAV sync and of the push server. The Compose file also sets `LISTS_TRUST_PROXY=1`, since it publishes the port for a reverse proxy only. The other variables (`LISTS_SYNC_PATH`, `LISTS_WEB_URL`, `LISTS_PUSH_TOKEN`, `LISTS_OIDC_*`) are not passed on by it and need a line of their own under `environment`. A Compose file of your own, syncing through WebDAV:
 
 ```yaml
 services:
@@ -60,7 +60,8 @@ Everything is configured through environment variables, so that no password show
 | `LISTS_WEB_LISTEN` | address and port to listen on | `127.0.0.1:8080`; `0.0.0.0:8080` in the image |
 | `LISTS_WEB_DATA` | directory with this device's copy of the data | `./lists-data`; `/data` in the image |
 | `LISTS_WEB_PASSWORD` | password for the web interface | none |
-| `LISTS_WEB_URL` | the server's address as the browser sees it; needed for OpenID Connect | none |
+| `LISTS_WEB_URL` | the server's address as the browser sees it; needed for OpenID Connect, and with `https://` the session cookie is marked `Secure` | none |
+| `LISTS_TRUST_PROXY` | `1`: the client's address is the last one in `X-Forwarded-For`, which the reverse proxy in front appends; set it only when every request comes through that proxy | none: the address of the connection |
 | `LISTS_SYNC` | `webdav`, `caldav`, `folder` or `off` | `off` |
 | `LISTS_SYNC_URL` | storage address for `webdav` and `caldav` | none |
 | `LISTS_SYNC_USER` | storage user name | none |
@@ -91,15 +92,28 @@ Register `<LISTS_WEB_URL>/auth/callback` as the redirect address. The flow is au
 
 A session lasts 30 days. Sessions are kept in memory, so a restart of the container signs everybody out.
 
+A wrong password is answered at once. An attempt counts as failed from its start until it succeeds, so attempts sent at the same time check no more passwords than the limit allows. After 5 wrong passwords within a minute from one client, the server answers 429 with `Retry-After` and does not check the password, the right one included, until the oldest of the five is a minute old; a successful login clears the count. Each failure is a line on the standard error stream with the client's address and the number of failures in the last minute; the password is not written. Behind a reverse proxy every request comes from the proxy's address, so set `LISTS_TRUST_PROXY=1` there, or a guesser locks everybody out of the password login. At most 1000 sign-ins through OpenID Connect may be under way at once; beyond that a new one pushes out the oldest, which then has to start again.
+
 ## Reverse proxy
 
 The server speaks plain HTTP. Put it behind a reverse proxy that terminates TLS and publish the container port on a loopback address only, as in the Compose file above. With Caddy:
 
 ```
+{
+    servers {
+        timeouts {
+            read_header 10s
+            read_body 30s
+        }
+    }
+}
+
 lists.example.org {
     reverse_proxy 127.0.0.1:8080
 }
 ```
+
+Caddy passes the client's address in `X-Forwarded-For`, which `LISTS_TRUST_PROXY=1` makes the server use. The timeouts are the proxy's job: the server handles every request on a thread of its own, so a client that never finishes its request does not hold up anyone else, but it has no read timeout of its own and keeps such a connection open until the client goes away. With nginx, `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;` passes the address, and `client_header_timeout` and `client_body_timeout` (60 seconds by default) close a slow client.
 
 ## Backup and updates
 
