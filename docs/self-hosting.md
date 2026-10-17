@@ -127,6 +127,10 @@ To update, pull the new image and recreate the container:
 docker compose pull && docker compose up -d
 ```
 
+## Time zone
+
+The server needs no time zone of its own, and the image has none. Each request from the page carries the browser's offset from UTC, and the server takes today, the time of a quick entry without a date and the end of the day from it. People in different zones can use one server. A request without the offset, from a script for example, is answered on the server's clock, which is UTC in the image.
+
 ## Limits
 
 - No notifications.
