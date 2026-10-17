@@ -1079,6 +1079,35 @@ impl App {
                     let op = text_arg(&args, "op")?;
                     json_reply(200, self.store.as_actor(&actor, || self.call(&op, &args))?)
                 }
+                // R155, R156: the export as a file to save; everything, or one list.
+                (Method::Get, "/api/export") => {
+                    let markdown = query(&url, "format").as_deref() == Some("markdown");
+                    let list = query(&url, "list").filter(|l| !l.is_empty());
+                    let dir = std::env::temp_dir().join(format!("lists-export-{}", uuid::Uuid::new_v4().simple()));
+                    std::fs::create_dir_all(&dir).map_err(|e| AppError::Storage { msg: e.to_string() })?;
+                    let file = dir.join("export");
+                    let path = file.to_string_lossy().into_owned();
+                    let written = if markdown {
+                        self.store.export_markdown(path, list)
+                    } else {
+                        self.store.export_json(path, list)
+                    };
+                    let data = written
+                        .and_then(|()| std::fs::read(&file).map_err(|e| AppError::Storage { msg: e.to_string() }));
+                    let _ = std::fs::remove_dir_all(&dir);
+                    let day = chrono::Local::now().format("%Y-%m-%d");
+                    let (kind, name) = if markdown {
+                        ("text/markdown; charset=utf-8", format!("Lists-{day}.md"))
+                    } else {
+                        ("application/json", format!("Lists-{day}.json"))
+                    };
+                    reply(200, kind, data?)
+                        .with_header(header(
+                            "Content-Disposition",
+                            &format!("attachment; filename=\"{name}\""),
+                        ))
+                        .with_header(header("Cache-Control", "no-store"))
+                }
                 (Method::Get, "/api/tokens") => json_reply(200, self.tokens.list()),
                 (Method::Post, "/api/tokens") => {
                     let args = match Self::json_body(request) {

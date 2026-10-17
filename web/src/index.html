@@ -170,7 +170,9 @@ const RU = {
   "The browser does not allow notifications for this site.": "Браузер запретил уведомления для этого сайта.",
   "The server cannot be reached.": "Сервер недоступен.", "Try again": "Повторить",
   "API tokens…": "Токены API…", "API tokens": "Токены API", "Read": "Чтение", "Read and write": "Чтение и запись", "Name": "Название",
-  "Create": "Создать", "New token": "Новый токен", "Revoke": "Отозвать", "Copy": "Скопировать", "Copied": "Скопировано", "Last used": "Использован", "never": "никогда",
+  "Create": "Создать", "New token": "Новый токен", "Export…": "Экспорт…", "Export": "Экспорт", "Format": "Формат", "What": "Что",
+  "JSON, which Lists and scripts can read back": "JSON — его читают Lists и сценарии", "Markdown, for reading": "Markdown — для чтения", "This list": "Этот список",
+  "Attachment content is not exported; the JSON names each file.": "Содержимое вложений не выгружается; в JSON названо каждое вложение.", "Revoke": "Отозвать", "Copy": "Скопировать", "Copied": "Скопировано", "Last used": "Использован", "never": "никогда",
   "Copy it now: it is not shown again.": "Скопируйте его сейчас: больше он не показывается.",
   "Revoke this token? Scripts that use it stop working.": "Отозвать токен? Сценарии, которые им пользуются, перестанут работать.",
   "A token lets a script reach this server without a password: send it as Authorization: Bearer <token>.": "Токен даёт сценарию доступ к серверу без пароля: передайте его заголовком Authorization: Bearer <токен>."
@@ -229,7 +231,7 @@ function setLook(v) {
   c.toggle("light", v === "light"); c.toggle("dark", v === "dark");
 }
 // `sel` is the set of selected tasks while the selection mode is open (R118), and null otherwise.
-const state = { fetching: {}, filterEdit: null, notifyEdit: false, push: null, tokensEdit: false, tokens: null, newToken: null, scope: "today", search: "", overview: null, tasks: [], open: new Set(), details: {}, drawer: false, typing: false, sel: null, more: false };
+const state = { fetching: {}, filterEdit: null, notifyEdit: false, push: null, tokensEdit: false, tokens: null, newToken: null, exportEdit: false, scope: "today", search: "", overview: null, tasks: [], open: new Set(), details: {}, drawer: false, typing: false, sel: null, more: false };
 const root = document.getElementById("root");
 
 // R135: the server takes today and the time of day from the zone of the browser, in minutes east of UTC.
@@ -590,7 +592,7 @@ function editor(d) {
 }
 
 function nav(scope, label, count, opts = {}) {
-  return $("button", { class: "nav" + (state.scope === scope && !state.search ? " on" : ""), onclick: () => { state.scope = scope; state.search = ""; state.open.clear(); state.drawer = false; state.sel = null; state.notifyEdit = false; state.tokensEdit = false; load(); } },
+  return $("button", { class: "nav" + (state.scope === scope && !state.search ? " on" : ""), onclick: () => { state.scope = scope; state.search = ""; state.open.clear(); state.drawer = false; state.sel = null; state.notifyEdit = false; state.tokensEdit = false; state.exportEdit = false; load(); } },
     opts.color !== undefined ? $("span", { class: "dot", style: /^#[0-9a-f]{6}$/i.test(opts.color) ? `background:${opts.color}` : "" }) : null, $("span", {}, label),
     count ? $("span", { class: "n" + (opts.bad ? " bad" : "") }, count) : null);
 }
@@ -697,6 +699,7 @@ function render() {
       $("button", { class: "nav", style: "color:var(--muted)", onclick: openNotify }, t("Notifications…")),
       $("button", { class: "nav", style: "color:var(--muted)", onclick: openTokens }, t("API tokens…")),
       $("button", { class: "nav", style: "color:var(--muted)", onclick: () => importer.click() }, t("Import…")), importer,
+      $("button", { class: "nav", style: "color:var(--muted)", onclick: () => { Object.assign(state, { exportEdit: true, notifyEdit: false, tokensEdit: false, filterEdit: null, drawer: false, sel: null }); render(); } }, t("Export…")),
       // R148: a browser that signs out stops getting notifications first.
       $("button", { class: "nav", style: "color:var(--muted)", onclick: async () => { await pushOff().catch(() => {}); api("/api/logout", { method: "POST", headers: { "X-Lists": "1" } }).then(showLogin); } }, t("Sign out"))),
     $("div", { id: "shade", onclick: () => { state.drawer = false; render(); } }),
@@ -705,9 +708,9 @@ function render() {
       state.sel ? $("header", {}, $("button", { "aria-label": t("Close"), style: "font-size:18px;width:32px", onclick: () => { state.sel = null; state.more = false; render(); } }, "✕"),
         $("h1", {}, `${t("Selected")}: ${state.sel.size}`), $("button", { class: "link", onclick: () => { state.sel = null; state.more = false; render(); } }, t("Done")))
       : $("header", {}, $("button", { id: "menu", "aria-label": "menu", onclick: () => { state.drawer = true; render(); } }, "☰"), $("h1", {}, scopeTitle()),
-        empty || state.filterEdit || state.notifyEdit || state.tokensEdit ? null : $("button", { id: "pick", class: "link", onclick: () => { state.sel = new Set(); state.open.clear(); render(); } }, t("Select")),
+        empty || state.filterEdit || state.notifyEdit || state.tokensEdit || state.exportEdit ? null : $("button", { id: "pick", class: "link", onclick: () => { state.sel = new Set(); state.open.clear(); render(); } }, t("Select")),
         $("button", { id: "sync", class: o.sync.lastError ? "bad" : "", title: o.sync.lastError || "", onclick: () => call("sync").then(load, load) }, syncText), search),
-      state.filterEdit ? $("div", { id: "tasks" }, filterForm(state.filterEdit)) : state.notifyEdit ? $("div", { id: "tasks" }, notifyForm()) : state.tokensEdit ? $("div", { id: "tasks" }, tokensForm()) : $("div", { id: "tasks" },
+      state.filterEdit ? $("div", { id: "tasks" }, filterForm(state.filterEdit)) : state.notifyEdit ? $("div", { id: "tasks" }, notifyForm()) : state.tokensEdit ? $("div", { id: "tasks" }, tokensForm()) : state.exportEdit ? $("div", { id: "tasks" }, exportForm()) : $("div", { id: "tasks" },
         state.scope.startsWith("filter:") && !state.search ? $("div", { class: "chips", style: "padding:8px 10px 0" }, $("button", { class: "link", onclick: () => { state.filterEdit = o.filters.find(f => "filter:" + f.id === state.scope); render(); } }, t("Edit"))) : null,
         current && !state.search ? $("div", { class: "chips", style: "padding:8px 10px 0" }, listTools(current)) : null,
         // R126 and R32: the project is completed here, and an empty one turns back into a task, since a project is not a row of its list (R120).
@@ -717,7 +720,7 @@ function render() {
           : secs.map(s => [s.title ? $("div", { class: "section" + (s.bad ? " bad" : "") }, s.title) : null, s.tasks.map(x => taskNode(x, origin))]),
         state.scope === "trash" && !empty ? $("div", { style: "text-align:right;padding:14px" }, $("button", { class: "link danger", onclick: () => confirm(t("Delete everything in the trash for good?")) && act("emptyTrash") }, t("Empty Trash"))) : null,
         state.scope === "completed" && !state.search && !empty ? $("div", { style: "text-align:right;padding:14px" }, clearCompleted()) : null),
-      state.sel ? selectionBar() : readOnly() || state.filterEdit || state.notifyEdit || state.tokensEdit || state.scope.startsWith("filter:") ? null : $("div", { id: "add" }, $("span", { style: "color:var(--muted)" }, "+"), add))));
+      state.sel ? selectionBar() : readOnly() || state.filterEdit || state.notifyEdit || state.tokensEdit || state.exportEdit || state.scope.startsWith("filter:") ? null : $("div", { id: "add" }, $("span", { style: "color:var(--muted)" }, "+"), add))));
 }
 
 // The times R68 offers, and the one in force when another device set something else.
@@ -856,6 +859,25 @@ function tokensForm() {
       $("button", { class: "link danger", onclick: () => revoke(tok) }, t("Revoke")))),
     row(t("New token"), name, scope, $("button", { class: "link", onclick: create }, t("Create"))),
     $("div", { class: "chips" }, $("button", { class: "link", onclick: () => { Object.assign(state, { tokensEdit: false, newToken: null }); render(); } }, t("Close"))));
+}
+
+// R155, R156: the export downloads as a file: everything, or the list on screen.
+function exportForm() {
+  const row = (label, ...kids) => $("div", { class: "chips" }, $("span", { style: "min-width:150px;color:var(--muted)" }, label), kids);
+  const list = state.scope === "inbox" ? "inbox" : state.scope.startsWith("list:") ? state.scope.slice(5) : null;
+  const format = $("select", {}, [["json", "JSON, which Lists and scripts can read back"], ["markdown", "Markdown, for reading"]].map(([v, n]) => $("option", { value: v }, t(n))));
+  const what = $("select", {}, $("option", { value: "" }, t("Everything")), list ? $("option", { value: list, selected: true }, `${t("This list")}: ${listName(list)}`) : null);
+  const download = () => {
+    const q = new URLSearchParams({ format: format.value });
+    if (what.value) q.set("list", what.value);
+    $("a", { href: "/api/export?" + q, download: "" }).click();
+  };
+  return $("div", { class: "edit", style: "padding:16px;max-width:640px" },
+    $("div", { class: "name", style: "border-bottom:1px solid var(--line);padding-bottom:6px;font-weight:600" }, t("Export")),
+    row(t("Format"), format), row(t("What"), what),
+    $("div", { class: "meta" }, t("Attachment content is not exported; the JSON names each file.")),
+    $("div", { class: "chips" }, $("button", { class: "link", onclick: download }, t("Download")),
+      $("button", { class: "link", onclick: () => { state.exportEdit = false; render(); } }, t("Close"))));
 }
 
 // R149: without the server the page says so, and offers to look again; it shows no stale data.
