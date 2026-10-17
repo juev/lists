@@ -168,7 +168,12 @@ const RU = {
   "Notifications work over HTTPS only.": "Уведомления работают только по HTTPS.", "This browser cannot get notifications.": "Этот браузер не получает уведомления.",
   "On iPhone and iPad, add Lists to the Home Screen first.": "На iPhone и iPad сначала добавьте Lists на экран «Домой».",
   "The browser does not allow notifications for this site.": "Браузер запретил уведомления для этого сайта.",
-  "The server cannot be reached.": "Сервер недоступен.", "Try again": "Повторить"
+  "The server cannot be reached.": "Сервер недоступен.", "Try again": "Повторить",
+  "API tokens…": "Токены API…", "API tokens": "Токены API", "Read": "Чтение", "Read and write": "Чтение и запись", "Name": "Название",
+  "Create": "Создать", "New token": "Новый токен", "Revoke": "Отозвать", "Copy": "Скопировать", "Copied": "Скопировано", "Last used": "Использован", "never": "никогда",
+  "Copy it now: it is not shown again.": "Скопируйте его сейчас: больше он не показывается.",
+  "Revoke this token? Scripts that use it stop working.": "Отозвать токен? Сценарии, которые им пользуются, перестанут работать.",
+  "A token lets a script reach this server without a password: send it as Authorization: Bearer <token>.": "Токен даёт сценарию доступ к серверу без пароля: передайте его заголовком Authorization: Bearer <токен>."
 };
 const ru = (navigator.language || "en").toLowerCase().startsWith("ru");
 const t = s => (ru && RU[s]) || s;
@@ -224,7 +229,7 @@ function setLook(v) {
   c.toggle("light", v === "light"); c.toggle("dark", v === "dark");
 }
 // `sel` is the set of selected tasks while the selection mode is open (R118), and null otherwise.
-const state = { fetching: {}, filterEdit: null, notifyEdit: false, push: null, scope: "today", search: "", overview: null, tasks: [], open: new Set(), details: {}, drawer: false, typing: false, sel: null, more: false };
+const state = { fetching: {}, filterEdit: null, notifyEdit: false, push: null, tokensEdit: false, tokens: null, newToken: null, scope: "today", search: "", overview: null, tasks: [], open: new Set(), details: {}, drawer: false, typing: false, sel: null, more: false };
 const root = document.getElementById("root");
 
 // R135: the server takes today and the time of day from the zone of the browser, in minutes east of UTC.
@@ -585,7 +590,7 @@ function editor(d) {
 }
 
 function nav(scope, label, count, opts = {}) {
-  return $("button", { class: "nav" + (state.scope === scope && !state.search ? " on" : ""), onclick: () => { state.scope = scope; state.search = ""; state.open.clear(); state.drawer = false; state.sel = null; state.notifyEdit = false; load(); } },
+  return $("button", { class: "nav" + (state.scope === scope && !state.search ? " on" : ""), onclick: () => { state.scope = scope; state.search = ""; state.open.clear(); state.drawer = false; state.sel = null; state.notifyEdit = false; state.tokensEdit = false; load(); } },
     opts.color !== undefined ? $("span", { class: "dot", style: /^#[0-9a-f]{6}$/i.test(opts.color) ? `background:${opts.color}` : "" }) : null, $("span", {}, label),
     count ? $("span", { class: "n" + (opts.bad ? " bad" : "") }, count) : null);
 }
@@ -690,6 +695,7 @@ function render() {
         $("select", { id: "keep", onchange: e => act("setKeepDone", { value: e.target.value === "day" ? "day" : Number(e.target.value) }) },
           keepChoices(o.keepDone).map(([v, n]) => $("option", { value: v, selected: o.keepDone === v }, n)))),
       $("button", { class: "nav", style: "color:var(--muted)", onclick: openNotify }, t("Notifications…")),
+      $("button", { class: "nav", style: "color:var(--muted)", onclick: openTokens }, t("API tokens…")),
       $("button", { class: "nav", style: "color:var(--muted)", onclick: () => importer.click() }, t("Import…")), importer,
       // R148: a browser that signs out stops getting notifications first.
       $("button", { class: "nav", style: "color:var(--muted)", onclick: async () => { await pushOff().catch(() => {}); api("/api/logout", { method: "POST", headers: { "X-Lists": "1" } }).then(showLogin); } }, t("Sign out"))),
@@ -699,9 +705,9 @@ function render() {
       state.sel ? $("header", {}, $("button", { "aria-label": t("Close"), style: "font-size:18px;width:32px", onclick: () => { state.sel = null; state.more = false; render(); } }, "✕"),
         $("h1", {}, `${t("Selected")}: ${state.sel.size}`), $("button", { class: "link", onclick: () => { state.sel = null; state.more = false; render(); } }, t("Done")))
       : $("header", {}, $("button", { id: "menu", "aria-label": "menu", onclick: () => { state.drawer = true; render(); } }, "☰"), $("h1", {}, scopeTitle()),
-        empty || state.filterEdit || state.notifyEdit ? null : $("button", { id: "pick", class: "link", onclick: () => { state.sel = new Set(); state.open.clear(); render(); } }, t("Select")),
+        empty || state.filterEdit || state.notifyEdit || state.tokensEdit ? null : $("button", { id: "pick", class: "link", onclick: () => { state.sel = new Set(); state.open.clear(); render(); } }, t("Select")),
         $("button", { id: "sync", class: o.sync.lastError ? "bad" : "", title: o.sync.lastError || "", onclick: () => call("sync").then(load, load) }, syncText), search),
-      state.filterEdit ? $("div", { id: "tasks" }, filterForm(state.filterEdit)) : state.notifyEdit ? $("div", { id: "tasks" }, notifyForm()) : $("div", { id: "tasks" },
+      state.filterEdit ? $("div", { id: "tasks" }, filterForm(state.filterEdit)) : state.notifyEdit ? $("div", { id: "tasks" }, notifyForm()) : state.tokensEdit ? $("div", { id: "tasks" }, tokensForm()) : $("div", { id: "tasks" },
         state.scope.startsWith("filter:") && !state.search ? $("div", { class: "chips", style: "padding:8px 10px 0" }, $("button", { class: "link", onclick: () => { state.filterEdit = o.filters.find(f => "filter:" + f.id === state.scope); render(); } }, t("Edit"))) : null,
         current && !state.search ? $("div", { class: "chips", style: "padding:8px 10px 0" }, listTools(current)) : null,
         // R126 and R32: the project is completed here, and an empty one turns back into a task, since a project is not a row of its list (R120).
@@ -711,7 +717,7 @@ function render() {
           : secs.map(s => [s.title ? $("div", { class: "section" + (s.bad ? " bad" : "") }, s.title) : null, s.tasks.map(x => taskNode(x, origin))]),
         state.scope === "trash" && !empty ? $("div", { style: "text-align:right;padding:14px" }, $("button", { class: "link danger", onclick: () => confirm(t("Delete everything in the trash for good?")) && act("emptyTrash") }, t("Empty Trash"))) : null,
         state.scope === "completed" && !state.search && !empty ? $("div", { style: "text-align:right;padding:14px" }, clearCompleted()) : null),
-      state.sel ? selectionBar() : readOnly() || state.filterEdit || state.notifyEdit || state.scope.startsWith("filter:") ? null : $("div", { id: "add" }, $("span", { style: "color:var(--muted)" }, "+"), add))));
+      state.sel ? selectionBar() : readOnly() || state.filterEdit || state.notifyEdit || state.tokensEdit || state.scope.startsWith("filter:") ? null : $("div", { id: "add" }, $("span", { style: "color:var(--muted)" }, "+"), add))));
 }
 
 // The times R68 offers, and the one in force when another device set something else.
@@ -756,7 +762,7 @@ async function pushState() {
   return sub && Notification.permission === "granted" ? { sub, settings: (await subscribeOnServer(sub)).settings } : { sub: null, settings: null };
 }
 async function openNotify() {
-  Object.assign(state, { notifyEdit: true, filterEdit: null, drawer: false, sel: null, push: null });
+  Object.assign(state, { notifyEdit: true, tokensEdit: false, filterEdit: null, drawer: false, sel: null, push: null });
   render();
   state.push = await pushState().catch(e => ({ reason: e.message }));
   render();
@@ -811,6 +817,45 @@ function notifyForm() {
       row("", $("button", { class: "link", onclick: test }, t("Send a test notification")))
     ] : null,
     $("div", { class: "chips" }, $("button", { class: "link", onclick: () => { state.notifyEdit = false; render(); } }, t("Close"))));
+}
+
+// R150: tokens for scripts. A new token is shown once, until the form closes.
+async function openTokens() {
+  Object.assign(state, { tokensEdit: true, notifyEdit: false, filterEdit: null, drawer: false, sel: null, tokens: null, newToken: null });
+  render();
+  state.tokens = await api("/api/tokens").catch(() => []);
+  render();
+}
+function tokensForm() {
+  const row = (label, ...kids) => $("div", { class: "chips" }, $("span", { style: "min-width:150px;color:var(--muted)" }, label), kids);
+  const when = v => (v ? new Date(v + "Z").toLocaleString(locale, { dateStyle: "medium", timeStyle: "short" }) : t("never"));
+  const refresh = async () => { state.tokens = await api("/api/tokens").catch(() => state.tokens); render(); };
+  const name = $("input", { type: "text", placeholder: t("Name"), maxlength: 100 });
+  const scope = $("select", {}, [["read", "Read"], ["write", "Read and write"]].map(([v, n]) => $("option", { value: v }, t(n))));
+  const create = async () => {
+    if (!name.value.trim()) return name.focus();
+    state.newToken = (await postJson("/api/tokens", { name: name.value.trim(), scope: scope.value })).token;
+    await refresh();
+  };
+  const revoke = async tok => {
+    if (!confirm(t("Revoke this token? Scripts that use it stop working."))) return;
+    await postJson("/api/tokens/revoke", { id: tok.id });
+    await refresh();
+  };
+  const copy = () => navigator.clipboard.writeText(state.newToken).then(() => toast(t("Copied")), () => {});
+  return $("div", { class: "edit", style: "padding:16px;max-width:640px" },
+    $("div", { class: "name", style: "border-bottom:1px solid var(--line);padding-bottom:6px;font-weight:600" }, t("API tokens")),
+    $("div", { class: "meta" }, t("A token lets a script reach this server without a password: send it as Authorization: Bearer <token>.")),
+    state.newToken ? [
+      $("div", { class: "chips" }, $("code", { id: "new-token", style: "user-select:all;word-break:break-all" }, state.newToken),
+        navigator.clipboard ? $("button", { class: "link", onclick: copy }, t("Copy")) : null),
+      $("div", { class: "meta" }, t("Copy it now: it is not shown again."))
+    ] : null,
+    (state.tokens || []).map(tok => row(tok.name, $("span", { class: "chip" }, t(tok.scope === "read" ? "Read" : "Read and write")),
+      $("span", { class: "meta" }, `${t("Created")} ${when(tok.created)} · ${t("Last used")}: ${when(tok.used)}`),
+      $("button", { class: "link danger", onclick: () => revoke(tok) }, t("Revoke")))),
+    row(t("New token"), name, scope, $("button", { class: "link", onclick: create }, t("Create"))),
+    $("div", { class: "chips" }, $("button", { class: "link", onclick: () => { Object.assign(state, { tokensEdit: false, newToken: null }); render(); } }, t("Close"))));
 }
 
 // R149: without the server the page says so, and offers to look again; it shows no stale data.
