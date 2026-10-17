@@ -386,7 +386,7 @@ class MarkdownTextView: NSTextView, NSLayoutManagerDelegate {
         let point = convert(event.locationInWindow, from: nil)
         if box(at: point) == nil, link(at: point) != nil {
             // Shift extends the selection and Control asks for the menu, on a link as anywhere else.
-            let plain = event.modifierFlags.intersection([.shift, .control, .option]).isEmpty
+            let plain = event.modifierFlags.isDisjoint(with: [.shift, .control, .option])
             if !plain || dragged(from: event) { super.mouseDown(with: event); return }
             // The second click of a double click would open the address again.
             if event.clickCount > 1 { return }

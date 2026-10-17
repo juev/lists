@@ -210,7 +210,7 @@ final class DatePopoverView: NSView {
     /// The common choices from the keyboard (R39), before the calendar or a button takes the press. The time field keeps
     /// its keys while it is typed into; Return confirms from there as well.
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        guard event.type == .keyDown, event.modifierFlags.intersection([.command, .control, .option]).isEmpty else {
+        guard event.type == .keyDown, event.modifierFlags.isDisjoint(with: [.command, .control, .option]) else {
             return super.performKeyEquivalent(with: event)
         }
         return press(code: event.keyCode) || super.performKeyEquivalent(with: event)

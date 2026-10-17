@@ -357,7 +357,7 @@ final class SidebarTableView: NSTableView {
     }
 
     override func keyDown(with event: NSEvent) {
-        if event.keyCode == 53, event.modifierFlags.intersection([.command, .shift, .option, .control]).isEmpty {
+        if event.keyCode == 53, event.modifierFlags.isDisjoint(with: [.command, .shift, .option, .control]) {
             return cancelOperation(nil)
         }
         super.keyDown(with: event)
