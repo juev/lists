@@ -341,10 +341,20 @@ The log holds what the app did and the text of errors. Titles, notes, names of l
 
 To send the log to someone, use Show in Finder on macOS or Share the log on Android; Clear removes both files. The web server writes to its standard error stream, as before.
 
+## Export
+
+Everything, or the list on screen, goes out as one file: File → Export on macOS, Settings → Export… on Android, "Export…" in the side panel of the web interface.
+
+- **JSON** carries the lists with their settings, the tasks with every field and their subtasks, the saved filters, and the names of the attachments. It is described in [json-format.md](json-format.md), and Lists imports it back: on another device, or after a script has written it from another program. Importing it on the device it came from makes copies; it does not write over the tasks.
+- **Markdown** is for reading: a heading for each list and the tasks as a task list, with their dates, priority and tags on the line, the notes under them and the subtasks indented. It is not imported back.
+
+Neither holds the content of the attachments or the trash. A backup (above) is the complete copy.
+
 ## Import
 
 | Source | File |
 |---|---|
+| Lists | an export as JSON (below) |
 | 2Do | backup, `.2dodb` |
 | Todoist | CSV template |
 | Trello | board exported as JSON |
