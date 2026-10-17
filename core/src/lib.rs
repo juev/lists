@@ -35,3 +35,4 @@ pub use model::*;
 pub use push::finish_pushes;
 pub use store::{days_between, shift_date, Store};
 pub use sync::check_sync_connection;
+pub use sync::{StorageBackup, StorageBackupStatus};

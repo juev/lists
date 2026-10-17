@@ -469,6 +469,8 @@ fn s43_put_creates_the_missing_folder_after_a_409_without_asking_for_it() {
 fn legacy(dav: &Dav) {
     let a = device();
     connect(&a, dav, "secret");
+    // A stands for an earlier version, which kept no copies in the storage (S60).
+    a.set_storage_backups(false).unwrap();
     a.set_compact_after_for_tests(0);
     let t = add(&a, "из снимка");
     let src = tempfile::tempdir().unwrap();

@@ -14,6 +14,8 @@
 //! A device only ever writes files carrying its own id, so two devices never
 //! write the same file and no locking is needed.
 
+mod backups;
+pub use backups::{StorageBackup, StorageBackupStatus};
 pub mod remote;
 pub(crate) mod seal;
 pub mod webdav;
@@ -1274,6 +1276,7 @@ impl Store {
         if view.sealed() {
             self.remove_clear_files(raw)?;
         }
+        self.backup_to_storage(remote, &me);
         Ok(report)
     }
 
@@ -1329,6 +1332,12 @@ impl Store {
                 if is_sha256(&name) {
                     clear.push(format!("{ROOT}/blobs/{folder}/{name}"));
                 }
+            }
+        }
+        // S61: the backups that lay in the clear go with the rest.
+        for device in raw.folders(&backups::backups_dir())? {
+            for name in raw.list(&format!("{}/{device}", backups::backups_dir()))? {
+                clear.push(format!("{}/{device}/{name}", backups::backups_dir()));
             }
         }
         let data = seal::random::<32>();

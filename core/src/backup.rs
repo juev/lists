@@ -25,7 +25,7 @@ const FORMAT: u32 = 1;
 const EXT: &str = ".listsbackup";
 const PREFIX: &str = "Lists_(";
 const NAME_FMT: &str = "%Y-%m-%d-%H_%M_%S";
-const SECONDS_FMT: &str = "%Y-%m-%dT%H:%M:%S";
+pub(crate) const SECONDS_FMT: &str = "%Y-%m-%dT%H:%M:%S";
 const MANIFEST: &str = "manifest.json";
 const DATABASE: &str = "lists.sqlite";
 const BLOBS: &str = "blobs/";
@@ -68,7 +68,7 @@ fn invalid(msg: impl Into<String>) -> AppError {
     AppError::invalid(msg)
 }
 
-fn created_of(name: &str) -> Option<NaiveDateTime> {
+pub(crate) fn created_of(name: &str) -> Option<NaiveDateTime> {
     let stem = name.strip_prefix(PREFIX)?.strip_suffix(EXT)?;
     // A second backup within one second carries a counter after the bracket.
     let (moment, _) = stem.split_once(')')?;
@@ -76,7 +76,7 @@ fn created_of(name: &str) -> Option<NaiveDateTime> {
 }
 
 impl Store {
-    fn backups_dir(&self) -> PathBuf {
+    pub(crate) fn backups_dir(&self) -> PathBuf {
         self.dir.join("backups")
     }
 
@@ -102,7 +102,7 @@ impl Store {
         let target = dir.join(&name);
         let snapshot = dir.join(format!(".{}.sqlite", uuid::Uuid::now_v7().simple()));
         let part = dir.join(format!(".{}.part", uuid::Uuid::now_v7().simple()));
-        let written = self.write_archive(&snapshot, &part, &now);
+        let written = self.write_archive(&snapshot, &part, &now, true);
         let _ = std::fs::remove_file(&snapshot);
         if let Err(e) = written.and_then(|()| Ok(std::fs::rename(&part, &target)?)) {
             let _ = std::fs::remove_file(&part);
@@ -118,7 +118,21 @@ impl Store {
         })
     }
 
-    fn write_archive(&self, snapshot: &Path, part: &Path, now: &NaiveDateTime) -> Result<()> {
+    /// S60: an archive for the storage written to `part`, without attachment content, and the
+    /// name it goes under.
+    pub(crate) fn write_storage_backup(&self, part: &Path) -> Result<String> {
+        let dir = self.backups_dir();
+        std::fs::create_dir_all(&dir)?;
+        let now = self.lock().now();
+        let snapshot = dir.join(format!(".{}.sqlite", uuid::Uuid::now_v7().simple()));
+        let written = self.write_archive(&snapshot, part, &now, false);
+        let _ = std::fs::remove_file(&snapshot);
+        written?;
+        Ok(format!("{PREFIX}{}){EXT}", now.format(NAME_FMT)))
+    }
+
+    /// `content`: whether the attachment content on the device goes into the archive.
+    fn write_archive(&self, snapshot: &Path, part: &Path, now: &NaiveDateTime, content: bool) -> Result<()> {
         // The registers and the list of content are taken at one moment.
         let (fields, hashes): (u64, BTreeSet<String>) = {
             let inner = self.lock();
@@ -144,7 +158,7 @@ impl Store {
         };
         let present: Vec<String> = hashes
             .into_iter()
-            .filter(|h| is_sha256(h) && self.blob_path(h).is_file())
+            .filter(|h| content && is_sha256(h) && self.blob_path(h).is_file())
             .collect();
         let manifest = Manifest {
             format: FORMAT,
