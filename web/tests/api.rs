@@ -805,9 +805,19 @@ fn r128_the_completion_of_a_repeat_is_taken_back() {
     // The mark of the record does the same.
     call(&web, &cookie, json!({ "op": "complete", "id": id }));
     let record = records()[0]["id"].clone();
+    assert_eq!(records()[0]["undoable"], true, "R133: its mark is on in Completed");
     call(&web, &cookie, json!({ "op": "reopen", "id": record }));
     assert_eq!(due(), "2031-01-02");
     assert!(records().is_empty());
+
+    // R133: once the date has changed, the record keeps no mark.
+    call(&web, &cookie, json!({ "op": "complete", "id": id }));
+    call(
+        &web,
+        &cookie,
+        json!({ "op": "setDue", "id": id, "value": "2031-02-01" }),
+    );
+    assert_eq!(records()[0]["undoable"], false);
 }
 
 /// A call the server is expected to refuse: the status of the answer.

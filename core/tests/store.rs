@@ -853,6 +853,58 @@ fn r128_a_record_written_before_undo_existed_cannot_be_reopened() {
 }
 
 #[test]
+fn r133_the_mark_of_a_record_in_completed_reopens_while_the_completion_can_be_undone() {
+    let d = device();
+    let (t, a, _) = weekly_with_subtasks(&d);
+    d.complete_task(t.id.clone()).unwrap();
+    d.set_now_for_tests("2026-10-06T10:00");
+    let record = d.tasks(Scope::Completed).unwrap().remove(0);
+    assert!(
+        record.undoable,
+        "the task stands on the date the completion moved it to"
+    );
+    assert!(!d.task(t.id.clone()).unwrap().undoable, "only a record");
+    d.reopen_task(record.id).unwrap();
+    assert_eq!(d.task(t.id.clone()).unwrap().due.as_deref(), Some("2026-10-05T19:00"));
+    assert_eq!(d.task(a.id).unwrap().done.as_deref(), Some("2026-10-05T09:00"));
+    assert!(view(&d, Scope::Completed).is_empty(), "the record has left Completed");
+
+    // Completed twice: the first completion can no longer be taken back, the last one can.
+    d.complete_task(t.id.clone()).unwrap();
+    d.wont_do_task(t.id.clone()).unwrap();
+    let records = d.tasks(Scope::Completed).unwrap();
+    let wont = records.iter().find(|r| r.wont).unwrap();
+    assert!(wont.undoable);
+    assert!(!records.iter().find(|r| !r.wont).unwrap().undoable);
+    assert!(d.tasks(Scope::WontDo).unwrap()[0].undoable, "in Won't do as well");
+
+    // A changed date, and the task completed for good, leave nothing to take back.
+    d.set_due(t.id.clone(), Some("2026-10-30".into())).unwrap();
+    assert!(d.tasks(Scope::Completed).unwrap().iter().all(|r| !r.undoable));
+    d.set_due(t.id.clone(), Some("2026-10-19T19:00".into())).unwrap();
+    assert!(d.task(wont.id.clone()).unwrap().undoable, "back on that date");
+    d.set_repeat(t.id.clone(), None).unwrap();
+    d.complete_task(t.id.clone()).unwrap();
+    assert!(d.tasks(Scope::Completed).unwrap().iter().all(|r| !r.undoable));
+}
+
+#[test]
+fn r133_a_record_written_before_undo_existed_has_no_mark() {
+    let d = device();
+    let t = due_today(&d, "старый повтор");
+    d.set_repeat(t.id.clone(), Some(weekly())).unwrap();
+    d.complete_task(t.id.clone()).unwrap();
+    let record = d.tasks(Scope::Completed).unwrap().remove(0);
+    let d = plant(d, &[("task", record.id.as_str(), "undo", serde_json::Value::Null)]);
+    assert!(!d.task(record.id.clone()).unwrap().undoable);
+    let d = plant(d, &[("task", record.id.as_str(), "undo", serde_json::json!("{broken"))]);
+    assert!(
+        !d.task(record.id).unwrap().undoable,
+        "a value that is not an object reads as none"
+    );
+}
+
+#[test]
 fn r18_monthly_on_the_31st() {
     let d = device();
     d.set_now_for_tests("2026-01-31T10:00");

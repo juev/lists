@@ -156,6 +156,23 @@ fn r131_r128_the_completion_of_a_repeat_is_taken_back() {
 }
 
 #[test]
+fn r131_r133_reopening_a_record_from_completed_is_taken_back() {
+    let d = device();
+    let t = add(&d, "каждую неделю");
+    d.set_due(t.id.clone(), Some("2026-10-05T19:00".into())).unwrap();
+    d.set_repeat(t.id.clone(), Some(weekly())).unwrap();
+    d.complete_task(t.id.clone()).unwrap();
+    let record = d.tasks(Scope::Completed).unwrap().remove(0);
+    d.reopen_task(record.id).unwrap();
+    assert!(view(&d, Scope::Completed).is_empty());
+
+    assert_eq!(d.undo().unwrap(), 1);
+    assert_eq!(view(&d, Scope::Completed), ["каждую неделю"], "completed again");
+    assert_eq!(d.task(t.id).unwrap().due.as_deref(), Some("2026-10-12T19:00"));
+    assert!(d.tasks(Scope::Completed).unwrap()[0].undoable);
+}
+
+#[test]
 fn r131_a_new_task_a_copy_a_project_and_an_attachment_are_taken_back() {
     let d = device();
     let t = d.quick_add("а завтра".into(), None, false, None).unwrap();
