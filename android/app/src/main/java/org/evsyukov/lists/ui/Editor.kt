@@ -590,13 +590,26 @@ private fun CommittedField(
 ) {
     var text by remember(key) { mutableStateOf(value) }
     var focused by remember(key) { mutableStateOf(false) }
+    // R140: the text the field held when the cursor went in; only what was typed since is written.
+    var shown by remember(key) { mutableStateOf(value) }
     val saved by rememberUpdatedState(value)
     val commit by rememberUpdatedState(onCommit)
     // An edit arriving from another device replaces the text unless the user is typing here.
-    LaunchedEffect(value) { if (!focused) text = value }
+    LaunchedEffect(value) {
+        if (focused) return@LaunchedEffect
+        shown = value
+        text = value
+    }
     fun save() {
-        val trimmed = text.trim()
-        if (trimmed != saved) commit(trimmed)
+        val typed = typedEdit(text, shown, saved)
+        if (typed != null) {
+            commit(typed)
+            shown = typed
+        } else if (text.trim() == shown.trim()) {
+            // Nothing was typed: what arrived meanwhile is shown now.
+            text = saved
+            shown = saved
+        }
     }
     DisposableEffect(key) { onDispose { if (focused) save() } }
     // R83: an app left in the background may be killed there, and the field never loses the keyboard then.
@@ -621,9 +634,20 @@ private fun CommittedField(
         keyboardActions = KeyboardActions(onDone = { save() }),
         modifier = modifier.onFocusChanged {
             if (focused && !it.isFocused) save()
+            if (!focused && it.isFocused) shown = text
             focused = it.isFocused
         },
     )
+}
+
+/**
+ * R140: what a field that loses the cursor writes: the trimmed text when it differs from what the field
+ * showed when the cursor went in (`shown`) and from what is stored now (`stored`), which a sync may have
+ * changed meanwhile; null when nothing was typed, so that a synced edit is not written over.
+ */
+internal fun typedEdit(text: String, shown: String, stored: String): String? {
+    val trimmed = text.trim()
+    return trimmed.takeIf { it != shown.trim() && it != stored }
 }
 
 // The text of a one-line field after an edit that brought line breaks (R73). Enter alone leaves the
