@@ -4,7 +4,7 @@ JAVA_HOME ?= /opt/homebrew/opt/openjdk@21
 ANDROID_HOME ?= $(HOME)/Library/Android/sdk
 export JAVA_HOME ANDROID_HOME
 
-.PHONY: test lint deny fmt apple apple-run android android-install web clean
+.PHONY: test lint deny fmt apple apple-run apple-lint android android-lint android-install web clean
 
 # --locked: a lockfile that no longer matches Cargo.toml is an error here, as it
 # is in the Docker build, instead of being rewritten on the way.
@@ -37,6 +37,10 @@ apple-run: apple
 android:
 	./scripts/build-android.sh
 	cd android && ./gradlew --quiet testDebugUnitTest assembleDebug
+
+# ktlint with the settings in .editorconfig; the generated bindings are left out.
+android-lint:
+	cd android && ktlint 'app/src/**/*.kt' '!app/src/main/java/uniffi/**'
 
 android-install: android
 	$(ANDROID_HOME)/platform-tools/adb install -r android/app/build/outputs/apk/debug/app-debug.apk

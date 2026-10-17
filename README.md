@@ -152,6 +152,7 @@ Android app (JDK 17 or newer, Android SDK with platform 36 and an NDK, `rustup t
 ```sh
 make android           # unit tests, then android/app/build/outputs/apk/debug/app-debug.apk
 make android-install   # onto the connected device or emulator
+make android-lint      # ktlint, settings in .editorconfig (brew install ktlint)
 ```
 
 `JAVA_HOME` and `ANDROID_HOME` default to the Homebrew and Android Studio locations on macOS; override them in the environment.
