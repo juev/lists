@@ -146,7 +146,7 @@ fn task_json(t: &TaskItem) -> Value {
         "priority": priority_to(t.priority), "tags": t.tags,
         "repeat": t.repeat.as_ref().and_then(|r| serde_json::to_value(r).ok()),
         "remind": t.remind, "done": t.done, "wont": t.wont, "deleted": t.deleted, "log": t.is_log,
-        "project": t.is_project,
+        "undoable": t.undoable, "project": t.is_project,
         "subtasks": t.subtasks_total, "subtasksDone": t.subtasks_done, "attachments": t.attachments,
     })
 }

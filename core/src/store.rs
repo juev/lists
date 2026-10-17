@@ -251,7 +251,14 @@ const TASK_COLUMNS: &str = concat!(
     t.wont, ",
     eff_due!(),
     ", ",
-    eff_start!()
+    eff_start!(),
+    ",
+    CASE WHEN t.log_of IS NULL OR t.done IS NULL THEN 0 ELSE EXISTS (
+      SELECT 1 FROM fields f, tasks o
+      WHERE f.kind = 'task' AND f.id = t.id AND f.field = 'undo' AND o.id = t.log_of AND o.purged = 0 AND o.done IS NULL
+        AND CASE WHEN json_valid(f.value) AND json_type(f.value) = 'object'
+            THEN o.due IS json_extract(f.value, '$.next_due') AND o.start IS json_extract(f.value, '$.next_start')
+            ELSE 0 END) END"
 );
 
 /// Visible, not a completion record.
@@ -493,6 +500,7 @@ fn task_from_row(r: &Row) -> rusqlite::Result<TaskItem> {
             .unwrap_or_default(),
         effective_due: r.get(20)?,
         effective_start: r.get(21)?,
+        undoable: r.get(22)?,
     })
 }
 

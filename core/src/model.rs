@@ -162,6 +162,10 @@ pub struct TaskItem {
     pub effective_due: Option<String>,
     /// The start the views go by: `start`, held back to the project's start (R125).
     pub effective_start: Option<String>,
+    /// A record of a repeat whose completion can still be taken back (R128): its mark reopens it,
+    /// in Completed as well (R133). Computed when the task is read.
+    #[uniffi(default = false)]
+    pub undoable: bool,
 }
 
 #[derive(Debug, Clone, Default, uniffi::Record)]
