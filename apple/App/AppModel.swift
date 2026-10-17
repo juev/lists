@@ -429,6 +429,17 @@ final class AppModel {
         (try? store?.defaultListId(lastUsed: Storage.defaults.string(forKey: "lastUsedList"))) ?? "inbox"
     }
 
+    /// R136: a list goes only once the user agrees, since undo does not bring it back (R131).
+    func deleteList(_ id: String) {
+        guard let list = list(id) else { return }
+        let alert = NSAlert()
+        alert.messageText = L("Delete the list “%@” and move its tasks to the trash?", list.name)
+        alert.addButton(withTitle: L("Delete")).hasDestructiveAction = true
+        alert.addButton(withTitle: L("Cancel"))
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        perform { try $0.deleteList(id: id) }
+    }
+
     /// The lists Inbox can be hidden in favour of (R121).
     var listsForHiddenInbox: [TaskList] { lists.filter { !$0.archived && $0.id != "inbox" } }
 

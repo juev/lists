@@ -244,12 +244,12 @@ struct SidebarTable: NSViewRepresentable {
                     RowMenuItem(title: L("Configure…")) { [weak self] in self?.configureList(list) },
                     RowMenuItem(title: L("Archive")) { [model] in model.perform { try $0.setListArchived(id: id, archived: true) } },
                     .divider,
-                    RowMenuItem(title: L("Delete list"), destructive: true) { [model] in model.perform { try $0.deleteList(id: id) } },
+                    RowMenuItem(title: L("Delete list"), destructive: true) { [model] in model.deleteList(id) },
                 ]
             case (.archived, .list(let id)):
                 items = [
                     RowMenuItem(title: L("Unarchive")) { [model] in model.perform { try $0.setListArchived(id: id, archived: false) } },
-                    RowMenuItem(title: L("Delete list"), destructive: true) { [model] in model.perform { try $0.deleteList(id: id) } },
+                    RowMenuItem(title: L("Delete list"), destructive: true) { [model] in model.deleteList(id) },
                 ]
             case (.project(_, let total), .project(let id)):
                 guard let project = model.projects.first(where: { $0.id == id }) else { return nil }

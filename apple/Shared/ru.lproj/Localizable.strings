@@ -106,6 +106,7 @@
 "Lists" = "Списки";
 "Archive" = "В архив";
 "Delete list" = "Удалить список";
+"Delete the list “%@” and move its tasks to the trash?" = "Удалить список «%@» и отправить его задачи в корзину?";
 "Tags" = "Теги";
 "Archived lists" = "Архив";
 "Unarchive" = "Вернуть из архива";
