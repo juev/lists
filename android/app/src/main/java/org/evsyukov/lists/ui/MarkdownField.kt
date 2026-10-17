@@ -295,7 +295,7 @@ fun MarkdownField(
 ) {
     var field by remember(key) { mutableStateOf(TextFieldValue(value)) }
     var focused by remember(key) { mutableStateOf(false) }
-    // R140: the text the field held when the cursor went in; only what was typed since is written.
+    // R143: the text the field held when the cursor went in; only what was typed since is written.
     var shown by remember(key) { mutableStateOf(value) }
     var textLayout by remember(key) { mutableStateOf<TextLayoutResult?>(null) }
     val saved by rememberUpdatedState(value)
