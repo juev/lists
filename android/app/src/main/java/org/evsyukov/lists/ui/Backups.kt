@@ -33,6 +33,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.evsyukov.lists.R
 import org.evsyukov.lists.Repo
+import org.evsyukov.lists.fromStore
 import org.evsyukov.lists.logError
 import org.evsyukov.lists.logged
 import org.evsyukov.lists.dateLabel
@@ -54,26 +55,36 @@ private fun everyLabel(hours: UInt) = when (hours) {
 /** What is to be restored: a backup of the list, or a file picked outside the app. */
 private data class Restore(val path: String, val label: String, val temporary: File? = null)
 
+/** What the dialog of backups opens with (#320). */
+private class BackupsStart(val settings: BackupSettings?, val backups: List<Backup>, val synced: Boolean)
+
+/** The backups of this device as they are now; called off the main thread. */
+private fun stored(): List<Backup> = runCatching { Repo.store.backups() }.getOrDefault(emptyList())
+
 /**
  * The backups of this device (R88–R90): the schedule, the number to keep, the
  * backups themselves and restoring from one of them or from a file.
  */
 @Composable
 fun BackupsDialog(model: MainViewModel, onDismiss: () -> Unit) {
+    // #320: what the dialog opens with, read off the main thread; it opens when that has come.
+    val start = fromStore { store ->
+        BackupsStart(
+            // R102: settings that cannot be read close the dialog and go to the log; before, they ended the app.
+            runCatching { store.backupSettings() }.onFailure { logError("app", "the backup settings were not read: ${logged(it)}") }.getOrNull(),
+            runCatching { store.backups() }.getOrDefault(emptyList()),
+            runCatching { store.syncConfig() }.getOrNull() !is SyncConfig.Off,
+        )
+    } ?: return
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    // R102: settings that cannot be read close the dialog and go to the log; before, they ended the app.
-    val stored = remember {
-        runCatching { Repo.store.backupSettings() }
-            .onFailure { logError("app", "the backup settings were not read: ${logged(it)}") }
-            .getOrNull()
-    }
+    val stored = start.settings
     if (stored == null) {
         LaunchedEffect(Unit) { onDismiss() }
         return
     }
     var settings by remember { mutableStateOf(stored) }
-    var backups by remember { mutableStateOf(runCatching { Repo.store.backups() }.getOrDefault(emptyList())) }
+    var backups by remember { mutableStateOf(start.backups) }
     var choosing by remember { mutableStateOf<String?>(null) }
     var chosen by remember { mutableStateOf<Backup?>(null) }
     var restoring by remember { mutableStateOf<Restore?>(null) }
@@ -81,7 +92,7 @@ fun BackupsDialog(model: MainViewModel, onDismiss: () -> Unit) {
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
     var failed by remember { mutableStateOf(false) }
-    val synced = remember { runCatching { Repo.store.syncConfig() }.getOrNull() !is SyncConfig.Off }
+    val synced = start.synced
 
     fun label(backup: Backup) = dateLabel(backup.created)
 
@@ -89,32 +100,34 @@ fun BackupsDialog(model: MainViewModel, onDismiss: () -> Unit) {
     fun run(done: String?, work: () -> Unit) {
         busy = true
         scope.launch {
-            val result = withContext(Dispatchers.IO) { runCatching(work) }
+            val (result, now) = withContext(Dispatchers.IO) { runCatching(work) to stored() }
             busy = false
             failed = result.isFailure
             message = result.fold({ done }, { describe(it) })
-            backups = runCatching { Repo.store.backups() }.getOrDefault(emptyList())
+            backups = now
         }
     }
 
     fun setSettings(changed: BackupSettings) {
-        runCatching { Repo.store.setBackupSettings(changed) }
-            .onSuccess { settings = changed }
-            .onFailure { failed = true; message = describe(it) }
+        scope.launch {
+            withContext(Dispatchers.IO) { runCatching { Repo.store.setBackupSettings(changed) } }
+                .onSuccess { settings = changed }
+                .onFailure { failed = true; message = describe(it) }
+        }
     }
 
     fun restore(what: Restore, overStorage: Boolean) {
         restoring = null
         busy = true
         scope.launch {
-            val result = withContext(Dispatchers.IO) {
+            val (result, now) = withContext(Dispatchers.IO) {
                 runCatching { Repo.store.restoreBackup(what.path, overStorage) }
-                    .also { what.temporary?.parentFile?.deleteRecursively() }
+                    .also { what.temporary?.parentFile?.deleteRecursively() } to stored()
             }
             busy = false
             failed = result.isFailure
             message = result.fold({ str(R.string.backups_restored, what.label) }, { describe(it) })
-            backups = runCatching { Repo.store.backups() }.getOrDefault(emptyList())
+            backups = now
             // The lists, the reminders and the next sync all start from the restored data.
             if (result.isSuccess) Repo.changed()
         }

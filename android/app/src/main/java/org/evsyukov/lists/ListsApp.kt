@@ -9,10 +9,14 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.res.Configuration
 import android.content.Intent
+import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.os.Build
+import android.os.StrictMode
 import android.provider.Settings
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
@@ -64,8 +68,14 @@ class ListsApp : Application() {
     override fun onCreate() {
         super.onCreate()
         instance = this
+        // #320: a debug build reports in the system log what reads or writes the disk on the main thread.
+        if (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0) {
+            StrictMode.setThreadPolicy(StrictMode.ThreadPolicy.Builder().detectDiskReads().detectDiskWrites().penaltyLog().build())
+        }
         SyncWorker.schedule(this)
         Repo.scope.launch {
+            // #320: opening may back the database up and migrate it; here, not in the first screen that asks.
+            runCatching { store }.onFailure { android.util.Log.e("Lists", "the store did not open", it) }
             Reminders.refresh(this@ListsApp)
             TodayNotice.refresh(this@ListsApp)
             TaskWidgets.refresh(this@ListsApp)
@@ -95,6 +105,15 @@ fun logged(error: Throwable): String = when (error) {
 fun logError(source: String, message: String) {
     runCatching { Repo.store.log(LogLevel.ERROR, source, message) }
 }
+
+/**
+ * #320: what a composable shows from the core, read off the main thread. Null until it has come, and when it
+ * cannot be read; while the value for new keys is read, the one for the former keys stays.
+ */
+@Composable
+fun <T> fromStore(vararg keys: Any?, read: (Store) -> T): T? = produceState<T?>(null, *keys) {
+    value = withContext(Dispatchers.IO) { runCatching { read(Repo.store) }.getOrNull() }
+}.value
 
 /** One place every screen goes through to reach the core and to learn that data changed. */
 object Repo {

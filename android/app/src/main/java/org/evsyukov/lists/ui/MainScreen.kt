@@ -171,6 +171,7 @@ import java.time.LocalDateTime
 import org.evsyukov.lists.EntryPrefs
 import org.evsyukov.lists.str
 import org.evsyukov.lists.Repo
+import org.evsyukov.lists.fromStore
 import org.evsyukov.lists.dateLabel
 import org.evsyukov.lists.dayOf
 import org.evsyukov.lists.displayName
@@ -695,7 +696,7 @@ private fun NewTaskSheet(state: UiState, restored: NewTaskEntry?, onAdd: suspend
 @Composable
 fun QuickChips(text: String, modifier: Modifier = Modifier) {
     if (text.isBlank() || !EntryPrefs.parse(LocalContext.current)) return
-    val parsed: QuickParse = remember(text) { Repo.store.parseQuick(text) }
+    val parsed: QuickParse = fromStore(text) { it.parseQuick(text) } ?: return
     val parts = buildList {
         parsed.due?.let { add(dateLabel(it)) }
         if (parsed.priority != Priority.NONE) add(parsed.priority.marks())

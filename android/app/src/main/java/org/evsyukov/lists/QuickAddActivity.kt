@@ -62,10 +62,11 @@ class QuickAddActivity : ComponentActivity() {
         val shared = read(intent)
         // What was shared or selected carries its own text.
         readsClipboard = shared == Shared() && EntryPrefs.clipboard(this)
-        val lists = runCatching { Repo.store.lists().filter { !it.archived } }.getOrDefault(emptyList())
-        val projects = runCatching { Repo.store.projects() }.getOrDefault(emptyList())
-
         setContent {
+            // #320: read off the main thread; the card comes when they have.
+            val start = fromStore { store ->
+                Triple(store.lists().filter { !it.archived }, store.projects(), EntryPrefs.defaultListId(this@QuickAddActivity))
+            }
             AppTheme {
                 // Tapping outside the card closes the window, as with any dialog.
                 Box(
@@ -79,7 +80,7 @@ class QuickAddActivity : ComponentActivity() {
                         modifier = Modifier.fillMaxWidth().padding(12.dp)
                             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {},
                     ) {
-                        val listId = remember { EntryPrefs.defaultListId(this@QuickAddActivity) }
+                        val (lists, projects, listId) = start ?: return@Surface
                         val entry = rememberSaveable(saver = NewTaskEntry.Saver) { NewTaskEntry(shared.title, shared.notes, listId) }
                         val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
                         Column {

@@ -27,8 +27,10 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import org.evsyukov.lists.ui.MainScreen
 import org.evsyukov.lists.ui.MainViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import uniffi.lists_core.SyncConfig
 
 /** [bars] is set by a screen that draws under the system bars: their icons then follow the look of the app. */
@@ -88,8 +90,11 @@ class MainActivity : ComponentActivity() {
         // Not when the activity is rebuilt: the view chosen since then stays.
         if (savedInstanceState == null) openView(intent)
         // S31: who had sync on before the request existed is asked here, once.
-        if (savedInstanceState == null && runCatching { Repo.store.syncConfig() !is SyncConfig.Off }.getOrDefault(false)) {
-            Background.askOnce(this)
+        if (savedInstanceState == null) {
+            lifecycleScope.launch {
+                val on = withContext(Dispatchers.IO) { runCatching { Repo.store.syncConfig() !is SyncConfig.Off }.getOrDefault(false) }
+                if (on) Background.askOnce(this@MainActivity)
+            }
         }
 
         // Sync when the app comes forward and once a minute while it stays there.
