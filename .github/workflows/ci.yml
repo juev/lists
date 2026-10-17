@@ -35,6 +35,11 @@ jobs:
         run: make lint
       - name: Test
         run: make test
+      - uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
+        with:
+          tool: cargo-deny@0.20.2
+      - name: Check the dependencies
+        run: make deny
       - name: Check that the build changed no tracked file
         run: ./scripts/check-clean-tree.sh
 

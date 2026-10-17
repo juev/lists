@@ -1,0 +1,42 @@
+# cargo-deny for both workspaces: `cargo deny --manifest-path core/Cargo.toml check`
+# and the same for web (make deny). Advisories stop the build: a crate with a
+# published vulnerability or one that is no longer maintained is a decision to
+# make, not a warning to scroll past.
+[graph]
+all-features = true
+
+[advisories]
+version = 2
+yanked = "deny"
+ignore = [
+    # zip 2: all three are about extracting an archive to disk (`ZipArchive::extract`,
+    # `ZipStreamReader::extract`). The core opens archives with `ZipArchive::new` and reads
+    # the entries it names (import.rs, backup.rs); it never extracts. The fix is zip 9.
+    { id = "RUSTSEC-2026-0367", reason = "no extraction to disk; fixed in zip 9 only" },
+    { id = "RUSTSEC-2026-0368", reason = "no extraction to disk; fixed in zip 9 only" },
+    { id = "RUSTSEC-2026-0369", reason = "no extraction to disk; fixed in zip 9 only" },
+]
+
+[licenses]
+version = 2
+# What the dependencies carry today; a new license is a decision as well.
+allow = [
+    "Apache-2.0",
+    "BSD-3-Clause",
+    "CDLA-Permissive-2.0",
+    "ISC",
+    "MIT",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Zlib",
+]
+confidence-threshold = 0.9
+
+[bans]
+multiple-versions = "allow"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
