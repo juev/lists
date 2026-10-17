@@ -3100,7 +3100,7 @@ fn r130_a_subtask_goes_last_whatever_it_asks_for() {
 }
 
 #[test]
-fn r144_due_notifications_are_those_of_the_window() {
+fn r146_due_notifications_are_those_of_the_window() {
     let d = device(); // now is 2026-10-05T10:00
     let mk = |title: &str, due: Option<&str>, remind: Option<&str>| {
         let t = d

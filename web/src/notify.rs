@@ -1,5 +1,5 @@
 //! The browsers that asked for notifications, and what is sent to them. Every browser is one more
-//! device with the settings of R36; the core decides what is due, this sends it. Rules: R144–R146
+//! device with the settings of R36; the core decides what is due, this sends it. Rules: R146–R148
 //! in docs/specs/product.md.
 
 use std::path::{Path, PathBuf};
@@ -14,7 +14,7 @@ use crate::webpush::{b64, encrypt, origin, unb64, Vapid};
 
 const FILE: &str = "web-push.json";
 const KEY_FILE: &str = "web-push-key";
-/// R146: no zone is further from UTC than fourteen hours.
+/// R148: no zone is further from UTC than fourteen hours.
 const MAX_ZONE_MINUTES: i64 = 14 * 60;
 /// A list this long is not one person's browsers; it only bounds the file.
 const MAX_BROWSERS: usize = 100;
@@ -75,7 +75,7 @@ impl Browser {
     }
 
     /// Minutes east of UTC at `now`: by the name of the zone when it is known, so that a change of
-    /// daylight saving time is followed without the page (R146).
+    /// daylight saving time is followed without the page (R148).
     fn minutes_east(&self, now: DateTime<Utc>) -> i32 {
         self.zone
             .as_deref()
@@ -117,7 +117,7 @@ fn invalid(msg: &str) -> AppError {
 #[derive(Debug, PartialEq)]
 pub enum Sent {
     Ok,
-    /// The push service no longer knows the subscription (404 or 410): it is dropped (R146).
+    /// The push service no longer knows the subscription (404 or 410): it is dropped (R148).
     Gone,
     Failed(String),
 }
@@ -184,8 +184,8 @@ impl Notifier {
         origin(endpoint)
     }
 
-    /// R144, R146: takes a subscription from the page, or refreshes its zone. Settings that come
-    /// along replace the stored ones; without them a new browser gets the defaults of R144 and a
+    /// R146, R148: takes a subscription from the page, or refreshes its zone. Settings that come
+    /// along replace the stored ones; without them a new browser gets the defaults of R146 and a
     /// known one keeps its own, also under a new address that `replaces` the old one. Answers
     /// with the settings in force.
     pub fn subscribe(&self, args: &Value) -> Result<Value, AppError> {
@@ -262,7 +262,7 @@ impl Notifier {
         Ok(answer)
     }
 
-    /// R146: the browser turned notifications off or signed out. True when it was known.
+    /// R148: the browser turned notifications off or signed out. True when it was known.
     pub fn unsubscribe(&self, endpoint: &str) -> Result<bool, AppError> {
         let mut browsers = self.lock();
         let before = browsers.len();
@@ -274,7 +274,7 @@ impl Notifier {
         Ok(true)
     }
 
-    /// R145: one notification to this browser now, whatever is due.
+    /// R147: one notification to this browser now, whatever is due.
     pub fn test(&self, endpoint: &str, now: DateTime<Utc>) -> Option<Sent> {
         let browser = self.lock().iter().find(|b| b.endpoint == endpoint).cloned()?;
         let sent = self.send(&browser, &json!({ "key": "test", "kind": "test" }), now);
@@ -284,7 +284,7 @@ impl Notifier {
         Some(sent)
     }
 
-    /// R144: sends what came due since the previous look, to each browser in its own zone. The
+    /// R146: sends what came due since the previous look, to each browser in its own zone. The
     /// first look only marks the start: nothing that came due before it is sent.
     pub fn tick(&self, store: &Store, now: DateTime<Utc>) {
         let since = {
@@ -530,7 +530,7 @@ mod tests {
     }
 
     #[test]
-    fn r144_each_notification_comes_once_at_its_minute() {
+    fn r146_each_notification_comes_once_at_its_minute() {
         let s = setup();
         let push = service();
         let browser = Client::new();
@@ -574,7 +574,7 @@ mod tests {
     }
 
     #[test]
-    fn r144_settings_of_the_browser_decide() {
+    fn r146_settings_of_the_browser_decide() {
         let s = setup();
         let push = service();
         let browser = Client::new();
@@ -622,7 +622,7 @@ mod tests {
     }
 
     #[test]
-    fn r146_the_zone_name_follows_daylight_saving_time() {
+    fn r148_the_zone_name_follows_daylight_saving_time() {
         let s = setup();
         let push = service();
         let browser = Client::new();
@@ -637,7 +637,7 @@ mod tests {
     }
 
     #[test]
-    fn r146_a_subscription_the_service_forgot_is_dropped() {
+    fn r148_a_subscription_the_service_forgot_is_dropped() {
         let s = setup();
         let push = service();
         let browser = Client::new();
@@ -651,7 +651,7 @@ mod tests {
     }
 
     #[test]
-    fn r145_a_test_notification_and_a_failure() {
+    fn r147_a_test_notification_and_a_failure() {
         let s = setup();
         let push = service();
         let browser = Client::new();
@@ -676,7 +676,7 @@ mod tests {
     }
 
     #[test]
-    fn r144_a_long_title_still_fits_a_push_message() {
+    fn r146_a_long_title_still_fits_a_push_message() {
         let n = PlannedNotification {
             key: "task:x".into(),
             kind: NotificationKind::Reminder,
@@ -695,14 +695,14 @@ mod tests {
     }
 
     #[test]
-    fn r146_subscriptions_are_checked_kept_and_dropped() {
+    fn r148_subscriptions_are_checked_kept_and_dropped() {
         let s = setup();
         let browser = Client::new();
         let good = browser.subscription("https://push.example.net/a", "Europe/Moscow", 180);
         assert_eq!(
             s.notifier.subscribe(&good).unwrap(),
             json!({ "leads": [0], "allDay": "09:00", "summary": null }),
-            "the defaults of R144"
+            "the defaults of R146"
         );
         let mut changed = good.clone();
         changed["settings"] = json!({ "leads": [60], "allDay": "08:30", "summary": "" });

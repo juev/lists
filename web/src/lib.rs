@@ -30,7 +30,7 @@ use tiny_http::{Header, Method, Request, Response, ResponseBox, Server};
 
 const INDEX: &str = include_str!("index.html");
 const MANIFEST: &str = include_str!("manifest.json");
-/// R144, R147: shows the notifications and keeps the page for when the server cannot be reached.
+/// R146, R149: shows the notifications and keeps the page for when the server cannot be reached.
 const SERVICE_WORKER: &str = include_str!("sw.js");
 const ICON: &str = include_str!("icon.svg");
 // Bitmaps for what cannot use the SVG: the iOS home screen, the install
@@ -78,11 +78,11 @@ pub struct Config {
     pub max_file: Option<u64>,
     /// R140: the most all live attachments of one task may weigh; `None` keeps the default.
     pub max_task: Option<u64>,
-    /// R146: the contact push services see in the VAPID token, `mailto:` or `https:`.
+    /// R148: the contact push services see in the VAPID token, `mailto:` or `https:`.
     pub vapid_subject: Option<String>,
 }
 
-/// R146: what the token says when nothing is configured; Apple refuses a token without a contact.
+/// R148: what the token says when nothing is configured; Apple refuses a token without a contact.
 const VAPID_SUBJECT: &str = "https://github.com/juev/lists";
 
 struct App {
@@ -1295,7 +1295,7 @@ pub fn start(config: Config) -> Result<Running, Box<dyn std::error::Error>> {
         });
     }
 
-    // R144: what came due is sent every half minute. The first look only marks the start.
+    // R146: what came due is sent every half minute. The first look only marks the start.
     {
         let app = app.clone();
         std::thread::spawn(move || loop {
