@@ -201,6 +201,142 @@ thread_local! {
 }
 
 impl Store {
+    /// R144: what came due after `since` and by now (`YYYY-MM-DDTHH:MM[:SS]`, on the clock of the
+    /// zone in force), earliest first. The web server sends these; it has no system to schedule
+    /// notifications with. A `since` that cannot be read gives nothing.
+    pub fn due_notifications(&self, settings: NotifySettings, since: &str) -> Result<Vec<PlannedNotification>> {
+        let Some(since) = NaiveDateTime::parse_from_str(since, "%Y-%m-%dT%H:%M:%S")
+            .or_else(|_| NaiveDateTime::parse_from_str(since, MOMENT_FMT))
+            .ok()
+        else {
+            return Ok(vec![]);
+        };
+        self.notifications(settings, Some(since))
+    }
+
+    /// The plan of `planned_notifications` (`since` is `None`) or the window of `due_notifications`.
+    fn notifications(
+        &self,
+        settings: NotifySettings,
+        since: Option<NaiveDateTime>,
+    ) -> Result<Vec<PlannedNotification>> {
+        let planned = (|| {
+            if !settings.enabled {
+                return Ok(vec![]);
+            }
+            let inner = self.lock();
+            let now = inner.now();
+            let clock = |value: &Option<String>| {
+                value
+                    .as_deref()
+                    .and_then(|v| chrono::NaiveTime::parse_from_str(v, "%H:%M").ok())
+            };
+            let all_day = clock(&settings.all_day_at);
+            let moment = |value: &str| NaiveDateTime::parse_from_str(value, MOMENT_FMT).ok();
+            let tasks = query_tasks(
+                &inner.conn,
+                &format!(
+                "WHERE {LIVE} AND {NOT_ARCHIVED} AND t.done IS NULL AND (t.remind IS NOT NULL OR {EFF_DUE} IS NOT NULL)"
+            ),
+                &[],
+            )?;
+            // From now on for a plan; for a window, what fell into it.
+            let wanted = |at: &NaiveDateTime| match since {
+                None => *at > now,
+                Some(since) => *at > since && *at <= now,
+            };
+            let mut out = Vec::new();
+            for task in &tasks {
+                // (kind, moment, what tells notifications of one task apart)
+                let planned: Vec<(NotificationKind, NaiveDateTime, String)> = match (&task.remind, &task.effective_due)
+                {
+                    // A reminder without a time of day follows the all-day setting, nine o'clock failing that.
+                    (Some(remind), _) => moment(remind)
+                        .or_else(|| {
+                            recur::split(remind).map(|(d, _)| {
+                                d.and_time(
+                                    all_day.unwrap_or_else(|| chrono::NaiveTime::from_hms_opt(9, 0, 0).expect("valid")),
+                                )
+                            })
+                        })
+                        .map(|at| (NotificationKind::Reminder, at, String::new()))
+                        .into_iter()
+                        .collect(),
+                    (None, Some(due)) if due.len() > 10 => moment(due)
+                        .map(|at| {
+                            let mut leads = settings.lead_minutes.clone();
+                            leads.sort_unstable();
+                            leads.dedup();
+                            leads
+                                .into_iter()
+                                .map(|lead| {
+                                    (
+                                        NotificationKind::Due,
+                                        at - chrono::Duration::minutes(i64::from(lead)),
+                                        format!(":{lead}"),
+                                    )
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default(),
+                    (None, Some(due)) => all_day
+                        .and_then(|time| {
+                            recur::split(due).map(|(d, _)| (NotificationKind::Due, d.and_time(time), String::new()))
+                        })
+                        .into_iter()
+                        .collect(),
+                    (None, None) => Vec::new(),
+                };
+                for (kind, at, suffix) in planned.into_iter().filter(|(_, at, _)| wanted(at)) {
+                    out.push(PlannedNotification {
+                        key: format!("task:{}{suffix}", task.id),
+                        kind,
+                        at: at.format(MOMENT_FMT).to_string(),
+                        task_id: Some(task.id.clone()),
+                        title: task.title.clone(),
+                        due: task.effective_due.clone(),
+                        count: 0,
+                    });
+                }
+            }
+            if let Some(time) = clock(&settings.summary_at) {
+                let first = since.map_or(now.date(), |since| since.date().min(now.date()));
+                for offset in 0..7 {
+                    let day = first + chrono::Duration::days(offset);
+                    let at = day.and_time(time);
+                    let key = day.format(DATE_FMT).to_string();
+                    // Everything due by that day, as things stand now; a project is counted in its tasks (R125).
+                    let count = tasks
+                        .iter()
+                        .filter(|t| !(t.is_project && t.parent_id.is_none()))
+                        .filter(|t| t.effective_due.as_deref().is_some_and(|d| d[..10] <= *key))
+                        .count() as u32;
+                    if wanted(&at) && count > 0 {
+                        out.push(PlannedNotification {
+                            key: format!("summary:{key}"),
+                            kind: NotificationKind::Summary,
+                            at: at.format(MOMENT_FMT).to_string(),
+                            task_id: None,
+                            title: String::new(),
+                            due: None,
+                            count,
+                        });
+                    }
+                }
+            }
+            out.sort_by(|a, b| (&a.at, &a.key).cmp(&(&b.at, &b.key)));
+            if since.is_none() {
+                out.truncate(60);
+            }
+            Ok(out)
+        })();
+        // R102: without the plan the app sets no reminder at all.
+        if let Err(e) = &planned {
+            self.note(LogLevel::Error, "notify", || format!("reminders not planned: {e}"));
+        }
+        planned
+    }
+
     /// Runs `f` with today, the time of day and the moments it writes taken on a clock that many
     /// minutes east of UTC rather than on this device's. The web server answers each browser in the
     /// zone of the browser (R135). The stamps keep their clock: it has no time zone.
@@ -1420,113 +1556,7 @@ impl Store {
     /// tasks, reminders derived from due dates, and daily summaries for the
     /// coming week. At most 60, which fits what the platforms let an app schedule.
     pub fn planned_notifications(&self, settings: NotifySettings) -> Result<Vec<PlannedNotification>> {
-        let planned = (|| {
-            if !settings.enabled {
-                return Ok(vec![]);
-            }
-            let inner = self.lock();
-            let now = inner.now();
-            let clock = |value: &Option<String>| {
-                value
-                    .as_deref()
-                    .and_then(|v| chrono::NaiveTime::parse_from_str(v, "%H:%M").ok())
-            };
-            let all_day = clock(&settings.all_day_at);
-            let moment = |value: &str| NaiveDateTime::parse_from_str(value, MOMENT_FMT).ok();
-            let tasks = query_tasks(
-                &inner.conn,
-                &format!(
-                "WHERE {LIVE} AND {NOT_ARCHIVED} AND t.done IS NULL AND (t.remind IS NOT NULL OR {EFF_DUE} IS NOT NULL)"
-            ),
-                &[],
-            )?;
-            let mut out = Vec::new();
-            for task in &tasks {
-                // (kind, moment, what tells notifications of one task apart)
-                let planned: Vec<(NotificationKind, NaiveDateTime, String)> = match (&task.remind, &task.effective_due)
-                {
-                    // A reminder without a time of day follows the all-day setting, nine o'clock failing that.
-                    (Some(remind), _) => moment(remind)
-                        .or_else(|| {
-                            recur::split(remind).map(|(d, _)| {
-                                d.and_time(
-                                    all_day.unwrap_or_else(|| chrono::NaiveTime::from_hms_opt(9, 0, 0).expect("valid")),
-                                )
-                            })
-                        })
-                        .map(|at| (NotificationKind::Reminder, at, String::new()))
-                        .into_iter()
-                        .collect(),
-                    (None, Some(due)) if due.len() > 10 => moment(due)
-                        .map(|at| {
-                            let mut leads = settings.lead_minutes.clone();
-                            leads.sort_unstable();
-                            leads.dedup();
-                            leads
-                                .into_iter()
-                                .map(|lead| {
-                                    (
-                                        NotificationKind::Due,
-                                        at - chrono::Duration::minutes(i64::from(lead)),
-                                        format!(":{lead}"),
-                                    )
-                                })
-                                .collect()
-                        })
-                        .unwrap_or_default(),
-                    (None, Some(due)) => all_day
-                        .and_then(|time| {
-                            recur::split(due).map(|(d, _)| (NotificationKind::Due, d.and_time(time), String::new()))
-                        })
-                        .into_iter()
-                        .collect(),
-                    (None, None) => Vec::new(),
-                };
-                for (kind, at, suffix) in planned.into_iter().filter(|(_, at, _)| *at > now) {
-                    out.push(PlannedNotification {
-                        key: format!("task:{}{suffix}", task.id),
-                        kind,
-                        at: at.format(MOMENT_FMT).to_string(),
-                        task_id: Some(task.id.clone()),
-                        title: task.title.clone(),
-                        due: task.effective_due.clone(),
-                        count: 0,
-                    });
-                }
-            }
-            if let Some(time) = clock(&settings.summary_at) {
-                for offset in 0..7 {
-                    let day = now.date() + chrono::Duration::days(offset);
-                    let at = day.and_time(time);
-                    let key = day.format(DATE_FMT).to_string();
-                    // Everything due by that day, as things stand now; a project is counted in its tasks (R125).
-                    let count = tasks
-                        .iter()
-                        .filter(|t| !(t.is_project && t.parent_id.is_none()))
-                        .filter(|t| t.effective_due.as_deref().is_some_and(|d| d[..10] <= *key))
-                        .count() as u32;
-                    if at > now && count > 0 {
-                        out.push(PlannedNotification {
-                            key: format!("summary:{key}"),
-                            kind: NotificationKind::Summary,
-                            at: at.format(MOMENT_FMT).to_string(),
-                            task_id: None,
-                            title: String::new(),
-                            due: None,
-                            count,
-                        });
-                    }
-                }
-            }
-            out.sort_by(|a, b| (&a.at, &a.key).cmp(&(&b.at, &b.key)));
-            out.truncate(60);
-            Ok(out)
-        })();
-        // R102: without the plan the app sets no reminder at all.
-        if let Err(e) = &planned {
-            self.note(LogLevel::Error, "notify", || format!("reminders not planned: {e}"));
-        }
-        planned
+        self.notifications(settings, None)
     }
 
     pub fn tags(&self) -> Result<Vec<TagCount>> {
