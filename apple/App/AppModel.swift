@@ -747,19 +747,29 @@ final class AppModel {
 
     // MARK: Writing
 
-    /// Runs a change, then refreshes what is on screen and queues a sync.
+    /// Runs a change, then refreshes what is on screen and queues a sync. What the change puts into
+    /// the history of undo of the core is one step of ⌘Z, under `name` in the Edit menu (R131).
     @discardableResult
-    func perform<T>(_ change: (Store) throws -> T) -> T? {
+    func perform<T>(named name: String? = nil, _ change: (Store) throws -> T) -> T? {
         guard let store else { return nil }
-        do {
-            let result = try change(store)
-            reload()
+        let revision = store.undoRevision()
+        store.beginGroup()
+        let result = Result { try change(store) }
+        store.endGroup()
+        if store.undoRevision() != revision {
+            undoManager?.registerUndo(withTarget: self) { model in
+                model.perform { try $0.undo() }
+            }
+            undoManager?.setActionName(name ?? L("Change Tasks"))
+        }
+        reload()
+        switch result {
+        case .success(let value):
             scheduleSync()
-            return result
-        } catch {
+            return value
+        case .failure(let error):
             alertIsError = true
             alert = describe(error)
-            reload()
             return nil
         }
     }
@@ -847,7 +857,8 @@ final class AppModel {
         let title = draft.title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty else { return nil }
         let parse = parseQuickText
-        let task: TaskItem? = perform { store in
+        // R37: Esc keeps the task of the card, so ⌘Z is the way to take a new task back: it goes to the trash.
+        let task: TaskItem? = perform(named: L("New Task")) { store in
             let created: TaskItem
             // R130: a new task goes first in its list, or right under the task that was selected when the card opened.
             let after = draft.after
@@ -879,12 +890,6 @@ final class AppModel {
             attach(draft.files, to: task.id)
             noteUsedList(task.listId)
             if allTasks.contains(where: { $0.id == task.id }) { selection = task.id }
-            // R37: Esc keeps the task of the card, so ⌘Z is the way to take a new task back: it goes to the trash.
-            undoManager?.registerUndo(withTarget: self) { model in
-                model.perform { try $0.deleteTask(id: task.id) }
-                if model.selection == task.id { model.selection = nil }
-            }
-            undoManager?.setActionName(L("New Task"))
         }
         return task
     }
@@ -1023,56 +1028,35 @@ final class AppModel {
             perform { try $0.reopenTask(id: task.id) }
             return
         }
-        perform { _ = try $0.completeTask(id: task.id) }
-        // The subtasks closed with the task come back with it; reopening by the mark leaves them (R11).
+        // The subtasks closed with the task come back with it on undo; reopening by the mark leaves them (R11).
         // A repeating task gets back its dates and the state of its subtasks (R128).
-        undoManager?.registerUndo(withTarget: self) { model in
-            model.perform { try $0.undoCloseTask(id: task.id) }
-        }
-        undoManager?.setActionName(L("Complete Task"))
+        perform(named: L("Complete Task")) { _ = try $0.completeTask(id: task.id) }
     }
 
     /// R126: completes the project whatever the state of its tasks; its open tasks close with it (R11)
     /// and come back with it on undo. The project leaves the sidebar at once.
     func completeProject(_ project: TaskItem) {
         guard project.done == nil else { return }
-        perform { _ = try $0.completeTask(id: project.id) }
-        undoManager?.registerUndo(withTarget: self) { model in
-            model.perform { try $0.undoCloseTask(id: project.id) }
-        }
-        undoManager?.setActionName(L("Complete Project"))
+        perform(named: L("Complete Project")) { _ = try $0.completeTask(id: project.id) }
     }
 
     /// Closes the task as "won't do" (R69); undone the way a completion is.
     func wontDo(_ task: TaskItem) {
         guard task.done == nil else { return }
-        perform { _ = try $0.wontDoTask(id: task.id) }
-        undoManager?.registerUndo(withTarget: self) { model in
-            model.perform { try $0.undoCloseTask(id: task.id) }
-        }
-        undoManager?.setActionName(L("Won't do"))
+        perform(named: L("Won't do")) { _ = try $0.wontDoTask(id: task.id) }
     }
 
     func delete(_ task: TaskItem) {
         finishRenaming(task.id, save: false)
-        perform { try $0.deleteTask(id: task.id) }
+        perform(named: L("Delete Task")) { try $0.deleteTask(id: task.id) }
         expanded.remove(task.id)
         if selection == task.id { selection = nil }
-        undoManager?.registerUndo(withTarget: self) { model in
-            model.perform { try $0.restoreTask(id: task.id) }
-        }
-        undoManager?.setActionName(L("Delete Task"))
     }
 
     /// The due date of one task from its menu or ⌘T; undo gives the former one back, as for several (R117, #299).
     func setDue(_ task: TaskItem, _ due: String?) {
-        let former = task.due
-        guard former != due else { return }
+        guard task.due != due else { return }
         perform { try $0.setDue(id: task.id, due: due) }
-        undoManager?.registerUndo(withTarget: self) { model in
-            model.perform { try $0.setDue(id: task.id, due: former) }
-        }
-        undoManager?.setActionName(L("Change Tasks"))
     }
 
     /// Shows a task in its list, expanded, with every ancestor expanded too.
@@ -1208,25 +1192,18 @@ final class AppModel {
     @discardableResult
     func batch(_ action: BatchAction, ids: [String]? = nil) -> Int {
         let tasks = ids.map { $0.compactMap(row) } ?? selectedTasks
-        let steps = tasks.compactMap { task in action.step(for: task, subtask: isSubtask(task)).map { (task.id, $0) } }
-        guard !steps.isEmpty else { return 0 }
+        let ids = tasks.filter { action.applies(to: $0, subtask: isSubtask($0)) }.map(\.id)
+        guard !ids.isEmpty else { return 0 }
         if case .delete = action {
-            for (id, _) in steps {
+            for id in ids {
                 finishRenaming(id, save: false)
                 expanded.remove(id)
             }
         }
-        perform { store in for (id, _) in steps { try action.run(store, id) } }
-        let backs = steps.compactMap { id, step in step.back.map { (id, $0) } }
-        if !backs.isEmpty {
-            undoManager?.registerUndo(withTarget: self) { model in
-                model.perform { store in for (id, back) in backs { try back.run(store, id) } }
-            }
-            undoManager?.setActionName(action.name)
-        }
+        perform(named: action.name) { store in for id in ids { try action.run(store, id) } }
         // The row the keys go on from may be gone with the action.
         if picked.isEmpty, let selection, !visibleIds.contains(selection) { self.selection = nil }
-        return steps.count
+        return ids.count
     }
 
     /// A tag as the core stores it.
