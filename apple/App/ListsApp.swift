@@ -212,9 +212,7 @@ struct MenuBarView: View {
 
     var body: some View {
         content
-            // Reading counts keeps this view refreshed when tasks change elsewhere.
-            .id(model.counts)
-            // R98: out of the view that `id` makes anew, so that only opening and closing the window count.
+            // R98: only opening and closing the window count.
             .background {
                 Color.clear
                     .onAppear { QuickEntryPanel.shared.menuBarWindowOpened() }
@@ -226,29 +224,9 @@ struct MenuBarView: View {
         VStack(alignment: .leading, spacing: 10) {
             DraftCardView(onDone: {})
             Divider()
-            let today = (try? model.store?.tasks(view: .today)) ?? []
-            if today.isEmpty {
-                Text(L("All done for today")).foregroundStyle(.secondary).frame(maxWidth: .infinity)
-            } else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 6) {
-                        ForEach(today.prefix(12), id: \.id) { task in
-                            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                                Button { model.toggleDone(task) } label: { Image(systemName: "square") }
-                                    .buttonStyle(.plain)
-                                    .accessibilityLabel(L("Complete"))
-                                Text(task.title).lineLimit(1)
-                                Spacer()
-                                if let due = task.effectiveDue, Moment.isOverdue(due) {
-                                    Text(Moment.label(due)).font(AppFont.style(.caption)).foregroundStyle(.red)
-                                }
-                            }
-                        }
-                        if today.count > 12 { Text(L("and %@ more", "\(today.count - 12)")).font(AppFont.style(.caption)).foregroundStyle(.secondary) }
-                    }
-                }
-                .frame(maxHeight: 260)
-            }
+            // Reading counts keeps the list refreshed when tasks change elsewhere. R138: only the list is made anew, the card
+            // keeps what is typed in it.
+            todayList.id(model.counts)
             Divider()
             HStack {
                 Button(L("Open Lists")) {
@@ -269,6 +247,32 @@ struct MenuBarView: View {
         }
         .padding(14)
         .frame(width: 340)
+    }
+
+    @ViewBuilder private var todayList: some View {
+        let today = (try? model.store?.tasks(view: .today)) ?? []
+        if today.isEmpty {
+            Text(L("All done for today")).foregroundStyle(.secondary).frame(maxWidth: .infinity)
+        } else {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(today.prefix(12), id: \.id) { task in
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Button { model.toggleDone(task) } label: { Image(systemName: "square") }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel(L("Complete"))
+                            Text(task.title).lineLimit(1)
+                            Spacer()
+                            if let due = task.effectiveDue, Moment.isOverdue(due) {
+                                Text(Moment.label(due)).font(AppFont.style(.caption)).foregroundStyle(.red)
+                            }
+                        }
+                    }
+                    if today.count > 12 { Text(L("and %@ more", "\(today.count - 12)")).font(AppFont.style(.caption)).foregroundStyle(.secondary) }
+                }
+            }
+            .frame(maxHeight: 260)
+        }
     }
 }
 
