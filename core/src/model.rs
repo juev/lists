@@ -311,6 +311,29 @@ pub struct Attachment {
     pub local_path: Option<String>,
 }
 
+/// R140: how much content one attachment and all attachments of one task may take on this device.
+/// Kept by the device, not synced: a phone and a server have different room.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Record)]
+pub struct AttachmentLimits {
+    /// The largest single file that can be added or downloaded.
+    pub max_file: u64,
+    /// The most that all live attachments of one task may weigh together.
+    pub max_task: u64,
+}
+
+/// R140: the limits of a device that has not chosen its own.
+pub const DEFAULT_MAX_FILE: u64 = 512 * 1024 * 1024;
+pub const DEFAULT_MAX_TASK: u64 = 2 * 1024 * 1024 * 1024;
+
+impl Default for AttachmentLimits {
+    fn default() -> Self {
+        AttachmentLimits {
+            max_file: DEFAULT_MAX_FILE,
+            max_task: DEFAULT_MAX_TASK,
+        }
+    }
+}
+
 /// What saving every attachment of a task into a folder did (R91).
 #[derive(Debug, Clone, PartialEq, Default, uniffi::Record)]
 pub struct AttachmentsSaved {

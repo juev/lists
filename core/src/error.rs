@@ -8,6 +8,9 @@ pub enum AppError {
     Storage { msg: String },
     #[error("sync: {msg}")]
     Sync { msg: String },
+    /// R140: the content is above what this device takes, or all attachments of the task are.
+    #[error("too large: {msg}")]
+    TooLarge { msg: String },
 }
 
 pub type Result<T> = std::result::Result<T, AppError>;
@@ -21,6 +24,9 @@ impl AppError {
     }
     pub fn not_found(what: impl Into<String>) -> Self {
         AppError::NotFound { what: what.into() }
+    }
+    pub fn too_large(msg: impl Into<String>) -> Self {
+        AppError::TooLarge { msg: msg.into() }
     }
 }
 

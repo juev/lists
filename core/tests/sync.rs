@@ -3,6 +3,7 @@
 mod common;
 
 use std::path::Path;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{mpsc, Mutex};
 
 use common::*;
@@ -1480,6 +1481,129 @@ fn s35_content_that_does_not_match_its_hash_is_not_fetched() {
 
     assert!(b.fetch_attachment(att.id).is_err());
     assert_eq!(b.attachments(t.id).unwrap()[0].local_path, None);
+}
+
+/// R140: a storage whose byte methods refuse attachment content: the core must use the file methods.
+struct Streams {
+    inner: DirRemote,
+    sent: AtomicU32,
+    taken: AtomicU32,
+}
+
+impl Streams {
+    fn new(storage: &TempDir) -> Self {
+        Streams {
+            inner: DirRemote::new(storage.path()),
+            sent: AtomicU32::new(0),
+            taken: AtomicU32::new(0),
+        }
+    }
+}
+
+impl Remote for Streams {
+    fn id(&self) -> String {
+        self.inner.id()
+    }
+    fn list(&self, dir: &str) -> Result<Vec<String>> {
+        self.inner.list(dir)
+    }
+    fn get(&self, path: &str) -> Result<Option<Vec<u8>>> {
+        if path.contains("/blobs/") {
+            panic!("the content was read whole: {path}");
+        }
+        self.inner.get(path)
+    }
+    fn put(&self, path: &str, data: &[u8]) -> Result<()> {
+        if path.contains("/blobs/") {
+            panic!("the content was written whole: {path}");
+        }
+        self.inner.put(path, data)
+    }
+    fn get_to(&self, path: &str, out: &mut dyn std::io::Write, max: u64) -> Result<bool> {
+        if path.contains("/blobs/") {
+            self.taken.fetch_add(1, Ordering::Relaxed);
+        }
+        self.inner.get_to(path, out, max)
+    }
+    fn put_file(&self, path: &str, local: &Path) -> Result<()> {
+        if path.contains("/blobs/") {
+            self.sent.fetch_add(1, Ordering::Relaxed);
+        }
+        self.inner.put_file(path, local)
+    }
+    fn delete(&self, path: &str) -> Result<()> {
+        self.inner.delete(path)
+    }
+    fn exists(&self, path: &str) -> Result<bool> {
+        self.inner.exists(path)
+    }
+}
+
+#[test]
+fn s52_content_goes_through_the_files_on_disk() {
+    let storage = tempfile::tempdir().unwrap();
+    let remote = Streams::new(&storage);
+    let (a, b) = (device(), device());
+    let content: Vec<u8> = (0..16 * 1024 * 1024).map(|i| (i % 251) as u8).collect();
+    let t = add(&a, "с большим файлом");
+    attach(&a, &t, "large.bin", &content);
+
+    // A pass for the fields goes byte by byte only for its own small files.
+    a.sync_with(&remote).unwrap();
+    let report = a.sync_attachments_with(&remote).unwrap();
+    assert_eq!((report.uploaded, report.downloaded), (1, 0));
+    assert_eq!(remote.sent.load(Ordering::Relaxed), 1, "the file went from the disk");
+
+    b.sync_with(&remote).unwrap();
+    let report = b.sync_attachments_with(&remote).unwrap();
+    assert_eq!((report.uploaded, report.downloaded), (0, 1));
+    assert_eq!(remote.taken.load(Ordering::Relaxed), 1, "the file came to the disk");
+    let got = b.attachments(t.id).unwrap().remove(0);
+    assert_eq!(std::fs::read(got.local_path.unwrap()).unwrap(), content);
+}
+
+#[test]
+fn s52_content_above_the_limit_is_not_downloaded() {
+    let storage = tempfile::tempdir().unwrap();
+    let remote = DirRemote::new(storage.path());
+    let (a, b) = (device(), device());
+    for d in [&a, &b] {
+        d.set_sync_config(folder(&storage)).unwrap();
+    }
+    let t = add(&a, "с файлом");
+    attach(&a, &t, "a.txt", b"twenty bytes of text!");
+    a.sync_with(&remote).unwrap();
+    a.sync_attachments_with(&remote).unwrap();
+
+    b.set_attachment_limits(AttachmentLimits {
+        max_file: 10,
+        max_task: 1000,
+    })
+    .unwrap();
+    b.sync_with(&remote).unwrap();
+    let report = b.sync_attachments_with(&remote).unwrap();
+    assert_eq!((report.uploaded, report.downloaded), (0, 0));
+    assert_eq!(b.attachments(t.id.clone()).unwrap()[0].local_path, None);
+    assert_eq!(b.sync_status().unwrap().attachments_waiting, 1);
+    assert_eq!(
+        std::fs::read_dir(b.dir().join("blobs")).unwrap().count(),
+        0,
+        "nothing was kept"
+    );
+
+    // With room for the file, the same content arrives on the next pass.
+    b.set_attachment_limits(AttachmentLimits {
+        max_file: 1000,
+        max_task: 2000,
+    })
+    .unwrap();
+    let report = b.sync_attachments_with(&remote).unwrap();
+    assert_eq!(report.downloaded, 1);
+    let got = b.attachments(t.id).unwrap().remove(0);
+    assert_eq!(
+        std::fs::read(got.local_path.unwrap()).unwrap(),
+        b"twenty bytes of text!"
+    );
 }
 
 #[test]

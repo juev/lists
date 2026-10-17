@@ -1,6 +1,7 @@
 //! WebDAV as dumb file storage: GET, PUT, DELETE, HEAD, MKCOL, MOVE and a depth-1 PROPFIND.
 
-use std::io::Read;
+use std::io::{Read, Write};
+use std::path::Path;
 use std::time::Duration;
 
 use base64::Engine;
@@ -107,6 +108,15 @@ impl WebDavRemote {
             None => self.base.clone(),
         };
         matches!(self.answers(&folder), Ok(false))
+    }
+
+    /// R140: PUT with the file as the body. The length is declared, so the server gets no chunked body.
+    fn send_file(&self, path: &str, size: u64, local: &Path) -> Result<u16> {
+        let file = std::fs::File::open(local)?;
+        let request = self
+            .request("PUT", &self.url(path))
+            .set("Content-Length", &size.to_string());
+        status(request.send(file), "PUT")
     }
 }
 
@@ -227,6 +237,23 @@ impl Remote for WebDavRemote {
         }
     }
 
+    fn get_to(&self, path: &str, out: &mut dyn Write, max: u64) -> Result<bool> {
+        match self.request("GET", &self.url(path)).call() {
+            Ok(response) => {
+                let cap = if max == 0 { u64::MAX } else { max.saturating_add(1) };
+                let mut reader = response.into_reader().take(cap);
+                let copied = std::io::copy(&mut reader, out).map_err(|e| AppError::sync(format!("GET {path}: {e}")))?;
+                if max != 0 && copied > max {
+                    return Err(AppError::too_large(format!("the content is more than {max} bytes")));
+                }
+                Ok(true)
+            }
+            Err(ureq::Error::Status(404, _)) => Ok(false),
+            Err(ureq::Error::Status(code, _)) => Err(fail("GET", path, code)),
+            Err(e) => Err(AppError::sync(format!("GET {path}: {e}"))),
+        }
+    }
+
     fn put(&self, path: &str, data: &[u8]) -> Result<()> {
         let send = || status(self.request("PUT", &self.url(path)).send_bytes(data), "PUT");
         match send() {
@@ -239,6 +266,19 @@ impl Remote for WebDavRemote {
         }
         self.make_parents(path)?;
         finish_put(path, send()?)
+    }
+
+    /// R140: the file goes to the server from the disk, in the pieces ureq reads, not from memory.
+    fn put_file(&self, path: &str, local: &Path) -> Result<()> {
+        let size = std::fs::metadata(local)?.len();
+        match self.send_file(path, size, local) {
+            Ok(code) if !matches!(code, 404 | 409) => return finish_put(path, code),
+            Ok(_) => {}
+            Err(e) if !self.folder_missing(path) => return Err(e),
+            Err(_) => {}
+        }
+        self.make_parents(path)?;
+        finish_put(path, self.send_file(path, size, local)?)
     }
 
     fn delete(&self, path: &str) -> Result<()> {

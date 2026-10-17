@@ -8,8 +8,9 @@
 mod oidc;
 
 use std::collections::{HashMap, VecDeque};
-use std::io::Read;
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::net::SocketAddr;
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -17,12 +18,13 @@ use std::time::{Duration, Instant};
 pub use oidc::OidcConfig;
 
 use lists_core::{
-    markdown_layout, AppError, Attachment, FilterSpec, KeepDone, MarkdownAlign, MarkdownKind, NewTask, Priority,
-    Repeat, Scope, SortMode, Store, SyncConfig, TaskItem, TaskList,
+    markdown_layout, AppError, Attachment, AttachmentLimits, FilterSpec, KeepDone, MarkdownAlign, MarkdownKind,
+    NewTask, Priority, Repeat, Scope, SortMode, Store, SyncConfig, TaskItem, TaskList, DEFAULT_MAX_FILE,
+    DEFAULT_MAX_TASK,
 };
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use tiny_http::{Header, Method, Request, Response, Server};
+use tiny_http::{Header, Method, Request, Response, ResponseBox, Server};
 
 const INDEX: &str = include_str!("index.html");
 const MANIFEST: &str = include_str!("manifest.json");
@@ -34,7 +36,7 @@ const ICON_180: &[u8] = include_bytes!("icon-180.png");
 const ICON_192: &[u8] = include_bytes!("icon-192.png");
 const ICON_512: &[u8] = include_bytes!("icon-512.png");
 const COOKIE: &str = "lists_session";
-/// Request bodies above this are refused; it bounds one uploaded attachment.
+/// Request bodies above this are refused; it bounds a JSON import.
 const MAX_BODY: usize = 64 * 1024 * 1024;
 const SESSION_TTL: Duration = Duration::from_secs(30 * 24 * 3600);
 /// R135: no zone is further from UTC than fourteen hours.
@@ -65,6 +67,11 @@ pub struct Config {
     pub trust_proxy: bool,
     /// R134: the session cookie is `Secure`, for a server the browser reaches over HTTPS.
     pub secure_cookie: bool,
+    /// R140: the largest one attachment may be, in bytes; `None` keeps the default. Zero means no
+    /// limit. Read once, when the server opens the store.
+    pub max_file: Option<u64>,
+    /// R140: the most all live attachments of one task may weigh; `None` keeps the default.
+    pub max_task: Option<u64>,
 }
 
 struct App {
@@ -85,7 +92,7 @@ pub struct Running {
     pub addr: SocketAddr,
 }
 
-type Reply = Response<std::io::Cursor<Vec<u8>>>;
+type Reply = ResponseBox;
 
 fn header(name: &str, value: &str) -> Header {
     Header::from_bytes(name.as_bytes(), value.as_bytes()).expect("static header")
@@ -98,6 +105,7 @@ fn reply(code: u16, content_type: &str, body: impl Into<Vec<u8>>) -> Reply {
         .with_header(header("Cache-Control", "no-store"))
         .with_header(header("X-Content-Type-Options", "nosniff"))
         .with_header(header("Referrer-Policy", "no-referrer"))
+        .boxed()
 }
 
 fn json_reply(code: u16, value: Value) -> Reply {
@@ -722,6 +730,38 @@ impl App {
         Ok(data)
     }
 
+    /// R140: an upload goes to the disk in pieces, so the server does not hold the file in memory.
+    /// Returns the number of bytes written; zero as the limit means no limit.
+    fn save_body(request: &mut Request, file: &Path, limit: u64) -> Result<u64, Reply> {
+        if limit != 0 && request.body_length().is_some_and(|n| n as u64 > limit) {
+            return Err(fail(413, "too large: this server takes smaller files"));
+        }
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut out = options.open(file).map_err(|e| fail(500, e.to_string()))?;
+        let reader = request.as_reader();
+        let mut buffer = [0u8; 64 * 1024];
+        let mut size = 0u64;
+        loop {
+            let read = reader.read(&mut buffer).map_err(|e| fail(400, e.to_string()))?;
+            if read == 0 {
+                break;
+            }
+            size += read as u64;
+            if limit != 0 && size > limit {
+                return Err(fail(413, "too large: this server takes smaller files"));
+            }
+            out.write_all(&buffer[..read]).map_err(|e| fail(500, e.to_string()))?;
+        }
+        out.flush().map_err(|e| fail(500, e.to_string()))?;
+        Ok(size)
+    }
+
     fn handle(&self, request: &mut Request) -> Reply {
         let url = request.url().to_string();
         let path = url.split('?').next().unwrap_or_default().to_string();
@@ -858,7 +898,7 @@ impl App {
                         }),
                     )
                 }
-                (Method::Get, "/api/file") => {
+                (Method::Get, "/api/file") | (Method::Head, "/api/file") => {
                     let (task, id) = (
                         query(&url, "task").unwrap_or_default(),
                         query(&url, "id").unwrap_or_default(),
@@ -872,25 +912,16 @@ impl App {
                     };
                     match found.as_ref().and_then(|a| a.local_path.as_ref().map(|p| (a, p))) {
                         Some((a, path)) => {
-                            let data = std::fs::read(path).map_err(|e| AppError::Storage { msg: e.to_string() })?;
                             let name: String = a.name.chars().filter(|c| !c.is_control() && *c != '"').collect();
                             let name = encode_name(&name);
                             let shown = query(&url, "view").and(preview_kind(&a.mime));
-                            match shown {
-                                // Shown in place only for the types of `preview_kind`, under the declared
-                                // type and nothing else: the browser may not guess another one.
-                                Some(_) => reply(200, &a.mime, data)
-                                    .with_header(header(
-                                        "Content-Disposition",
-                                        &format!("inline; filename*=UTF-8''{name}"),
-                                    ))
-                                    .with_header(header("Content-Security-Policy", PREVIEW_POLICY)),
-                                // Never rendered in place: an uploaded HTML file must not run on this origin.
-                                None => reply(200, "application/octet-stream", data).with_header(header(
-                                    "Content-Disposition",
-                                    &format!("attachment; filename*=UTF-8''{name}"),
-                                )),
-                            }
+                            let range = request
+                                .headers()
+                                .iter()
+                                .find(|h| h.field.equiv("Range"))
+                                .map(|h| h.value.as_str().to_string());
+                            // R141: the file is sent from the disk, and one range of it when asked.
+                            file_reply(Path::new(path), &a.mime, &name, shown.is_some(), range.as_deref())
                         }
                         None => fail(404, "no such attachment"),
                     }
@@ -901,14 +932,14 @@ impl App {
                         .map(|n| n.replace(['/', '\\'], "_"))
                         .filter(|n| !n.is_empty())
                         .unwrap_or_else(|| "file".into());
-                    let data = match Self::body(request) {
-                        Ok(b) => b,
-                        Err(r) => return Ok(r),
-                    };
                     let dir = std::env::temp_dir().join(format!("lists-upload-{}", uuid::Uuid::new_v4().simple()));
                     std::fs::create_dir_all(&dir).map_err(|e| AppError::Storage { msg: e.to_string() })?;
                     let file = dir.join("upload");
-                    std::fs::write(&file, data).map_err(|e| AppError::Storage { msg: e.to_string() })?;
+                    // R140: the body goes to the disk as it arrives; only the limit can stop it.
+                    if let Err(r) = Self::save_body(request, &file, self.store.attachment_limits().max_file) {
+                        let _ = std::fs::remove_dir_all(&dir);
+                        return Ok(r);
+                    }
                     let actor = self.session(request).unwrap_or_default();
                     let added = self.store.as_actor(&actor, || {
                         self.store
@@ -972,9 +1003,129 @@ impl App {
                 AppError::Invalid { .. } => 400,
                 AppError::Sync { .. } => 502,
                 AppError::Storage { .. } => 500,
+                // R140: the web answers a file above the limit of the device with 413.
+                AppError::TooLarge { .. } => 413,
             };
             fail(code, e.to_string())
         })
+    }
+}
+
+/// R141: what a `Range` header asks for. A range that cannot be understood is ignored, and the whole
+/// file is a valid answer; a range outside the file is refused with 416.
+enum Asked {
+    Whole,
+    Part { start: u64, end: u64 },
+    NotSatisfiable,
+}
+
+fn asked_range(value: Option<&str>, size: u64) -> Asked {
+    let Some(text) = value else {
+        return Asked::Whole;
+    };
+    let Some(spec) = text.trim().strip_prefix("bytes=") else {
+        return Asked::Whole;
+    };
+    // Several ranges at once are not needed by a browser: the whole file is a correct answer.
+    if spec.contains(',') {
+        return Asked::Whole;
+    }
+    let Some((start, end)) = spec.split_once('-') else {
+        return Asked::Whole;
+    };
+    let (start, end) = (start.trim(), end.trim());
+    let (start, end) = if start.is_empty() {
+        // `-N`: the last N bytes.
+        let Some(suffix) = end.parse::<u64>().ok().filter(|n| *n > 0) else {
+            return Asked::Whole;
+        };
+        if size == 0 {
+            return Asked::NotSatisfiable;
+        }
+        (size.saturating_sub(suffix), size - 1)
+    } else {
+        let Ok(start) = start.parse::<u64>() else {
+            return Asked::Whole;
+        };
+        let end = if end.is_empty() {
+            size.saturating_sub(1)
+        } else {
+            let Ok(end) = end.parse::<u64>() else {
+                return Asked::Whole;
+            };
+            end
+        };
+        (start, end)
+    };
+    if size == 0 || start >= size || end < start {
+        return Asked::NotSatisfiable;
+    }
+    Asked::Part {
+        start,
+        end: end.min(size - 1),
+    }
+}
+
+/// R141: one attachment, sent from the disk: the whole file or one range of it.
+fn file_reply(path: &Path, mime: &str, name: &str, inline: bool, range: Option<&str>) -> Reply {
+    let size = match std::fs::metadata(path) {
+        Ok(meta) => meta.len(),
+        Err(_) => return fail(404, "no such attachment"),
+    };
+    let mut file = match std::fs::File::open(path) {
+        Ok(file) => file,
+        Err(e) => return fail(500, e.to_string()),
+    };
+    let (kind, disposition) = if inline {
+        // Shown in place only for the types of `preview_kind`, under the declared type and nothing
+        // else: the browser may not guess another one.
+        (mime, format!("inline; filename*=UTF-8''{name}"))
+    } else {
+        // Never rendered in place: an uploaded HTML file must not run on this origin.
+        (
+            "application/octet-stream",
+            format!("attachment; filename*=UTF-8''{name}"),
+        )
+    };
+    let mut headers = vec![
+        header("Content-Type", kind),
+        header("Cache-Control", "no-store"),
+        header("X-Content-Type-Options", "nosniff"),
+        header("Referrer-Policy", "no-referrer"),
+        header("Content-Disposition", &disposition),
+        header("Accept-Ranges", "bytes"),
+    ];
+    if inline {
+        headers.push(header("Content-Security-Policy", PREVIEW_POLICY));
+    }
+    match asked_range(range, size) {
+        Asked::Whole => Response::new(
+            200.into(),
+            headers,
+            Box::new(file) as Box<dyn Read + Send>,
+            Some(size as usize),
+            None,
+        ),
+        Asked::Part { start, end } => {
+            if let Err(e) = file.seek(SeekFrom::Start(start)) {
+                return fail(500, e.to_string());
+            }
+            let length = end - start + 1;
+            headers.push(header("Content-Range", &format!("bytes {start}-{end}/{size}")));
+            Response::new(
+                206.into(),
+                headers,
+                Box::new(file.take(length)) as Box<dyn Read + Send>,
+                Some(length as usize),
+                None,
+            )
+        }
+        Asked::NotSatisfiable => {
+            let mut response = fail(416, "range not satisfiable");
+            response.add_header(header("Content-Range", &format!("bytes */{size}")));
+            response.add_header(header("Accept-Ranges", "bytes"));
+            response
+        }
     }
 }
 
@@ -993,6 +1144,12 @@ fn encode_name(name: &str) -> String {
 /// Opens the store, starts the HTTP workers and the sync thread, and returns.
 pub fn start(config: Config) -> Result<Running, Box<dyn std::error::Error>> {
     let store = Store::open(config.data_dir)?;
+    // R140: the limits of this server: what the environment gives, or the defaults. The environment
+    // is the only place they are set here, so a removed variable brings its default back.
+    store.set_attachment_limits(AttachmentLimits {
+        max_file: config.max_file.unwrap_or(DEFAULT_MAX_FILE),
+        max_task: config.max_task.unwrap_or(DEFAULT_MAX_TASK),
+    })?;
     store.set_sync_config(config.sync)?;
     store.set_sync_password(config.sync_password);
     store.set_push_server(config.push_server)?;

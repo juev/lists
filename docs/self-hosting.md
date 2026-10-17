@@ -65,6 +65,8 @@ Everything is configured through environment variables, so that no password show
 |---|---|---|
 | `LISTS_WEB_LISTEN` | address and port to listen on | `127.0.0.1:8080`; `0.0.0.0:8080` in the image |
 | `LISTS_WEB_DATA` | directory with this device's copy of the data | `./lists-data`; `/data` in the image |
+| `LISTS_MAX_FILE_MB` | the largest attachment this server takes, in megabytes; `0` disables the limit | `512` |
+| `LISTS_MAX_TASK_MB` | the most all attachments of one task may take here, in megabytes; `0` disables the limit | `2048` |
 | `LISTS_WEB_PASSWORD` | password for the web interface | none |
 | `LISTS_WEB_URL` | the server's address as the browser sees it; needed for OpenID Connect, and with `https://` the session cookie is marked `Secure` | none |
 | `LISTS_TRUST_PROXY` | `1`: the client's address is the last one in `X-Forwarded-For`, which the reverse proxy in front appends; set it only when every request comes through that proxy | none: the address of the connection |

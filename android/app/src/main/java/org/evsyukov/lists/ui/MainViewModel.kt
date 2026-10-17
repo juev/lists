@@ -140,6 +140,7 @@ fun describe(error: Throwable): String = when (error) {
     is AppException.Invalid -> error.msg
     is AppException.Storage -> str(R.string.err_storage, error.msg)
     is AppException.Sync -> error.msg
+    is AppException.TooLarge -> error.msg
     else -> error.message ?: error.toString()
 }
 

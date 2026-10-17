@@ -87,6 +87,7 @@ fun logged(error: Throwable): String = when (error) {
     is AppException.Invalid -> "invalid: ${error.msg}"
     is AppException.Storage -> "storage: ${error.msg}"
     is AppException.Sync -> "sync: ${error.msg}"
+    is AppException.TooLarge -> "too large: ${error.msg}"
     else -> error.javaClass.simpleName
 }
 

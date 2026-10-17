@@ -913,12 +913,40 @@ final class AppModel {
     }
 
     /// Copies the files into the task; one that cannot be read is reported and the rest go on.
+    /// R140: the copy runs off the main thread; the card is refreshed when each file is done.
     func attach(_ urls: [URL], to taskId: String) {
+        guard let store else { return }
         for url in urls {
             let scoped = url.startAccessingSecurityScopedResource()
-            perform { _ = try $0.addAttachment(taskId: taskId, path: url.path, name: nil) }
-            if scoped { url.stopAccessingSecurityScopedResource() }
-            IncomingFiles.discard(url)
+            _Concurrency.Task { [weak self] in
+                let outcome = await _Concurrency.Task.detached(priority: .userInitiated) {
+                    () -> (failure: String?, changed: Bool) in
+                    let before = store.undoRevision()
+                    do {
+                        _ = try store.addAttachment(taskId: taskId, path: url.path, name: nil)
+                    } catch {
+                        return (describe(error), false)
+                    }
+                    // One step of undo for the file (R131), unless something else joined in meanwhile.
+                    return (nil, store.undoRevision() == before + 1)
+                }.value
+                if scoped { url.stopAccessingSecurityScopedResource() }
+                IncomingFiles.discard(url)
+                guard let self else { return }
+                if outcome.changed {
+                    self.undoManager?.registerUndo(withTarget: self) { model in
+                        model.perform { try $0.undo() }
+                    }
+                    self.undoManager?.setActionName(L("Change Tasks"))
+                }
+                self.reload()
+                self.scheduleSync()
+                self.attachmentsMoved(arrived: outcome.failure == nil)
+                if let failure = outcome.failure {
+                    self.alertIsError = true
+                    self.alert = failure
+                }
+            }
         }
     }
 
@@ -1276,11 +1304,35 @@ final class AppModel {
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
         panel.message = L("A 2Do backup (.2dodb), a Todoist CSV, a Trello board JSON or Microsoft To Do lists as JSON")
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        guard let report = perform({ try $0.importFile(path: url.path) }) else { return }
-        let summary = L("Imported from %@: %@ lists, %@ tasks, %@ attachments.", report.source, "\(report.lists)", "\(report.tasks)", "\(report.attachments)")
-        alertIsError = false
-        alert = ([summary] + report.notes).joined(separator: "\n\n")
+        guard panel.runModal() == .OK, let url = panel.url, let store else { return }
+        // R140: reading a large export and writing its tasks runs off the main thread.
+        _Concurrency.Task { [weak self] in
+            let outcome = await _Concurrency.Task.detached(priority: .userInitiated) {
+                () -> (success: Bool, message: String?, changed: Bool) in
+                // One undo step for everything the import writes (R131).
+                let before = store.undoRevision()
+                store.beginGroup()
+                defer { store.endGroup() }
+                do {
+                    let report = try store.importFile(path: url.path)
+                    let summary = L("Imported from %@: %@ lists, %@ tasks, %@ attachments.", report.source, "\(report.lists)", "\(report.tasks)", "\(report.attachments)")
+                    return (true, ([summary] + report.notes).joined(separator: "\n\n"), store.undoRevision() != before)
+                } catch {
+                    return (false, describe(error), false)
+                }
+            }.value
+            guard let self else { return }
+            if outcome.changed {
+                self.undoManager?.registerUndo(withTarget: self) { model in
+                    model.perform { try $0.undo() }
+                }
+                self.undoManager?.setActionName(L("Change Tasks"))
+            }
+            self.reload()
+            self.scheduleSync()
+            self.alertIsError = !outcome.success
+            self.alert = outcome.message
+        }
     }
 
     // MARK: Sync
