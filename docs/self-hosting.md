@@ -19,7 +19,7 @@ docker run -d --name lists \
   ghcr.io/juev/lists:0.5.2
 ```
 
-The container listens on port 8080, keeps its data in `/data` and runs as user 10001. A directory mounted over `/data` must be writable by that user.
+The container listens on port 8080, keeps its data in `/data` and runs as user 10001. A directory mounted over `/data` must be writable by that user. Uploads and imports are written to `/data/tmp` first (`TMPDIR`), so the server needs nothing outside `/data` and runs with a read-only root filesystem.
 
 The image holds only the server, linked statically, and a minimal init; there is no shell inside, so `docker exec` has nothing to run.
 
