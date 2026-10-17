@@ -487,11 +487,11 @@ class MainViewModel : ViewModel() {
         viewModelScope.launch { Repo.sync() }
     }
 
-    /** S52: the save of the settings of sync under way; a second one does not start meanwhile. */
+    /** S53: the save of the settings of sync under way; a second one does not start meanwhile. */
     private var joining: Job? = null
 
     /**
-     * S52: stores where to sync and which side to keep there (S36) in the scope of the model, so that
+     * S53: stores where to sync and which side to keep there (S36) in the scope of the model, so that
      * closing the settings does not cut it short half way. The password and the token go in before the
      * data of this device is replaced, and the former ones come back when the storage is not saved.
      */

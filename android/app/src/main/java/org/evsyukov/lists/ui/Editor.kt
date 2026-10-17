@@ -605,7 +605,7 @@ private fun CommittedField(
 ) {
     var text by remember(key) { mutableStateOf(value) }
     var focused by remember(key) { mutableStateOf(false) }
-    // R140: the text the field held when the cursor went in; only what was typed since is written.
+    // R143: the text the field held when the cursor went in; only what was typed since is written.
     var shown by remember(key) { mutableStateOf(value) }
     val saved by rememberUpdatedState(value)
     val commit by rememberUpdatedState(onCommit)
@@ -656,7 +656,7 @@ private fun CommittedField(
 }
 
 /**
- * R140: what a field that loses the cursor writes: the trimmed text when it differs from what the field
+ * R143: what a field that loses the cursor writes: the trimmed text when it differs from what the field
  * showed when the cursor went in (`shown`) and from what is stored now (`stored`), which a sync may have
  * changed meanwhile; null when nothing was typed, so that a synced edit is not written over.
  */
@@ -1196,7 +1196,7 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
         testing = true
         scope.launch {
             val sender = enabled && pushSignIn && pushServer.isNotEmpty()
-            // S52: the model carries it to the end when the settings are closed meanwhile.
+            // S53: the model carries it to the end when the settings are closed meanwhile.
             val joined = model.joinStorage(
                 config, side, SyncSecrets(password.takeIf { enabled }, pushServer.takeIf { sender }, pushToken.takeIf { sender }),
             )
