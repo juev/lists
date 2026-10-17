@@ -25,12 +25,12 @@ import androidx.core.view.WindowCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
-import org.evsyukov.lists.ui.MainScreen
-import org.evsyukov.lists.ui.MainViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.evsyukov.lists.ui.MainScreen
+import org.evsyukov.lists.ui.MainViewModel
 import uniffi.lists_core.SyncConfig
 
 /** [bars] is set by a screen that draws under the system bars: their icons then follow the look of the app. */

@@ -1,10 +1,10 @@
 package org.evsyukov.lists.ui
 
 import android.content.Context
+import android.content.res.Configuration
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import android.content.res.Configuration
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -55,8 +55,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -66,11 +66,12 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 import org.evsyukov.lists.R
 import org.evsyukov.lists.Repo
-import org.evsyukov.lists.fromStore
 import org.evsyukov.lists.dateLabel
 import org.evsyukov.lists.displayName
+import org.evsyukov.lists.fromStore
 import org.evsyukov.lists.logError
 import org.evsyukov.lists.logged
 import org.evsyukov.lists.priorities
@@ -78,7 +79,6 @@ import org.evsyukov.lists.str
 import org.evsyukov.lists.summary
 import org.evsyukov.lists.title
 import org.evsyukov.lists.today
-import kotlinx.coroutines.launch
 import uniffi.lists_core.Freq
 import uniffi.lists_core.NewTask
 import uniffi.lists_core.Priority

@@ -31,13 +31,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.async
 import org.evsyukov.lists.ui.CardHandle
 import org.evsyukov.lists.ui.NewTaskCard
 import org.evsyukov.lists.ui.NewTaskEntry
 import org.evsyukov.lists.ui.TaskDraft
-import org.evsyukov.lists.ui.saveDraft
 import org.evsyukov.lists.ui.describe
-import kotlinx.coroutines.async
+import org.evsyukov.lists.ui.saveDraft
 
 /** What another app handed over, reduced to what a task can hold. */
 private data class Shared(val title: String = "", val notes: String = "", val files: List<Uri> = emptyList())
