@@ -631,3 +631,24 @@ fn r92_the_backup_before_a_migration_takes_a_place_in_the_rotation() {
     assert!(!names.contains(&oldest));
     assert!(names.iter().any(|n| !n.starts_with("Lists_(2026-10-01")), "{names:?}");
 }
+
+#[test]
+fn s51_a_backup_restores_the_tags_the_device_shows() {
+    let d = device();
+    let t = add(&d, "задача");
+    let fits = "a".repeat(196);
+    d.add_tag(t.id.clone(), fits.clone()).unwrap();
+    let long = "b".repeat(197);
+    // A tag written by an earlier version is in the database but no device can carry it.
+    let d = plant(d, &[("task", &t.id, &format!("tag:{long}"), serde_json::json!(true))]);
+    assert_eq!(d.task(t.id.clone()).unwrap().tags, std::slice::from_ref(&fits));
+
+    let backup = d.create_backup().unwrap();
+    let fresh = device();
+    fresh.restore_backup(backup.path, false).unwrap();
+    assert_eq!(
+        fresh.task(t.id).unwrap().tags,
+        [fits],
+        "the copy has the tags the device showed"
+    );
+}

@@ -24,15 +24,21 @@ pub const KIND_BLOB: &str = "blob";
 pub const KIND_SETTINGS: &str = "settings";
 pub const SETTINGS_ID: &str = "app";
 
-/// Bumped whenever a derived table changes shape: the tables are then dropped
-/// and rebuilt from `fields`, which never changes shape.
-const DERIVED_VERSION: &str = "4";
+/// Bumped whenever a derived table changes shape or what it holds is built by
+/// another rule: the tables are then dropped and rebuilt from `fields`, which
+/// never changes shape.
+const DERIVED_VERSION: &str = "5";
 /// The version of the tables that are not rebuilt from the registers: `fields` and the bookkeeping.
 /// A change that rewrites one of them raises it, and a database with a smaller number is backed up
 /// before it is migrated (R92). Adding a column or a table needs no new number.
 pub const SCHEMA_VERSION: u32 = 2;
 
-const MAX_KEY_LEN: usize = 200;
+pub(crate) const MAX_KEY_LEN: usize = 200;
+
+/// What makes a key of a register acceptable to every device and to a restored backup (S51).
+pub(crate) fn key_ok(key: &str) -> bool {
+    !key.is_empty() && key.len() <= MAX_KEY_LEN
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Change {
@@ -50,7 +56,6 @@ pub struct Change {
 
 impl Change {
     pub fn is_well_formed(&self) -> bool {
-        let key_ok = |s: &str| !s.is_empty() && s.len() <= MAX_KEY_LEN;
         key_ok(&self.kind) && key_ok(&self.id) && key_ok(&self.field) && hlc::is_valid(&self.stamp)
     }
 }
@@ -412,8 +417,9 @@ fn materialize_task(conn: &Connection, id: &str) -> Result<()> {
     )?;
     conn.execute("DELETE FROM task_tags WHERE task_id = ?1", [id])?;
     for (field, (value, _)) in &r.0 {
-        if let Some(tag) = field.strip_prefix("tag:") {
-            if value.as_bool() == Some(true) && !tag.is_empty() {
+        if let Some(tag) = field.strip_prefix(crate::tag::PREFIX) {
+            // A tag no register can carry stays out of the view (S51), even if an earlier version wrote it.
+            if value.as_bool() == Some(true) && crate::tag::name_ok(tag) {
                 conn.execute(
                     "INSERT OR IGNORE INTO task_tags (task_id, tag) VALUES (?1, ?2)",
                     params![id, tag],

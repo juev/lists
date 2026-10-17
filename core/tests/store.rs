@@ -192,6 +192,81 @@ fn r7_tags_list_only_those_in_use() {
 }
 
 #[test]
+fn s51_a_tag_at_the_limit_of_a_field_is_taken_and_a_longer_one_is_refused() {
+    let d = device();
+    let t = add(&d, "задача");
+    let latin = "a".repeat(196);
+    let cyrillic = "я".repeat(98);
+    d.add_tag(t.id.clone(), latin.clone()).unwrap();
+    d.add_tag(t.id.clone(), cyrillic.clone()).unwrap();
+    assert_eq!(d.task(t.id.clone()).unwrap().tags, [latin.clone(), cyrillic.clone()]);
+
+    // One byte more than the field can carry: 197 Latin letters, 99 Cyrillic ones.
+    for too_long in ["a".repeat(197), "я".repeat(99)] {
+        let error = d.add_tag(t.id.clone(), too_long.clone()).unwrap_err().to_string();
+        assert!(error.contains("196 bytes"), "{error}");
+        assert!(
+            d.remove_tag(t.id.clone(), too_long).is_err(),
+            "no field is written either"
+        );
+    }
+    assert_eq!(d.task(t.id).unwrap().tags, [latin, cyrillic]);
+}
+
+#[test]
+fn s51_quick_add_refuses_a_tag_that_the_register_cannot_carry() {
+    let d = device();
+    let too_long = "a".repeat(197);
+    let error = d
+        .quick_add(format!("задача #{too_long}"), None, true, None)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("196 bytes"), "{error}");
+    assert!(view(&d, Scope::All).is_empty(), "the task is not created");
+
+    let fits = "я".repeat(98);
+    let task = d.quick_add(format!("задача #{fits}"), None, true, None).unwrap();
+    assert_eq!(task.tags, [fits]);
+}
+
+#[test]
+fn s51_a_tag_from_before_the_limit_leaves_the_view_after_an_upgrade() {
+    let dir = tempfile::tempdir().unwrap();
+    let t = {
+        let store = Store::open(dir.path().to_string_lossy().into_owned()).unwrap();
+        store.set_now_for_tests(NOW);
+        add(&store, "задача")
+    };
+    let long = "a".repeat(197);
+    {
+        let conn = rusqlite::Connection::open(dir.path().join("lists.sqlite")).unwrap();
+        let stamp: String = conn
+            .query_row("SELECT max(stamp) FROM fields", [], |r| r.get(0))
+            .unwrap();
+        conn.execute(
+            "INSERT OR REPLACE INTO fields (kind, id, field, value, stamp, dirty)
+             VALUES ('task', ?1, ?2, 'true', ?3, 0)",
+            rusqlite::params![t.id, format!("tag:{long}"), stamp],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT OR REPLACE INTO task_tags (task_id, tag) VALUES (?1, ?2)",
+            rusqlite::params![t.id, long],
+        )
+        .unwrap();
+        // The derived tables are as version 4, the one before S51, left them.
+        conn.execute("UPDATE meta SET value = '4' WHERE key = 'derived_version'", [])
+            .unwrap();
+    }
+
+    let store = Store::open(dir.path().to_string_lossy().into_owned()).unwrap();
+    assert!(
+        store.task(t.id).unwrap().tags.is_empty(),
+        "a tag no register can carry is not shown"
+    );
+}
+
+#[test]
 fn r9_trash_restore_and_purge() {
     let d = device();
     let t = add(&d, "мусор");

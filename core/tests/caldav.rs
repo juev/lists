@@ -1837,3 +1837,36 @@ fn c28_sending_the_device_undoes_an_edit_of_another_client() {
         assert_eq!(d.task(t.id.clone()).unwrap().title, "один");
     }
 }
+
+#[test]
+fn s51_a_category_that_does_not_fit_is_not_a_local_register() {
+    let dav = start();
+    let (a, b) = pair(&dav);
+    let t = add(&a, "задача");
+    settle(&a, &b);
+    let fits = "a".repeat(196);
+    let long = "b".repeat(197);
+
+    // Another client puts one category that fits into the field and one that does not.
+    dav.edit(&t.id, |lines| {
+        let mut out: Vec<String> = lines.into_iter().filter(|l| !l.starts_with("CATEGORIES")).collect();
+        let end = out.iter().position(|l| l == "END:VTODO").unwrap();
+        out.insert(end, format!("CATEGORIES:{fits},{long}"));
+        out
+    });
+
+    assert!(a.sync_now().unwrap().pulled > 0);
+    assert_eq!(a.task(t.id.clone()).unwrap().tags, std::slice::from_ref(&fits));
+    let conn = rusqlite::Connection::open(a.dir().join("lists.sqlite")).unwrap();
+    let written: i64 = conn
+        .query_row(
+            "SELECT count(*) FROM fields WHERE field = ?1",
+            [format!("tag:{long}")],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(written, 0, "the category never becomes a register");
+
+    b.sync_now().unwrap();
+    assert_eq!(b.task(t.id).unwrap().tags, [fits]);
+}

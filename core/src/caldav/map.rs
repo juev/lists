@@ -10,9 +10,10 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 use super::ical::{self, Component, Prop};
-use crate::db::is_sha256;
+use crate::db::{self, is_sha256};
 use crate::hlc;
 use crate::model::{Freq, Repeat};
+use crate::tag;
 
 pub const STATE: &str = "X-LISTS-STATE";
 pub const SHA_PARAM: &str = "X-LISTS-SHA256";
@@ -54,7 +55,7 @@ impl TaskState {
     pub fn decode(value: &str) -> Option<TaskState> {
         let json = base64::engine::general_purpose::STANDARD.decode(value.trim()).ok()?;
         let mut state: TaskState = serde_json::from_slice(&json).ok()?;
-        let valid = |r: &mut Registers| r.retain(|field, (_, stamp)| !field.is_empty() && hlc::is_valid(stamp));
+        let valid = |r: &mut Registers| r.retain(|field, (_, stamp)| db::key_ok(field) && hlc::is_valid(stamp));
         valid(&mut state.fields);
         state.attachments.values_mut().for_each(valid);
         Some(state)
@@ -99,7 +100,10 @@ impl Standard {
             tags: state
                 .fields
                 .iter()
-                .filter_map(|(f, (v, _))| f.strip_prefix("tag:").filter(|_| v.as_bool() == Some(true)))
+                .filter_map(|(f, (v, _))| {
+                    f.strip_prefix(tag::PREFIX)
+                        .filter(|t| v.as_bool() == Some(true) && tag::name_ok(t))
+                })
                 .map(str::to_string)
                 .collect(),
             rrule: repeat.as_ref().map(to_rrule),
@@ -159,7 +163,7 @@ pub fn read(calendar: &Component) -> Option<Remote> {
             .all("CATEGORIES")
             .flat_map(|p| ical::split_list(&p.value))
             .map(|t| t.to_lowercase().split_whitespace().collect::<Vec<_>>().join("-"))
-            .filter(|t| !t.is_empty())
+            .filter(|t| tag::name_ok(t))
             .collect(),
         rrule: repeat.as_ref().map(to_rrule),
         done: status_done || cancelled || completed.is_some(),
@@ -702,6 +706,28 @@ mod tests {
             ["home", "work-stuff"]
         );
         assert!(remote.state.is_none());
+    }
+
+    #[test]
+    fn s51_a_tag_that_does_not_fit_its_register_is_not_read_or_written() {
+        let fits = "a".repeat(196);
+        let long = "b".repeat(197);
+        let foreign = format!(
+            "BEGIN:VCALENDAR\r\nBEGIN:VTODO\r\nUID:f\r\nSUMMARY:Task\r\nCATEGORIES:{fits},{long}\r\nEND:VTODO\r\nEND:VCALENDAR\r\n"
+        );
+        let remote = read(&ical::parse(&foreign).unwrap()).unwrap();
+        assert_eq!(
+            remote.standard.tags.into_iter().collect::<Vec<_>>(),
+            [fits],
+            "the category that fits is read, the longer one is not"
+        );
+
+        // A register from an earlier version does not become a standard property either.
+        let field = format!("tag:{long}");
+        let s = state(&[("title", json!("Task")), (field.as_str(), json!(true))]);
+        assert!(Standard::of(&s).tags.is_empty());
+        let text = ical::serialize(&render("task-1", &s, None, &|_| None, now()));
+        assert!(!text.contains("CATEGORIES:"), "{text}");
     }
 
     #[test]

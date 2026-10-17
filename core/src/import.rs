@@ -789,6 +789,7 @@ impl Store {
             .map(|t| (t.key.clone(), derived_id(source, "task", &t.key)))
             .collect();
         let mut blobs: Vec<(PathBuf, String)> = Vec::new();
+        let mut long_tags = 0u32;
 
         self.write(|w| {
             // R121: while Inbox is hidden, tasks without a list go to the default list instead.
@@ -865,8 +866,15 @@ impl Store {
                         .unwrap_or(Value::Null),
                 )?;
                 set("deleted", json!(false))?;
-                for tag in task.tags.iter().map(|t| clean_tag(t)).filter(|t| !t.is_empty()) {
-                    set(&format!("tag:{tag}"), json!(true))?;
+                for raw in &task.tags {
+                    let name = clean_tag(raw);
+                    if name.is_empty() {
+                        continue;
+                    }
+                    match crate::tag::field(&name) {
+                        Some(field) => set(&field, json!(true))?,
+                        None => long_tags += 1,
+                    }
                 }
                 for (index, (name, path)) in task.files.iter().enumerate() {
                     let Ok(bytes) = std::fs::read(path) else { continue };
@@ -890,6 +898,17 @@ impl Store {
             }
             Ok(())
         })?;
+        if long_tags > 0 {
+            let (noun, verb) = if long_tags == 1 {
+                ("tag", "was")
+            } else {
+                ("tags", "were")
+            };
+            report.notes.push(format!(
+                "{long_tags} {noun} {verb} longer than {} bytes and {verb} not imported.",
+                crate::tag::MAX_NAME_LEN
+            ));
+        }
         // I9: what the file says about subtasks is brought to the rule of R10.
         self.tidy_if_whole()?;
         for (path, sha256) in blobs {
