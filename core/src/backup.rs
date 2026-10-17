@@ -75,6 +75,22 @@ pub(crate) fn created_of(name: &str) -> Option<NaiveDateTime> {
     NaiveDateTime::parse_from_str(moment, NAME_FMT).ok()
 }
 
+/// R142: `backups/` and the copies in it, as an earlier version may have left them, closed from
+/// other users. A folder that is not there yet is left to the first backup.
+pub(crate) fn close_backups(dir: &Path) -> Result<()> {
+    if !dir.is_dir() {
+        return Ok(());
+    }
+    crate::store::private_dir(dir)?;
+    for entry in std::fs::read_dir(dir)? {
+        let path = entry?.path();
+        if path.is_file() {
+            crate::store::private_file(&path)?;
+        }
+    }
+    Ok(())
+}
+
 impl Store {
     pub(crate) fn backups_dir(&self) -> PathBuf {
         self.dir.join("backups")
@@ -90,7 +106,7 @@ impl Store {
     /// Writes the archive and returns it; rotation is the caller's.
     fn write_backup(&self) -> Result<Backup> {
         let dir = self.backups_dir();
-        std::fs::create_dir_all(&dir)?;
+        crate::store::make_private_dir(&dir)?;
         let now = self.lock().now();
         let moment = now.format(NAME_FMT).to_string();
         let mut name = format!("{PREFIX}{moment}){EXT}");
@@ -104,7 +120,10 @@ impl Store {
         let part = dir.join(format!(".{}.part", uuid::Uuid::now_v7().simple()));
         let written = self.write_archive(&snapshot, &part, &now, true);
         let _ = std::fs::remove_file(&snapshot);
-        if let Err(e) = written.and_then(|()| Ok(std::fs::rename(&part, &target)?)) {
+        let placed = written
+            .and_then(|()| Ok(std::fs::rename(&part, &target)?))
+            .and_then(|()| Ok(crate::store::private_file(&target)?));
+        if let Err(e) = placed {
             let _ = std::fs::remove_file(&part);
             self.note(LogLevel::Error, "backup", || format!("not created: {e}"));
             return Err(e);
@@ -122,7 +141,7 @@ impl Store {
     /// name it goes under.
     pub(crate) fn write_storage_backup(&self, part: &Path) -> Result<String> {
         let dir = self.backups_dir();
-        std::fs::create_dir_all(&dir)?;
+        crate::store::make_private_dir(&dir)?;
         let now = self.lock().now();
         let snapshot = dir.join(format!(".{}.sqlite", uuid::Uuid::now_v7().simple()));
         let written = self.write_archive(&snapshot, part, &now, false);
@@ -306,7 +325,7 @@ impl Store {
                 )));
             }
             let dir = self.backups_dir();
-            std::fs::create_dir_all(&dir)?;
+            crate::store::make_private_dir(&dir)?;
             let database = dir.join(format!(".{}.sqlite", uuid::Uuid::now_v7().simple()));
             let restored = self.restore_from(&mut zip, &database, over_storage);
             let _ = std::fs::remove_file(&database);
@@ -373,6 +392,8 @@ impl Store {
             }
             if hex(&digest.finalize()) == hash {
                 std::fs::rename(&tmp, &target)?;
+                // R142: as private as content added by hand.
+                crate::store::private_file(&target)?;
             } else {
                 std::fs::remove_file(&tmp)?;
             }
