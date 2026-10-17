@@ -859,11 +859,15 @@ fun TaskRow(
             .padding(start = 4.dp, end = 16.dp, top = padding, bottom = padding),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // The record of a repeat kept in a view of tasks takes its completion back (R128); in the journal it is history.
-        val journal = state.effectiveScope == Scope.Completed || state.effectiveScope == Scope.WontDo
-        IconButton(onClick = if (selected == null) onToggle else onSelect, enabled = selected != null || (!task.deleted && (!task.isLog || !journal))) {
+        // The mark of a record of a repeat takes its completion back while it can (R128, R133); after that it is a repeat icon.
+        val history = task.markState() == MarkState.History
+        IconButton(onClick = if (selected == null) onToggle else onSelect, enabled = selected != null || (!task.deleted && !history)) {
             // In the selection mode the mark selects like the rest of the row, and says nothing else.
-            Mark(task.markState(), if (selected != null) null else if (done) str(R.string.reopen) else str(R.string.complete), round = subtask)
+            Mark(
+                task.markState(),
+                if (selected != null) null else if (history) str(R.string.repeat) else if (done) str(R.string.reopen) else str(R.string.complete),
+                round = subtask,
+            )
         }
         if (task.isProject) {
             Icon(Icons.Outlined.Folder, str(R.string.project), Modifier.padding(end = 6.dp).size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -1013,6 +1017,7 @@ private fun SelectionBar(enabled: Boolean, actions: SelectionActions, onAction: 
 }
 
 fun TaskItem.markState(): MarkState = when {
+    isLog && !undoable -> MarkState.History
     wont -> MarkState.Wont
     done != null -> MarkState.Done
     else -> MarkState.Open
