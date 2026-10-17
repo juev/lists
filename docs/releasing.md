@@ -24,7 +24,8 @@ To try the pipeline without publishing, start the Release workflow by hand (Acti
 
 - `make test` and `make lint`, in CI and again in the Release workflow. Both run with `--locked`, so a lockfile that does not match `Cargo.toml` fails there and not first in the Docker build; `make lint` runs Clippy with all features, `cli` included. After the builds `scripts/check-clean-tree.sh` fails when a build changed a tracked file or left a new one that is not ignored.
 - **The Android release APK starts** on an x86_64 emulator in CI, R8 included (see [Android signing key](#android-signing-key)).
-- **The macOS app starts.** CI runs `scripts/check-launch.sh … debug` on the Debug build: the helper of quick entry is switched on and the app is started with a probe that stops it when the event loop is run while the model is built. That is how 0.3.1 stopped at every launch (#239); the check fails on that code and passes after the fix. The Release workflow runs `scripts/check-launch.sh … release` on the app it has just packed, which must still be running fifteen seconds after its start; when it is not, nothing is published.
+- **The macOS app starts.** CI runs `scripts/check-launch.sh … debug` on the Debug build: the helper of quick entry is switched on and the app is started with a probe that stops it when the event loop is run while the model is built. That is how 0.3.1 stopped at every launch (#239); the check fails on that code and passes after the fix. The Release workflow mounts the disk image it has just packed with `scripts/check-dmg.sh` and starts the app from it with `scripts/check-launch.sh … release`; the app must still be running fifteen seconds after its start, and when it is not, nothing is published.
+- **The disk image.** `scripts/check-dmg.sh` checks that the image holds `Lists.app` of the version in its name and the link to `/Applications`, and that the signature of the app verifies. A notarized image must also carry a stapled ticket and be accepted by Gatekeeper (`spctl`), the image and the app alike.
 - **Not checked by a machine:** what the apps show on a screen, the arm64 APK and the Android app on a phone, and a launch of the macOS Release build under the real conditions of a Mac in use: with the installed helper, with notifications allowed and planned, with the keychain asking. The probe covers one way a launch can go wrong, not all of them. Before a tag, install the build on the Mac it is meant for and start it several times.
 
 ## Android signing key
@@ -60,7 +61,7 @@ A disk image that opens without warnings needs a Developer ID Application certif
 base64 -i DeveloperID.p12 | gh secret set LISTS_MACOS_CERTIFICATE_B64
 ```
 
-Without the certificate the workflow still releases: the app is signed ad hoc, the run shows a warning, and the release notes tell how to remove the quarantine flag. In such a build the share extension does not work, because the App Group it shares with the app needs a team.
+Without the certificate the workflow still releases: the app is signed ad hoc, the run shows a warning, and the release notes tell how to remove the quarantine flag. In such a build the share extension does not work, because the App Group it shares with the app needs a team. With the certificate but without all three notarization secrets the workflow stops: a signed image that is not notarized would be published with notes that describe neither case.
 
 `./scripts/release-macos.sh` does the same locally and writes the image to `dist/`. The signed and notarized path has not been run yet: the project has no Developer ID certificate so far. Signing with the hardened runtime and a timestamp was checked with a development certificate.
 

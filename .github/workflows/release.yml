@@ -149,11 +149,20 @@ jobs:
           CERTIFICATE_B64: ${{ secrets.LISTS_MACOS_CERTIFICATE_B64 }}
           CERTIFICATE_PASSWORD: ${{ secrets.LISTS_MACOS_CERTIFICATE_PASSWORD }}
           NOTARY_KEY_B64: ${{ secrets.LISTS_NOTARY_KEY_B64 }}
+          NOTARY_KEY_ID: ${{ secrets.LISTS_NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.LISTS_NOTARY_ISSUER_ID }}
         run: |
           set -euo pipefail
           if [[ -z "$CERTIFICATE_B64" ]]; then
             echo '::warning::No Developer ID certificate in the secrets: the disk image is signed ad hoc and not notarized'
             exit 0
+          fi
+          # A signed image that is not notarized is refused by Gatekeeper as an ad hoc one is, but
+          # its share extension works: neither set of notes would be true. A certificate therefore
+          # needs the notarization key as well.
+          if [[ -z "$NOTARY_KEY_B64" || -z "$NOTARY_KEY_ID" || -z "$NOTARY_ISSUER_ID" ]]; then
+            echo '::error::The Developer ID certificate is in the secrets, the notarization key is not: set LISTS_NOTARY_KEY_B64, LISTS_NOTARY_KEY_ID and LISTS_NOTARY_ISSUER_ID'
+            exit 1
           fi
           keychain="$RUNNER_TEMP/signing.keychain-db"
           keychain_password="$(openssl rand -hex 16)"
@@ -165,12 +174,8 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple: -k "$keychain_password" "$keychain" > /dev/null
           security list-keychains -d user -s "$keychain" login.keychain-db
           rm "$RUNNER_TEMP/certificate.p12"
-          if [[ -n "$NOTARY_KEY_B64" ]]; then
-            printf '%s' "$NOTARY_KEY_B64" | base64 --decode > "$RUNNER_TEMP/notary.p8"
-            echo "LISTS_NOTARY_KEY=$RUNNER_TEMP/notary.p8" >> "$GITHUB_ENV"
-          else
-            echo '::warning::No notarization key in the secrets: the disk image is signed but not notarized'
-          fi
+          printf '%s' "$NOTARY_KEY_B64" | base64 --decode > "$RUNNER_TEMP/notary.p8"
+          echo "LISTS_NOTARY_KEY=$RUNNER_TEMP/notary.p8" >> "$GITHUB_ENV"
 
       - name: Build the disk image
         id: build
@@ -179,15 +184,21 @@ jobs:
           LISTS_NOTARY_ISSUER_ID: ${{ secrets.LISTS_NOTARY_ISSUER_ID }}
         run: |
           ./scripts/release-macos.sh
-          if xcrun stapler validate dist/*.dmg; then
+          if [[ -n "${LISTS_NOTARY_KEY:-}" ]]; then
             echo 'notarized=true' >> "$GITHUB_OUTPUT"
           else
             echo 'notarized=false' >> "$GITHUB_OUTPUT"
           fi
 
-      # Nothing is published when the app that was just packed does not stay running (#240).
-      - name: Start the app
-        run: ./scripts/check-launch.sh apple/build/Build/Products/Release/Lists.app release
+      # The image that is published is mounted and checked, and the app is started from it:
+      # nothing is published when it does not stay running (#240).
+      - name: Check the disk image and start the app from it
+        env:
+          NOTARIZED: ${{ steps.build.outputs.notarized }}
+        run: |
+          mode=adhoc
+          [[ "$NOTARIZED" == 'true' ]] && mode=notarized
+          ./scripts/check-dmg.sh dist/*.dmg "$mode" launch
 
       - uses: actions/upload-artifact@v7
         with:
