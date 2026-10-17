@@ -698,3 +698,50 @@ fn s51_a_backup_restores_the_tags_the_device_shows() {
         "the copy has the tags the device showed"
     );
 }
+
+#[cfg(unix)]
+fn mode(path: &std::path::Path) -> u32 {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::metadata(path).unwrap().permissions().mode() & 0o777
+}
+
+#[cfg(unix)]
+#[test]
+fn r142_a_backup_is_for_its_owner_alone() {
+    let d = furnished();
+    let backup = d.create_backup().unwrap();
+    assert_eq!(mode(&d.dir().join("backups")), 0o700);
+    assert_eq!(mode(std::path::Path::new(&backup.path)), 0o600);
+}
+
+#[cfg(unix)]
+#[test]
+fn r142_an_attachment_restored_from_a_backup_is_for_its_owner_alone() {
+    let old = furnished();
+    let backup = old.create_backup().unwrap();
+    let fresh = device();
+    fresh.restore_backup(backup.path, false).unwrap();
+    let report = fresh
+        .tasks(Scope::Search {
+            text: "отчёт".into()
+        })
+        .unwrap()
+        .remove(0);
+    let file = fresh.attachments(report.id).unwrap().remove(0);
+    assert_eq!(mode(std::path::Path::new(&file.local_path.unwrap())), 0o600);
+}
+
+#[cfg(unix)]
+#[test]
+fn r142_backups_of_an_earlier_version_are_closed_on_open() {
+    use std::os::unix::fs::PermissionsExt;
+    let d = furnished();
+    let backup = d.create_backup().unwrap();
+    let dir = d.dir().join("backups");
+    // As an earlier version left them: made with the umask of the process.
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::set_permissions(&backup.path, std::fs::Permissions::from_mode(0o644)).unwrap();
+    let d = reopen(d);
+    assert_eq!(mode(&d.dir().join("backups")), 0o700);
+    assert_eq!(mode(std::path::Path::new(&backup.path)), 0o600);
+}

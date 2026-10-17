@@ -57,7 +57,7 @@ pub(crate) fn private_file(path: &Path) -> std::io::Result<()> {
 }
 
 /// R142: creates the folder and everything above it, closed from other users from the start.
-fn make_private_dir(path: &Path) -> std::io::Result<()> {
+pub(crate) fn make_private_dir(path: &Path) -> std::io::Result<()> {
     let mut builder = std::fs::DirBuilder::new();
     builder.recursive(true);
     #[cfg(unix)]
@@ -1082,6 +1082,7 @@ impl Store {
         let database = dir.join("lists.sqlite");
         let conn = Connection::open(&database)?;
         private_file(&database)?;
+        crate::backup::close_backups(&dir.join("backups"))?;
         // R92: a database of an earlier schema is backed up as it is, before anything in it is changed.
         let outdated = db::schema_version(&conn)?.is_some_and(|stored| stored < db::SCHEMA_VERSION);
         if !outdated {

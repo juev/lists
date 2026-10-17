@@ -212,7 +212,7 @@ impl Store {
             return Err(AppError::invalid("not a backup of this app"));
         }
         let dir = self.backups_dir();
-        std::fs::create_dir_all(&dir)?;
+        crate::store::make_private_dir(&dir)?;
         let local = dir.join(format!(".{}.download", uuid::Uuid::now_v7().simple()));
         let fetched = self.storage_view(|remote| {
             let mut out = std::io::BufWriter::new(private_create(&local)?);
