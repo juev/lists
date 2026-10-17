@@ -40,6 +40,8 @@ import org.evsyukov.lists.logged
 import org.evsyukov.lists.str
 import uniffi.lists_core.Backup
 import uniffi.lists_core.BackupSettings
+import uniffi.lists_core.StorageBackup
+import uniffi.lists_core.StorageBackupStatus
 import uniffi.lists_core.SyncConfig
 import java.io.File
 
@@ -52,11 +54,14 @@ private fun everyLabel(hours: UInt) = when (hours) {
     else -> str(R.string.backups_every_48)
 }
 
-/** What is to be restored: a backup of the list, or a file picked outside the app. */
-private data class Restore(val path: String, val label: String, val temporary: File? = null)
+/**
+ * What is to be restored: a backup of the list, a file picked outside the app, or a copy in the
+ * sync storage (R154), which `copy` names.
+ */
+private data class Restore(val path: String, val label: String, val temporary: File? = null, val copy: StorageBackup? = null)
 
 /** What the dialog of backups opens with (#320). */
-private class BackupsStart(val settings: BackupSettings?, val backups: List<Backup>, val synced: Boolean)
+private class BackupsStart(val settings: BackupSettings?, val backups: List<Backup>, val synced: Boolean, val storage: StorageBackupStatus?)
 
 /** The backups of this device as they are now; called off the main thread. */
 private fun stored(): List<Backup> = runCatching { Repo.store.backups() }.getOrDefault(emptyList())
@@ -74,6 +79,7 @@ fun BackupsDialog(model: MainViewModel, onDismiss: () -> Unit) {
             runCatching { store.backupSettings() }.onFailure { logError("app", "the backup settings were not read: ${logged(it)}") }.getOrNull(),
             runCatching { store.backups() }.getOrDefault(emptyList()),
             runCatching { store.syncConfig() }.getOrNull() !is SyncConfig.Off,
+            runCatching { store.storageBackupStatus() }.getOrNull(),
         )
     } ?: return
     val context = LocalContext.current
@@ -93,6 +99,17 @@ fun BackupsDialog(model: MainViewModel, onDismiss: () -> Unit) {
     var message by remember { mutableStateOf<String?>(null) }
     var failed by remember { mutableStateOf(false) }
     val synced = start.synced
+    var storage by remember { mutableStateOf(start.storage) }
+    // R154: null while the storage is being asked.
+    var copies by remember { mutableStateOf<List<StorageBackup>?>(null) }
+    var copiesError by remember { mutableStateOf<String?>(null) }
+    if (storage?.available == true) {
+        LaunchedEffect(Unit) {
+            withContext(Dispatchers.IO) { runCatching { Repo.store.storageBackups() } }
+                .onSuccess { copies = it }
+                .onFailure { copies = emptyList(); copiesError = describe(it) }
+        }
+    }
 
     fun label(backup: Backup) = dateLabel(backup.created)
 
@@ -121,7 +138,10 @@ fun BackupsDialog(model: MainViewModel, onDismiss: () -> Unit) {
         busy = true
         scope.launch {
             val (result, now) = withContext(Dispatchers.IO) {
-                runCatching { Repo.store.restoreBackup(what.path, overStorage) }
+                runCatching {
+                    val copy = what.copy
+                    if (copy != null) Repo.store.restoreStorageBackup(copy.device, copy.name, overStorage) else Repo.store.restoreBackup(what.path, overStorage)
+                }
                     .also { what.temporary?.parentFile?.deleteRecursively() } to stored()
             }
             busy = false
@@ -185,6 +205,46 @@ fun BackupsDialog(model: MainViewModel, onDismiss: () -> Unit) {
                     ) {
                         Text(label(backup), Modifier.weight(1f))
                         Text(Formatter.formatShortFileSize(context, backup.size.toLong()), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                storage?.takeIf { it.available }?.let { status ->
+                    HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                    Text(str(R.string.backups_storage), style = MaterialTheme.typography.titleSmall)
+                    SwitchRow(str(R.string.backups_storage_keep), status.enabled) { on ->
+                        scope.launch {
+                            val now = withContext(Dispatchers.IO) {
+                                runCatching { Repo.store.setStorageBackups(on) }.onFailure { failed = true; message = describe(it) }
+                                runCatching { Repo.store.storageBackupStatus() }.getOrNull()
+                            }
+                            storage = now ?: storage
+                        }
+                    }
+                    Text(str(R.string.backups_storage_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (status.enabled) {
+                        val error = status.error
+                        val last = status.last
+                        when {
+                            error != null -> Text(str(R.string.backups_storage_failed, error), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                            last != null -> Text(str(R.string.backups_storage_last, dateLabel(last)), style = MaterialTheme.typography.bodySmall)
+                            else -> Text(str(R.string.backups_storage_no_own), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                    copiesError?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+                    val found = copies
+                    when {
+                        found == null -> Text(str(R.string.backups_working), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        found.isEmpty() -> Text(str(R.string.backups_storage_none), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    for (copy in found.orEmpty()) {
+                        Row(
+                            Modifier.fillMaxWidth().clickable(enabled = !busy, role = Role.Button) {
+                                restoring = Restore("", dateLabel(copy.created), copy = copy)
+                            }.padding(vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(dateLabel(copy.created), Modifier.weight(1f))
+                            Text(str(if (copy.thisDevice) R.string.backups_storage_this else R.string.backups_storage_other), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
                     }
                 }
             }
