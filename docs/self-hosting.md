@@ -6,26 +6,29 @@ The server is meant for one person: everyone who signs in sees the same data.
 
 ## Docker
 
-The image is `ghcr.io/juev/lists`, built for amd64 and arm64. Tags: the version (`0.2.0`), the minor line (`0.2`) and `latest`. Pre-releases get the version tag only; every version is listed on the [releases page](https://github.com/juev/lists/releases).
+The image is `ghcr.io/juev/lists`, built for amd64 and arm64. Tags: the version (`0.5.2`), the minor line (`0.5`) and `latest`. Pre-releases get the version tag only; every version is listed on the [releases page](https://github.com/juev/lists/releases). Run the same release as the apps: 0.5.0 and 0.5.1 changed how a WebDAV or folder storage is kept, and a server older than the apps stops syncing with it.
+
+The server speaks plain HTTP, and the password and the session cookie travel in clear text. Publish the port on a loopback address only and put a [reverse proxy](#reverse-proxy) with TLS in front:
 
 ```sh
 docker run -d --name lists \
-  -p 8080:8080 \
+  -p 127.0.0.1:8080:8080 \
   -v lists-data:/data \
   -e LISTS_WEB_PASSWORD='choose a password' \
-  ghcr.io/juev/lists:0.2.0
+  -e LISTS_TRUST_PROXY=1 \
+  ghcr.io/juev/lists:0.5.2
 ```
 
 The container listens on port 8080, keeps its data in `/data` and runs as user 10001. A directory mounted over `/data` must be writable by that user.
 
 The image holds only the server, linked statically, and a minimal init; there is no shell inside, so `docker exec` has nothing to run.
 
-The repository carries a ready [`compose.yaml`](../compose.yaml) that reads its settings from an `.env` file: the version of the image (`LISTS_VERSION`), the port, the password and the settings of WebDAV sync and of the push server. The Compose file also sets `LISTS_TRUST_PROXY=1`, since it publishes the port for a reverse proxy only. The other variables (`LISTS_SYNC_PATH`, `LISTS_WEB_URL`, `LISTS_PUSH_TOKEN`, `LISTS_OIDC_*`) are not passed on by it and need a line of their own under `environment`. A Compose file of your own, syncing through WebDAV:
+The repository carries a ready [`compose.yaml`](../compose.yaml) that reads its settings from an `.env` file; copy [`.env.example`](../.env.example) to `.env` and fill it in. Git ignores `.env`, so the passwords in it are not committed. The file sets the version of the image (`LISTS_VERSION`), the port, the password and the settings of WebDAV sync and of the push server. The Compose file also sets `LISTS_TRUST_PROXY=1`, since it publishes the port for a reverse proxy only. The other variables (`LISTS_SYNC_PATH`, `LISTS_WEB_URL`, `LISTS_PUSH_TOKEN`, `LISTS_OIDC_*`) are not passed on by it and need a line of their own under `environment`. A Compose file of your own, syncing through WebDAV:
 
 ```yaml
 services:
   lists:
-    image: ghcr.io/juev/lists:0.2.0
+    image: ghcr.io/juev/lists:0.5.2
     restart: unless-stopped
     ports:
       - "127.0.0.1:8080:8080"
@@ -37,6 +40,7 @@ services:
       LISTS_SYNC_URL: https://dav.example.org/lists
       LISTS_SYNC_USER: me
       LISTS_SYNC_PASSWORD: ${LISTS_SYNC_PASSWORD}
+      LISTS_TRUST_PROXY: "1"
 
 volumes:
   lists-data:
@@ -48,8 +52,10 @@ Keep the two passwords in an `.env` file next to `compose.yaml`.
 
 ```sh
 make web
-LISTS_WEB_PASSWORD=… LISTS_WEB_LISTEN=0.0.0.0:8080 web/target/release/lists-web
+LISTS_WEB_PASSWORD=… web/target/release/lists-web
 ```
+
+The server listens on `127.0.0.1:8080`; the reverse proxy on the same machine reaches it there.
 
 ## Settings
 

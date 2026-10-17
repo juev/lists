@@ -73,17 +73,18 @@ Every release is signed with the same key, so a newer APK installs over the olde
 
 ### Web interface
 
-The image `ghcr.io/juev/lists` is built for amd64 and arm64.
+The image `ghcr.io/juev/lists` is built for amd64 and arm64. The server speaks plain HTTP, so the password and the session cookie travel in clear text: publish the port on the loopback address only and reach it from elsewhere through a reverse proxy that terminates TLS.
 
 ```sh
 docker run -d --name lists \
-  -p 8080:8080 \
+  -p 127.0.0.1:8080:8080 \
   -v lists-data:/data \
   -e LISTS_WEB_PASSWORD='choose a password' \
-  ghcr.io/juev/lists:0.2.0
+  -e LISTS_TRUST_PROXY=1 \
+  ghcr.io/juev/lists:0.5.2
 ```
 
-Open `http://<host>:8080` and sign in with the password. Sync, OpenID Connect, a Compose file and the reverse proxy are covered in [docs/self-hosting.md](docs/self-hosting.md).
+Open `http://127.0.0.1:8080` on the same machine and sign in with the password. The reverse proxy, sync, OpenID Connect and a Compose file are covered in [docs/self-hosting.md](docs/self-hosting.md). Run the version of the latest [release](https://github.com/juev/lists/releases), the same as the apps: a server older than 0.5.1 stops syncing with a storage the current apps write, as [Sync](#sync) explains.
 
 ## First steps
 

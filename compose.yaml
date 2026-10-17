@@ -1,5 +1,5 @@
-# lists-web behind a loopback port. Put LISTS_WEB_PASSWORD (and the sync
-# settings, see docs/self-hosting.md) into an .env file next to this one.
+# lists-web behind a loopback port. Copy .env.example to .env next to this
+# file and fill in LISTS_WEB_PASSWORD and the sync settings (docs/self-hosting.md).
 services:
   lists:
     image: ghcr.io/juev/lists:${LISTS_VERSION:-latest}
