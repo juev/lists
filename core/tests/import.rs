@@ -561,7 +561,7 @@ fn r155_i11_an_export_imported_into_an_empty_device_gives_the_same_data_and_a_se
     a.create_filter(
         "Срочное".into(),
         FilterSpec {
-            list_ids: vec![home.id],
+            list_ids: vec![home.id, INBOX_ID.into()],
             min_priority: Priority::High,
             ..FilterSpec::default()
         },
