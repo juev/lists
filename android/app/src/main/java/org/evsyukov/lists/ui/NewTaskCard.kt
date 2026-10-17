@@ -68,6 +68,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import org.evsyukov.lists.R
 import org.evsyukov.lists.Repo
+import org.evsyukov.lists.fromStore
 import org.evsyukov.lists.dateLabel
 import org.evsyukov.lists.displayName
 import org.evsyukov.lists.logError
@@ -360,7 +361,7 @@ fun NewTaskCard(
     val preset = presetDue(chosen?.defaultDueToday == true, start, today()).takeIf { due == null && !dueRemoved }
     val presetPriority = chosen?.defaultPriority?.takeIf { priority == null && it != Priority.NONE }
     // What the title says wins over an untouched preset (R41), and the icon says so.
-    val typed = remember(text, parse) { if (parse && text.isNotBlank()) Repo.store.parseQuick(text) else null }
+    val typed = fromStore(text, parse) { if (parse && text.isNotBlank()) it.parseQuick(text) else null }
     // Shown as the value of the field, whichever of the three it comes from: the card, the title, the list.
     val shownDue = shownDue(due, typed?.due, preset)
     val shownPriority = shownPriority(priority, typed?.priority ?: Priority.NONE, presetPriority)

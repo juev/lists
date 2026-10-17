@@ -72,6 +72,8 @@ data class UiState(
     /** Inbox has no row while it holds no open tasks (R121); synced. */
     val inboxHidden: Boolean = false,
     val loaded: Boolean = false,
+    /** The list a task entered where no list is implied goes to (R40, R121); read with the rest, off the main thread. */
+    val defaultListId: String = "inbox",
     /** R109: the tasks selected for an action on several at once; null while the selection mode is off. */
     val selection: Set<String>? = null,
     /** R131: whether the menu of the bar offers Undo. */
@@ -114,7 +116,7 @@ data class UiState(
         is Scope.Project -> projects.firstOrNull { it.id == s.id }?.listId
         Scope.Inbox -> "inbox"
         is Scope.List -> s.id
-        else -> EntryPrefs.defaultListId(ListsApp.instance)
+        else -> defaultListId
     }
 
     val readOnly: Boolean
@@ -192,6 +194,7 @@ class MainViewModel : ViewModel() {
                     keepDone = store.keepDone(),
                     newTaskList = store.newTaskList(),
                     inboxHidden = store.inboxHidden(),
+                    defaultListId = EntryPrefs.defaultListId(ListsApp.instance),
                     canUndo = store.canUndo(),
                     loaded = true,
                 )

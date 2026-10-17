@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Context
 import org.unifiedpush.android.connector.FailedReason
 import org.unifiedpush.android.connector.PushService
+import kotlinx.coroutines.launch
 import org.unifiedpush.android.connector.UnifiedPush
 import org.unifiedpush.android.connector.data.PushEndpoint
 import org.unifiedpush.android.connector.data.PushMessage
@@ -43,16 +44,20 @@ object Push {
 
     /** Takes the address out of the storage, so that nobody keeps sending to it. */
     internal fun forget(context: Context) {
-        runCatching { Repo.store.setPushEndpoint(null) }
-        SyncWorker.soon(context)
+        Repo.scope.launch {
+            runCatching { Repo.store.setPushEndpoint(null) }
+            SyncWorker.soon(context)
+        }
     }
 }
 
 class PushReceiver : PushService() {
     override fun onNewEndpoint(endpoint: PushEndpoint, instance: String) {
-        runCatching { Repo.store.setPushEndpoint(endpoint.url) }
-        // The next run publishes the address for the other devices.
-        SyncWorker.soon(this)
+        Repo.scope.launch {
+            runCatching { Repo.store.setPushEndpoint(endpoint.url) }
+            // The next run publishes the address for the other devices.
+            SyncWorker.soon(this@PushReceiver)
+        }
     }
 
     /** The message says nothing but "sync": whatever it carries is not read. */

@@ -123,6 +123,7 @@ import org.evsyukov.lists.NotifyPrefs
 import org.evsyukov.lists.EntryPrefs
 import org.evsyukov.lists.LookPrefs
 import org.evsyukov.lists.Repo
+import org.evsyukov.lists.fromStore
 import org.evsyukov.lists.logError
 import org.evsyukov.lists.logged
 import org.evsyukov.lists.EventPrefs
@@ -1080,11 +1081,21 @@ private tailrec fun Context.activity(): Activity? = when (this) {
     else -> null
 }
 
+/** What the settings open with (#320). */
+private class SettingsStart(val sync: SyncConfig?, val pushServer: String, val logLevel: LogLevel, val logFiles: List<String>)
+
 @Composable
 fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss: () -> Unit) {
+    // #320: what the settings start from, read off the main thread; they open when it has come.
+    val start = fromStore { store ->
+        SettingsStart(
+            runCatching { store.syncConfig() }.getOrNull(), runCatching { store.pushSendServer() }.getOrNull().orEmpty(),
+            runCatching { store.logLevel() }.getOrDefault(LogLevel.ERROR), runCatching { store.logFiles() }.getOrDefault(emptyList()),
+        )
+    } ?: return
     val state by model.state.collectAsStateWithLifecycle()
     val syncing by Repo.syncing.collectAsStateWithLifecycle()
-    val saved = remember { runCatching { Repo.store.syncConfig() }.getOrNull() }
+    val saved = start.sync
     // "off", "webdav" or "caldav"; a folder cannot be chosen on Android.
     var kind by remember { mutableStateOf(if (saved is SyncConfig.WebDav) "webdav" else if (saved is SyncConfig.CalDav) "caldav" else "off") }
     val enabled = kind != "off"
@@ -1100,7 +1111,7 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
     val scope = rememberCoroutineScope()
     var push by remember { mutableStateOf(Push.enabled(context)) }
     // S29: receiving is the distributor's; these two serve sending to a server that requires sign-in.
-    var pushServer by remember { mutableStateOf(runCatching { Repo.store.pushSendServer() }.getOrNull().orEmpty()) }
+    var pushServer by remember { mutableStateOf(start.pushServer) }
     var pushToken by remember { mutableStateOf(if (enabled) Secrets.load(context, Secrets.PUSH_TOKEN).orEmpty() else "") }
     // Off until a server is set: a public ntfy server needs neither field.
     var pushSignIn by remember { mutableStateOf(pushServer.isNotEmpty()) }
@@ -1108,7 +1119,7 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
     // S30: nudges go out with sync runs, so the answer comes later than the save.
     LaunchedEffect(Unit) {
         while (true) {
-            pushRefused = runCatching { Repo.store.pushRefused() }.getOrDefault(false)
+            pushRefused = withContext(Dispatchers.IO) { runCatching { Repo.store.pushRefused() }.getOrDefault(false) }
             delay(2000)
         }
     }
@@ -1150,8 +1161,8 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
     var choosing by remember { mutableStateOf<String?>(null) }
     val logLevels = listOf(LogLevel.OFF, LogLevel.ERROR, LogLevel.INFO, LogLevel.DEBUG)
     val logLabels = listOf(str(R.string.log_off), str(R.string.log_errors), str(R.string.log_events), str(R.string.log_detailed))
-    var logLevel by remember { mutableStateOf(Repo.store.logLevel()) }
-    var logFiles by remember { mutableStateOf(Repo.store.logFiles()) }
+    var logLevel by remember { mutableStateOf(start.logLevel) }
+    var logFiles by remember { mutableStateOf(start.logFiles) }
     // R101: the section on screen, none for the list of sections. Saved: a new text size rebuilds the activity (R100).
     var section by rememberSaveable { mutableStateOf<String?>(null) }
     val sections = listOf(
@@ -1241,8 +1252,12 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
                             if (logFiles.isNotEmpty()) {
                                 SettingRow(str(R.string.share_log), "") { shareLog(context, logFiles) }
                                 SettingRow(str(R.string.clear_log), "") {
-                                    runCatching { Repo.store.clearLog() }
-                                    logFiles = Repo.store.logFiles()
+                                    scope.launch {
+                                        logFiles = withContext(Dispatchers.IO) {
+                                            runCatching { Repo.store.clearLog() }
+                                            runCatching { Repo.store.logFiles() }.getOrDefault(emptyList())
+                                        }
+                                    }
                                 }
                             }
                             Text(str(R.string.log_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -1417,21 +1432,20 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
                     "caldav" -> SyncConfig.CalDav(url, user)
                     else -> SyncConfig.Off
                 }
-                // S36: a storage that is new to this device may hold data of its own.
-                if (config == SyncConfig.Off || runCatching { Repo.store.syncConfig() }.getOrNull() == config) {
-                    save(config, SyncSide.MERGE)
-                } else {
-                    val secret = password
-                    error = null
-                    testing = true
-                    scope.launch {
-                        val both = withContext(Dispatchers.IO) { runCatching { Repo.store.syncConflict(config, secret) } }
-                        testing = false
-                        both.fold(
-                            { if (it) joining = config else save(config, SyncSide.MERGE) },
-                            { error = str(R.string.no_connection, describe(it)) },
-                        )
-                    }
+                val secret = password
+                error = null
+                testing = true
+                scope.launch {
+                    // S36: a storage that is new to this device may hold data of its own.
+                    val same = config == SyncConfig.Off ||
+                        withContext(Dispatchers.IO) { runCatching { Repo.store.syncConfig() }.getOrNull() } == config
+                    if (same) return@launch save(config, SyncSide.MERGE)
+                    val both = withContext(Dispatchers.IO) { runCatching { Repo.store.syncConflict(config, secret) } }
+                    testing = false
+                    both.fold(
+                        { if (it) joining = config else save(config, SyncSide.MERGE) },
+                        { error = str(R.string.no_connection, describe(it)) },
+                    )
                 }
             }, enabled = !testing) { Text(str(R.string.save_and_sync)) }
         },
@@ -1495,8 +1509,13 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
         }
         "logLevel" -> ChoiceDialog(str(R.string.log_level), logLabels, logLevels.indexOf(logLevel), { choosing = null }) {
             logLevel = logLevels[it]
-            runCatching { Repo.store.setLogLevel(logLevel) }
-            logFiles = Repo.store.logFiles()
+            val level = logLevel
+            scope.launch {
+                logFiles = withContext(Dispatchers.IO) {
+                    runCatching { Repo.store.setLogLevel(level) }
+                    runCatching { Repo.store.logFiles() }.getOrDefault(emptyList())
+                }
+            }
         }
         "keepDone" -> {
             // What R68 offers, and the value in force when another device set something else.
@@ -1628,7 +1647,7 @@ fun FilterDialog(filter: SavedFilter?, state: UiState, model: MainViewModel, onD
         status = status,
         text = text,
     )
-    val matching = remember(spec) { runCatching { Repo.store.previewFilter(spec).size }.getOrDefault(0) }
+    val matching = fromStore(spec) { it.previewFilter(spec).size } ?: 0
 
     FormDialog(
         title = filter?.name ?: str(R.string.new_filter),

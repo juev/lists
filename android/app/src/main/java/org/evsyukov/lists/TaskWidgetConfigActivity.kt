@@ -39,11 +39,11 @@ class TaskWidgetConfigActivity : ComponentActivity() {
         setResult(RESULT_CANCELED)
         val id = intent.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID)
         if (id == AppWidgetManager.INVALID_APPWIDGET_ID) return finish()
-        val lists = runCatching { Repo.store.lists().filter { !it.archived && it.id != "inbox" } }.getOrDefault(emptyList())
-        val choices = listOf(WidgetView.Today to getString(R.string.today), WidgetView.Inbox to getString(R.string.inbox)) +
-            lists.map { WidgetView.OfList(it.id) to it.name }
-
         setContent {
+            // #320: read off the main thread; the lists join the choices when they have come.
+            val lists = fromStore { store -> store.lists().filter { !it.archived && it.id != "inbox" } }.orEmpty()
+            val choices = listOf(WidgetView.Today to getString(R.string.today), WidgetView.Inbox to getString(R.string.inbox)) +
+                lists.map { WidgetView.OfList(it.id) to it.name }
             AppTheme {
                 // Tapping outside the card closes the window, as with any dialog.
                 Box(
