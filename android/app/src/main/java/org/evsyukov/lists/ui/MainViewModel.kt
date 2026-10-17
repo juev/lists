@@ -272,6 +272,15 @@ class MainViewModel : ViewModel() {
         viewModelScope.launch { reload() }
     }
 
+    /**
+     * R136: Inbox opens in place of the list. The view switches without a reload of its own: one started
+     * before the list is gone could land after the reload that follows the change and bring the list back.
+     */
+    fun deleteList(id: String) {
+        _state.update { it.copy(scope = Scope.Inbox, search = null, selection = null) }
+        act { it.deleteList(id) }
+    }
+
     fun search(text: String?) {
         _state.update { it.copy(search = text, selection = null) }
         viewModelScope.launch { reload() }
