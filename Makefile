@@ -34,6 +34,14 @@ apple:
 apple-run: apple
 	open apple/build/Build/Products/Debug/Lists.app
 
+# The tests in apple/Tests run without starting the app.
+apple-test:
+	LISTS_XCODE_ACTION=test ./scripts/build-apple-app.sh Debug
+
+# SwiftLint with the settings in apple/.swiftlint.yml.
+apple-lint:
+	cd apple && swiftlint lint --strict --quiet
+
 android:
 	./scripts/build-android.sh
 	cd android && ./gradlew --quiet testDebugUnitTest assembleDebug

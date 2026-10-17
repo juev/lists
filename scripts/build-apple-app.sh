@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Generates the Xcode project and builds Lists.app into apple/build.
 # Usage: build-apple-app.sh [Debug|Release] [extra xcodebuild settings…]
+# LISTS_XCODE_ACTION=test runs the tests of the scheme (apple/Tests) instead of
+# only building it.
 #
 # The share extension reads the same database as the app through an App Group,
 # and a group needs a signing team. The certificate is the one named by
@@ -36,5 +38,6 @@ swiftpm="$root/apple/Lists.xcodeproj/project.xcworkspace/xcshareddata/swiftpm"
 mkdir -p "$swiftpm"
 cp "$root/apple/Package.resolved" "$swiftpm/Package.resolved"
 xcodebuild -project "$root/apple/Lists.xcodeproj" -scheme Lists -configuration "$config" \
-    -derivedDataPath "$root/apple/build" -onlyUsePackageVersionsFromResolvedFile -quiet "$@" build
+    -derivedDataPath "$root/apple/build" -onlyUsePackageVersionsFromResolvedFile -quiet "$@" \
+    "${LISTS_XCODE_ACTION:-build}"
 echo "apple: $root/apple/build/Build/Products/$config/Lists.app"

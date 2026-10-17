@@ -51,6 +51,11 @@ targets:
         copy:
           destination: wrapper
           subpath: Contents/Library/LoginItems
+    # The tests of Shared/ run in a bundle of their own, with no host app: a test run does not
+    # start Lists (make apple-test).
+    scheme:
+      testTargets:
+        - ListsTests
   ListsHelper:
     type: application
     platform: macOS
@@ -82,3 +87,15 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: org.evsyukov.lists.share
         INFOPLIST_FILE: ShareExtension/Info.plist
         CODE_SIGN_ENTITLEMENTS: ShareExtension/ListsShare.entitlements
+  ListsTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - Tests
+      - Shared
+      - path: Generated/lists_core.swift
+        group: Generated
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.evsyukov.lists.tests
+        GENERATE_INFOPLIST_FILE: YES

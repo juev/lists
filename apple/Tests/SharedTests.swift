@@ -1,0 +1,85 @@
+import XCTest
+
+/// The code in Shared/, which the app, its helper and the share extension compile in. The bundle
+/// has no host app, so nothing here starts Lists; strings come back as their English keys.
+final class MomentTests: XCTestCase {
+    func testADayIsNamedAsSeenFromToday() {
+        XCTAssertEqual(Moment.label("2026-10-17", today: "2026-10-17"), "Today")
+        XCTAssertEqual(Moment.label("2026-10-18", today: "2026-10-17"), "Tomorrow")
+        XCTAssertEqual(Moment.label("2026-10-16", today: "2026-10-17"), "Yesterday")
+    }
+
+    func testATimeFollowsTheDay() {
+        XCTAssertEqual(Moment.label("2026-10-18T18:30", today: "2026-10-17"), "Tomorrow, 18:30")
+    }
+
+    func testAValueThatIsNotADateIsShownAsItIs() {
+        XCTAssertEqual(Moment.label("someday", today: "2026-10-17"), "someday")
+    }
+
+    func testDatesTravelWithoutAZone() {
+        XCTAssertFalse(Moment.hasTime("2026-10-17"))
+        XCTAssertTrue(Moment.hasTime("2026-10-17T09:00"))
+        XCTAssertEqual(Moment.day("2026-10-17T09:00"), "2026-10-17")
+        let nine = Moment.date("2026-10-17T09:00")!
+        XCTAssertEqual(Moment.string(nine, withTime: true), "2026-10-17T09:00")
+        XCTAssertEqual(Moment.string(nine, withTime: false), "2026-10-17")
+    }
+
+    // R72: the row leaves out the day the heading of its group names.
+    func testTheRowLeavesTheDayToTheHeading() {
+        let tomorrow = Moment.string(Date().addingTimeInterval(36 * 3600), withTime: false)
+        XCTAssertEqual(Moment.rowDate(due: tomorrow + "T18:30", open: true, dayInHeading: true)?.text, "18:30")
+        XCTAssertNil(Moment.rowDate(due: tomorrow, open: true, dayInHeading: true))
+        XCTAssertNil(Moment.rowDate(due: nil, open: true, dayInHeading: false))
+    }
+
+    func testAnOverdueRowKeepsItsDay() {
+        let row = Moment.rowDate(due: "2020-01-01", open: true, dayInHeading: true)
+        XCTAssertEqual(row?.late, true)
+        XCTAssertEqual(row?.text.isEmpty, false)
+        XCTAssertEqual(Moment.rowDate(due: "2020-01-01", open: false, dayInHeading: false)?.late, false)
+    }
+}
+
+final class RepeatTests: XCTestCase {
+    func testAPresetIsNamedByItsShape() {
+        XCTAssertEqual(Repeat.every(.weekly, weekdays: [1, 2, 3, 4, 5]).presetName, "On weekdays")
+        XCTAssertEqual(Repeat.every(.monthly, interval: 3).presetName, "Every quarter")
+        var dated = Repeat.every(.monthly)
+        dated.monthday = 17
+        XCTAssertEqual(dated.presetName, "Every month", "the day of the month changes as the series goes on")
+        var counted = Repeat.every(.daily)
+        counted.count = 3
+        XCTAssertNil(counted.presetName)
+    }
+
+    func testARuleThatIsNoPresetIsSpelledOut() {
+        XCTAssertEqual(Repeat.every(.daily, interval: 3).summary, "Every 3 days")
+        var last = Repeat.every(.monthly)
+        last.nth = -1
+        last.nthWeekday = 5
+        XCTAssertEqual(last.summary, "Every month, last Fri")
+        var done = Repeat.every(.weekly, interval: 2, weekdays: [3, 1])
+        done.fromDone = true
+        XCTAssertEqual(done.summary, "Every 2 weeks: Mon, Wed after completion")
+    }
+}
+
+final class PriorityTests: XCTestCase {
+    func testMarksGrowWithThePriority() {
+        XCTAssertEqual(Priority.all.map(\.marks), ["", "!", "!!", "!!!"])
+    }
+}
+
+/// The bindings reach the Rust core: the static library is linked and a store opens and takes a task.
+final class CoreTests: XCTestCase {
+    func testAStoreOpensThroughTheBindingsAndTakesATask() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("lists-tests-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = try Store.open(dir: dir.path)
+        let task = try store.quickAdd(text: "check the bindings", listId: nil)
+        XCTAssertEqual(task.title, "check the bindings")
+        XCTAssertTrue(try store.tasks(view: .inbox).contains { $0.id == task.id })
+    }
+}
