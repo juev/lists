@@ -27,4 +27,7 @@ ENV LISTS_WEB_LISTEN=0.0.0.0:8080 \
     LISTS_WEB_DATA=/data
 VOLUME /data
 EXPOSE 8080
+# R144: the image has no shell or curl, so the server asks itself.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD ["/lists-web", "healthcheck"]
 ENTRYPOINT ["/tini", "--", "/lists-web"]

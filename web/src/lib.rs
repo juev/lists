@@ -773,6 +773,9 @@ impl App {
                     "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; frame-ancestors 'none'",
                 ))
             }
+            // R144: for the health check of a container or a proxy; it says nothing but that the
+            // server answers, so it needs no session.
+            (Method::Get, "/healthz") => return reply(200, "text/plain; charset=utf-8", "ok"),
             (Method::Get, "/manifest.json") => return reply(200, "application/manifest+json", MANIFEST),
             (Method::Get, "/icon.svg") => return reply(200, "image/svg+xml", ICON),
             (Method::Get, "/icon-32.png") | (Method::Get, "/favicon.ico") => return reply(200, "image/png", ICON_32),
@@ -1139,6 +1142,37 @@ fn encode_name(name: &str) -> String {
             }
         })
         .collect()
+}
+
+/// R144: asks the server listening on `listen` for `/healthz`. A wildcard address is asked on
+/// loopback, which is where the check runs: inside the container, next to the server.
+pub fn check_health(listen: &str) -> Result<(), String> {
+    let addr = std::net::ToSocketAddrs::to_socket_addrs(listen)
+        .map_err(|e| format!("{listen}: {e}"))?
+        .next()
+        .ok_or_else(|| format!("{listen}: no address"))?;
+    let addr = match addr {
+        SocketAddr::V4(a) if a.ip().is_unspecified() => SocketAddr::from(([127, 0, 0, 1], a.port())),
+        SocketAddr::V6(a) if a.ip().is_unspecified() => SocketAddr::from((std::net::Ipv6Addr::LOCALHOST, a.port())),
+        other => other,
+    };
+    let timeout = Duration::from_secs(5);
+    let mut stream = std::net::TcpStream::connect_timeout(&addr, timeout).map_err(|e| format!("{addr}: {e}"))?;
+    stream.set_read_timeout(Some(timeout)).map_err(|e| e.to_string())?;
+    stream.set_write_timeout(Some(timeout)).map_err(|e| e.to_string())?;
+    write!(stream, "GET /healthz HTTP/1.0\r\nHost: {addr}\r\n\r\n").map_err(|e| format!("{addr}: {e}"))?;
+    let mut answer = Vec::new();
+    stream
+        .take(4096)
+        .read_to_end(&mut answer)
+        .map_err(|e| format!("{addr}: {e}"))?;
+    let answer = String::from_utf8_lossy(&answer);
+    let status = answer.lines().next().unwrap_or_default();
+    if status.split(' ').nth(1) == Some("200") {
+        Ok(())
+    } else {
+        Err(format!("{addr}: {status}"))
+    }
 }
 
 /// Opens the store, starts the HTTP workers and the sync thread, and returns.

@@ -2,7 +2,7 @@
 //! through the JSON interface.
 
 use lists_core::{Store, SyncConfig};
-use lists_web::{start, Config};
+use lists_web::{check_health, start, Config};
 use serde_json::{json, Value};
 
 struct Web {
@@ -1531,4 +1531,43 @@ fn r135_each_browser_gets_today_of_its_own_zone() {
             .unwrap();
         assert_eq!(tasks.status(), 200, "a zone that is not one is the server's: {zone:?}");
     }
+}
+
+#[test]
+fn r144_healthz_answers_without_a_session() {
+    let web = web(Some("secret"));
+    let health = ureq::get(&format!("{}/healthz", web.base)).call().unwrap();
+    assert_eq!(health.status(), 200);
+    assert_eq!(health.into_string().unwrap(), "ok");
+    assert_eq!(status(ureq::get(&format!("{}/api/overview", web.base)).call()), 401);
+}
+
+#[test]
+fn r144_the_health_check_asks_a_wildcard_address_on_loopback() {
+    let web = web_configured(Some("secret"), |c| c.listen = "0.0.0.0:0".into());
+    let port = web.base.rsplit(':').next().unwrap();
+    assert_eq!(check_health(&format!("0.0.0.0:{port}")), Ok(()));
+    assert_eq!(check_health(&format!("127.0.0.1:{port}")), Ok(()));
+}
+
+#[test]
+fn r144_lists_web_healthcheck_exits_with_0_only_when_the_server_answers() {
+    let web = web(Some("secret"));
+    let healthcheck = |listen: &str| {
+        std::process::Command::new(env!("CARGO_BIN_EXE_lists-web"))
+            .arg("healthcheck")
+            .env("LISTS_WEB_LISTEN", listen)
+            .output()
+            .unwrap()
+    };
+    let up = healthcheck(web.base.trim_start_matches("http://"));
+    assert_eq!(up.status.code(), Some(0), "{}", String::from_utf8_lossy(&up.stderr));
+
+    let free = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap();
+    let down = healthcheck(&free.to_string());
+    assert_eq!(down.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&down.stderr).contains("healthcheck"));
 }
