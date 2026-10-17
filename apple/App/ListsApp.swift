@@ -156,6 +156,15 @@ struct AppCommands: Commands {
             }
             Divider()
             Button(L("Import…")) { model.importFromFile() }
+            Menu(L("Export")) {
+                Button(L("Everything as JSON…")) { model.export(markdown: false, listId: nil) }
+                Button(L("Everything as Markdown…")) { model.export(markdown: true, listId: nil) }
+                if let list = model.exportableList {
+                    Divider()
+                    Button(L("This List as JSON…")) { model.export(markdown: false, listId: list) }
+                    Button(L("This List as Markdown…")) { model.export(markdown: true, listId: list) }
+                }
+            }
         }
         CommandMenu(L("Task")) {
             // Plain Return and Space are handled by the list itself: as menu

@@ -317,7 +317,12 @@
 "Normal" = "Обычно";
 "Relaxed" = "Свободно";
 "Import…" = "Импорт…";
-"A 2Do backup (.2dodb), a Todoist CSV, a Trello board JSON or Microsoft To Do lists as JSON" = "Резервная копия 2Do (.2dodb), CSV из Todoist, JSON доски Trello или списки Microsoft To Do в JSON";
+"A Lists export (.json), a 2Do backup (.2dodb), a Todoist CSV, a Trello board JSON or Microsoft To Do lists as JSON" = "Выгрузка Lists (.json), резервная копия 2Do (.2dodb), CSV из Todoist, JSON доски Trello или списки Microsoft To Do в JSON";
+"Export" = "Экспорт";
+"Everything as JSON…" = "Всё в JSON…";
+"Everything as Markdown…" = "Всё в Markdown…";
+"This List as JSON…" = "Этот список в JSON…";
+"This List as Markdown…" = "Этот список в Markdown…";
 "Imported from %@: %@ lists, %@ tasks, %@ attachments." = "Импорт из %1$@: списков — %2$@, задач — %3$@, вложений — %4$@.";
 "Tasks due today or overdue: %@" = "Задач на сегодня и просроченных: %@";
 "Notifications" = "Уведомления";
