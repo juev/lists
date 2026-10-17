@@ -29,6 +29,19 @@ To try the pipeline without publishing, start the Release workflow by hand (Acti
 - **The published files.** After the upload the workflow downloads the release again and checks every file against `SHA256SUMS`, and that the release holds the files that were built and no others.
 - **Not checked by a machine:** what the apps show on a screen, the arm64 APK and the Android app on a phone, and a launch of the macOS Release build under the real conditions of a Mac in use: with the installed helper, with notifications allowed and planned, with the keychain asking. The probe covers one way a launch can go wrong, not all of them. Before a tag, install the build on the Mac it is meant for and start it several times.
 
+## Pinned dependencies
+
+What the release jobs run, with the signing secrets in their environment, is pinned to content, not to a name that can be moved:
+
+| What | Where | How |
+|---|---|---|
+| GitHub Actions | `.github/workflows/*.yml` | by commit, the version in a comment next to it |
+| the build image of the Docker image | `Dockerfile` | `rust:<version>-alpine` with its digest |
+| Gradle | `android/gradle/wrapper/gradle-wrapper.properties` | `distributionSha256Sum` of the distribution |
+| Swift packages | `apple/project.yml`, `apple/Package.resolved` | an exact version, and the revision in `Package.resolved`; `scripts/build-apple-app.sh` puts the file into the generated project and builds with `-onlyUsePackageVersionsFromResolvedFile`, so a pin that does not match stops the build |
+
+Dependabot (`.github/dependabot.yml`) proposes new pins of the actions and the image every week. A new Gradle version needs a new checksum, from `https://services.gradle.org/distributions/gradle-<version>-bin.zip.sha256`. A new version of a Swift package is set in `apple/project.yml`; then, in `apple/`, run `xcodegen generate` and `xcodebuild -resolvePackageDependencies -project Lists.xcodeproj -scheme Lists` and copy `Lists.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved` to `apple/Package.resolved`.
+
 ## Android signing key
 
 Every APK must be signed with the same key, or it will not install over the previous version. The workflow refuses to publish an APK whose certificate differs from the pinned fingerprint.
