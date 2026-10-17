@@ -4,6 +4,12 @@ services:
   lists:
     image: ghcr.io/juev/lists:${LISTS_VERSION:-latest}
     restart: unless-stopped
+    # The server writes only to /data, temporary files included (#334); it needs no
+    # capability and never gains a privilege. scripts/check-image.sh runs it so.
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
     ports:
       - "127.0.0.1:${LISTS_PORT:-8080}:8080"
     volumes:
