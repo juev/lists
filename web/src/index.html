@@ -159,7 +159,16 @@ const RU = {
   "Completed tasks leave the view": "Выполненные пропадают", "at once": "сразу", "after an hour": "через час", "after": "через", "min": "мин", "s": "с", "at the end of the day": "в конце дня",
   "Select": "Выбрать", "Selected": "Выбрано", "Done": "Готово", "Complete": "Выполнить", "Move to list": "Переместить в список", "More": "Ещё",
   "Moved": "Перемещено", "Changed": "Изменено", "Restored": "Восстановлено",
-  "Appearance": "Оформление", "Same as the system": "Как в системе", "Light": "Светлое", "Dark": "Тёмное"
+  "Appearance": "Оформление", "Same as the system": "Как в системе", "Light": "Светлое", "Dark": "Тёмное",
+  "Notifications…": "Уведомления…", "Notifications": "Уведомления", "Show notifications in this browser": "Показывать уведомления в этом браузере",
+  "Task due at a time": "Задача со сроком по времени", "Task due on a day": "Задача со сроком на день", "Summary of the day": "Сводка дня",
+  "At the due time": "В момент срока", "5 minutes before": "За 5 минут", "15 minutes before": "За 15 минут", "30 minutes before": "За 30 минут",
+  "1 hour before": "За час", "2 hours before": "За 2 часа", "1 day before": "За день", "Leave a time empty to turn it off.": "Пустое время выключает уведомление.",
+  "Send a test notification": "Прислать пробное уведомление", "Sent": "Отправлено",
+  "Notifications work over HTTPS only.": "Уведомления работают только по HTTPS.", "This browser cannot get notifications.": "Этот браузер не получает уведомления.",
+  "On iPhone and iPad, add Lists to the Home Screen first.": "На iPhone и iPad сначала добавьте Lists на экран «Домой».",
+  "The browser does not allow notifications for this site.": "Браузер запретил уведомления для этого сайта.",
+  "The server cannot be reached.": "Сервер недоступен.", "Try again": "Повторить"
 };
 const ru = (navigator.language || "en").toLowerCase().startsWith("ru");
 const t = s => (ru && RU[s]) || s;
@@ -215,12 +224,16 @@ function setLook(v) {
   c.toggle("light", v === "light"); c.toggle("dark", v === "dark");
 }
 // `sel` is the set of selected tasks while the selection mode is open (R118), and null otherwise.
-const state = { fetching: {}, filterEdit: null, scope: "today", search: "", overview: null, tasks: [], open: new Set(), details: {}, drawer: false, typing: false, sel: null, more: false };
+const state = { fetching: {}, filterEdit: null, notifyEdit: false, push: null, scope: "today", search: "", overview: null, tasks: [], open: new Set(), details: {}, drawer: false, typing: false, sel: null, more: false };
 const root = document.getElementById("root");
 
 // R135: the server takes today and the time of day from the zone of the browser, in minutes east of UTC.
+// R147: no answer, or a proxy that has no server behind it, is an error with `offline` set.
 async function api(path, options = {}) {
-  const res = await fetch(path, { ...options, headers: { ...options.headers, "X-Lists-Zone": String(-new Date().getTimezoneOffset()) } });
+  const unreachable = () => { toast(t("The server cannot be reached.")); return Object.assign(new Error("offline"), { offline: true }); };
+  let res;
+  try { res = await fetch(path, { ...options, headers: { ...options.headers, "X-Lists-Zone": String(-new Date().getTimezoneOffset()) } }); } catch { throw unreachable(); }
+  if ([502, 503, 504].includes(res.status) && !(res.headers.get("Content-Type") || "").includes("json")) throw unreachable();
   if (res.status === 401) { showLogin(); throw new Error("login"); }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) { toast(data.error || res.statusText); throw new Error(data.error); }
@@ -572,7 +585,7 @@ function editor(d) {
 }
 
 function nav(scope, label, count, opts = {}) {
-  return $("button", { class: "nav" + (state.scope === scope && !state.search ? " on" : ""), onclick: () => { state.scope = scope; state.search = ""; state.open.clear(); state.drawer = false; state.sel = null; load(); } },
+  return $("button", { class: "nav" + (state.scope === scope && !state.search ? " on" : ""), onclick: () => { state.scope = scope; state.search = ""; state.open.clear(); state.drawer = false; state.sel = null; state.notifyEdit = false; load(); } },
     opts.color !== undefined ? $("span", { class: "dot", style: /^#[0-9a-f]{6}$/i.test(opts.color) ? `background:${opts.color}` : "" }) : null, $("span", {}, label),
     count ? $("span", { class: "n" + (opts.bad ? " bad" : "") }, count) : null);
 }
@@ -676,17 +689,19 @@ function render() {
       $("label", { class: "nav", style: "color:var(--muted)" }, t("Completed tasks leave the view"),
         $("select", { id: "keep", onchange: e => act("setKeepDone", { value: e.target.value === "day" ? "day" : Number(e.target.value) }) },
           keepChoices(o.keepDone).map(([v, n]) => $("option", { value: v, selected: o.keepDone === v }, n)))),
+      $("button", { class: "nav", style: "color:var(--muted)", onclick: openNotify }, t("Notifications…")),
       $("button", { class: "nav", style: "color:var(--muted)", onclick: () => importer.click() }, t("Import…")), importer,
-      $("button", { class: "nav", style: "color:var(--muted)", onclick: () => api("/api/logout", { method: "POST", headers: { "X-Lists": "1" } }).then(showLogin) }, t("Sign out"))),
+      // R146: a browser that signs out stops getting notifications first.
+      $("button", { class: "nav", style: "color:var(--muted)", onclick: async () => { await pushOff().catch(() => {}); api("/api/logout", { method: "POST", headers: { "X-Lists": "1" } }).then(showLogin); } }, t("Sign out"))),
     $("div", { id: "shade", onclick: () => { state.drawer = false; render(); } }),
     $("div", { id: "main" },
       // R118: in the selection mode the header counts the selected tasks, and the cross and "Done" close the mode.
       state.sel ? $("header", {}, $("button", { "aria-label": t("Close"), style: "font-size:18px;width:32px", onclick: () => { state.sel = null; state.more = false; render(); } }, "✕"),
         $("h1", {}, `${t("Selected")}: ${state.sel.size}`), $("button", { class: "link", onclick: () => { state.sel = null; state.more = false; render(); } }, t("Done")))
       : $("header", {}, $("button", { id: "menu", "aria-label": "menu", onclick: () => { state.drawer = true; render(); } }, "☰"), $("h1", {}, scopeTitle()),
-        empty || state.filterEdit ? null : $("button", { id: "pick", class: "link", onclick: () => { state.sel = new Set(); state.open.clear(); render(); } }, t("Select")),
+        empty || state.filterEdit || state.notifyEdit ? null : $("button", { id: "pick", class: "link", onclick: () => { state.sel = new Set(); state.open.clear(); render(); } }, t("Select")),
         $("button", { id: "sync", class: o.sync.lastError ? "bad" : "", title: o.sync.lastError || "", onclick: () => call("sync").then(load, load) }, syncText), search),
-      state.filterEdit ? $("div", { id: "tasks" }, filterForm(state.filterEdit)) : $("div", { id: "tasks" },
+      state.filterEdit ? $("div", { id: "tasks" }, filterForm(state.filterEdit)) : state.notifyEdit ? $("div", { id: "tasks" }, notifyForm()) : $("div", { id: "tasks" },
         state.scope.startsWith("filter:") && !state.search ? $("div", { class: "chips", style: "padding:8px 10px 0" }, $("button", { class: "link", onclick: () => { state.filterEdit = o.filters.find(f => "filter:" + f.id === state.scope); render(); } }, t("Edit"))) : null,
         current && !state.search ? $("div", { class: "chips", style: "padding:8px 10px 0" }, listTools(current)) : null,
         // R126 and R32: the project is completed here, and an empty one turns back into a task, since a project is not a row of its list (R120).
@@ -696,7 +711,7 @@ function render() {
           : secs.map(s => [s.title ? $("div", { class: "section" + (s.bad ? " bad" : "") }, s.title) : null, s.tasks.map(x => taskNode(x, origin))]),
         state.scope === "trash" && !empty ? $("div", { style: "text-align:right;padding:14px" }, $("button", { class: "link danger", onclick: () => confirm(t("Delete everything in the trash for good?")) && act("emptyTrash") }, t("Empty Trash"))) : null,
         state.scope === "completed" && !state.search && !empty ? $("div", { style: "text-align:right;padding:14px" }, clearCompleted()) : null),
-      state.sel ? selectionBar() : readOnly() || state.filterEdit || state.scope.startsWith("filter:") ? null : $("div", { id: "add" }, $("span", { style: "color:var(--muted)" }, "+"), add))));
+      state.sel ? selectionBar() : readOnly() || state.filterEdit || state.notifyEdit || state.scope.startsWith("filter:") ? null : $("div", { id: "add" }, $("span", { style: "color:var(--muted)" }, "+"), add))));
 }
 
 // The times R68 offers, and the one in force when another device set something else.
@@ -718,6 +733,91 @@ function clearCompleted() {
     e.target.value = "";
     if (choice && confirm(t(choice[2]))) act("clearCompleted", { before: choice[3]() });
   } }, $("option", { value: "" }, t("Clear…")), choices.map(c => $("option", { value: c[0] }, t(c[1]))));
+}
+
+// R144–R146: the notifications of this browser. The subscription is the browser's; the server keeps
+// it with the settings and the zone, and sends what comes due.
+const zoneInfo = () => ({ zone: Intl.DateTimeFormat().resolvedOptions().timeZone || "", offset: -new Date().getTimezoneOffset() });
+const keyBytes = text => Uint8Array.from(atob(text.replace(/-/g, "+").replace(/_/g, "/")), c => c.charCodeAt(0));
+const postJson = (path, body) => api(path, { method: "POST", headers: { "Content-Type": "application/json", "X-Lists": "1" }, body: JSON.stringify(body) });
+const subscribeOnServer = (sub, extra = {}) => postJson("/api/notifications/subscribe", { ...sub.toJSON(), ...zoneInfo(), ...extra });
+const pushRegistration = async () => ("serviceWorker" in navigator ? navigator.serviceWorker.getRegistration() : null);
+
+// R145: what the form can offer: a reason why not, or the subscription and its settings.
+async function pushState() {
+  if (!isSecureContext) return { reason: "Notifications work over HTTPS only." };
+  if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) {
+    const apple = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+    return { reason: apple && !navigator.standalone ? "On iPhone and iPad, add Lists to the Home Screen first." : "This browser cannot get notifications." };
+  }
+  if (Notification.permission === "denied") return { reason: "The browser does not allow notifications for this site." };
+  await navigator.serviceWorker.register("/sw.js");
+  const sub = await (await navigator.serviceWorker.ready).pushManager.getSubscription();
+  return sub && Notification.permission === "granted" ? { sub, settings: (await subscribeOnServer(sub)).settings } : { sub: null, settings: null };
+}
+async function openNotify() {
+  Object.assign(state, { notifyEdit: true, filterEdit: null, drawer: false, sel: null, push: null });
+  render();
+  state.push = await pushState().catch(e => ({ reason: e.message }));
+  render();
+}
+// The permission is asked first, while the click still counts as the person's own.
+async function pushOn() {
+  if (await Notification.requestPermission() !== "granted") { state.push = await pushState(); return render(); }
+  const reg = await navigator.serviceWorker.ready;
+  const { key } = await api("/api/notifications/key");
+  const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(key) });
+  state.push = { sub, settings: (await subscribeOnServer(sub)).settings };
+  render();
+}
+async function pushOff() {
+  const reg = await pushRegistration();
+  const sub = reg && reg.pushManager ? await reg.pushManager.getSubscription() : null;
+  if (sub) {
+    await postJson("/api/notifications/unsubscribe", { endpoint: sub.endpoint }).catch(() => {});
+    await sub.unsubscribe().catch(() => {});
+  }
+  if (state.push) state.push = { sub: null, settings: null };
+}
+// R146: an open page gives its zone again, so the server follows a move to another zone.
+async function refreshPush() {
+  try {
+    const reg = await pushRegistration();
+    const sub = reg && reg.pushManager && Notification.permission === "granted" ? await reg.pushManager.getSubscription() : null;
+    if (sub) await subscribeOnServer(sub);
+  } catch {}
+}
+const LEADS = [[0, "At the due time"], [5, "5 minutes before"], [15, "15 minutes before"], [30, "30 minutes before"], [60, "1 hour before"], [120, "2 hours before"], [1440, "1 day before"]];
+function notifyForm() {
+  const p = state.push || {}, s = p.settings;
+  const row = (label, ...kids) => $("div", { class: "chips" }, $("span", { style: "min-width:150px;color:var(--muted)" }, label), kids);
+  const save = async change => { try { p.settings = (await subscribeOnServer(p.sub, { settings: { ...s, ...change } })).settings; } catch {} render(); };
+  const time = key => $("input", { type: "time", value: s[key] || "", onchange: e => save({ [key]: e.target.value || null }) });
+  const toggle = async on => {
+    try { await (on ? pushOn() : pushOff()); } catch (e) { if (e.message !== "offline") toast(e.message); }
+    if (!on) render();
+  };
+  const test = () => postJson("/api/notifications/test", { endpoint: p.sub.endpoint }).then(() => toast(t("Sent")), async () => { state.push = await pushState().catch(() => state.push); render(); });
+  return $("div", { class: "edit", style: "padding:16px;max-width:640px" },
+    $("div", { class: "name", style: "border-bottom:1px solid var(--line);padding-bottom:6px;font-weight:600" }, t("Notifications")),
+    row("", $("label", { class: "chip" }, $("input", { type: "checkbox", checked: !!p.sub, disabled: !state.push || !!p.reason, onchange: e => toggle(e.target.checked) }), t("Show notifications in this browser"))),
+    p.reason ? $("div", { class: "meta" }, t(p.reason)) : null,
+    s ? [
+      row(t("Task due at a time"), LEADS.map(([m, n]) => $("label", { class: "chip" },
+        $("input", { type: "checkbox", checked: s.leads.includes(m), onchange: e => save({ leads: e.target.checked ? [...s.leads, m] : s.leads.filter(x => x !== m) }) }), t(n)))),
+      row(t("Task due on a day"), time("allDay")),
+      row(t("Summary of the day"), time("summary")),
+      $("div", { class: "meta" }, t("Leave a time empty to turn it off.")),
+      row("", $("button", { class: "link", onclick: test }, t("Send a test notification")))
+    ] : null,
+    $("div", { class: "chips" }, $("button", { class: "link", onclick: () => { state.notifyEdit = false; render(); } }, t("Close"))));
+}
+
+// R147: without the server the page says so, and offers to look again; it shows no stale data.
+function lost(e) { if (e && e.offline) showOffline(); }
+function showOffline() {
+  root.replaceChildren($("div", { class: "empty", style: "margin-top:15vh" },
+    $("p", {}, t("The server cannot be reached.")), $("button", { class: "link", onclick: () => load().catch(lost) }, t("Try again"))));
 }
 
 async function showLogin() {
@@ -747,9 +847,13 @@ function writeHash() {
 }
 document.documentElement.lang = locale;
 readHash();
-load().catch(() => {});
+// R147: the worker keeps the page for when the server cannot be reached; it needs HTTPS or localhost.
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
+load().then(refreshPush, lost);
+// A click on a notification moves an open page to its task (R144).
+addEventListener("hashchange", () => { readHash(); load().catch(lost); });
 // Changes made on other devices arrive through the server's own sync.
-setInterval(() => { if (!document.hidden && state.overview && !state.typing) load().catch(() => {}); }, 20000);
+setInterval(() => { if (!document.hidden && state.overview && !state.typing) load().catch(lost); }, 20000);
 </script>
 </body>
 </html>
