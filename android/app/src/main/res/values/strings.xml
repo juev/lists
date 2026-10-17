@@ -215,6 +215,8 @@
     <string name="syncing">Syncing…</string>
     <string name="close">Close</string>
     <string name="undo">Undo</string>
+    <string name="changed_notice">Changed</string>
+    <string name="created_notice">Created</string>
     <string name="close_search">Close search</string>
     <string name="empty">Empty</string>
     <string name="sync_failed">Sync failed</string>

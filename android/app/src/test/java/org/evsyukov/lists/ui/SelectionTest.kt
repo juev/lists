@@ -2,7 +2,6 @@ package org.evsyukov.lists.ui
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import uniffi.lists_core.Freq
@@ -40,82 +39,82 @@ class SelectionTest {
     }
 
     @Test
-    fun r109_a_task_in_the_trash_is_restored_and_goes_back_there_on_undo() {
-        assertEquals(Step(Back.Trash), BatchAction.Restore.on(task(deleted = true)))
-        assertNull(BatchAction.Restore.on(task()))
-        assertNull(BatchAction.Restore.on(task(isLog = true)))
+    fun r109_a_task_in_the_trash_is_only_restored() {
+        assertTrue(BatchAction.Restore.appliesTo(task(deleted = true)))
+        assertFalse(BatchAction.Restore.appliesTo(task()))
+        assertFalse(BatchAction.Restore.appliesTo(task(isLog = true)))
     }
 
     @Test
-    fun r109_a_record_is_deleted_and_comes_back_on_undo() {
-        assertEquals(Step(Back.Restore), BatchAction.Delete.on(task(isLog = true)))
+    fun r109_a_record_is_deleted() {
+        assertTrue(BatchAction.Delete.appliesTo(task(isLog = true)))
     }
 
     @Test
-    fun r109_completing_is_taken_back_by_reopening() {
-        assertEquals(Step(Back.Reopen), BatchAction.Complete.on(task()))
-        assertEquals(Step(Back.Reopen), BatchAction.WontDo.on(task()))
+    fun r109_an_open_task_is_completed() {
+        assertTrue(BatchAction.Complete.appliesTo(task()))
+        assertTrue(BatchAction.WontDo.appliesTo(task()))
     }
 
     @Test
-    fun r128_completing_a_repeating_task_is_taken_back_too() {
+    fun r128_a_repeating_task_is_completed_as_well() {
         val daily = Repeat(Freq.DAILY, 1u, emptyList(), null, null, null, false, null, null)
-        assertEquals(Step(Back.Reopen), BatchAction.Complete.on(task(repeat = daily)))
-        assertEquals(Step(Back.Reopen), BatchAction.WontDo.on(task(repeat = daily)))
+        assertTrue(BatchAction.Complete.appliesTo(task(repeat = daily)))
+        assertTrue(BatchAction.WontDo.appliesTo(task(repeat = daily)))
     }
 
     @Test
     fun r109_a_closed_task_is_passed_over_when_completing() {
-        assertNull(BatchAction.Complete.on(task(done = "2026-10-10T10:00")))
-        assertNull(BatchAction.WontDo.on(task(done = "2026-10-10T10:00")))
+        assertFalse(BatchAction.Complete.appliesTo(task(done = "2026-10-10T10:00")))
+        assertFalse(BatchAction.WontDo.appliesTo(task(done = "2026-10-10T10:00")))
     }
 
     @Test
-    fun r109_deleting_is_taken_back_by_restoring_also_for_a_closed_task() {
-        assertEquals(Step(Back.Restore), BatchAction.Delete.on(task()))
-        assertEquals(Step(Back.Restore), BatchAction.Delete.on(task(done = "2026-10-10T10:00")))
+    fun r109_a_closed_task_is_deleted_as_well() {
+        assertTrue(BatchAction.Delete.appliesTo(task()))
+        assertTrue(BatchAction.Delete.appliesTo(task(done = "2026-10-10T10:00")))
     }
 
     @Test
-    fun r109_a_date_is_taken_back_to_what_each_task_had() {
-        assertEquals(Step(Back.Due(null)), BatchAction.Due("2026-10-11").on(task()))
-        assertEquals(Step(Back.Due("2026-10-09T09:00")), BatchAction.Due("2026-10-11").on(task(due = "2026-10-09T09:00")))
-        assertEquals(Step(Back.Start("2026-10-01")), BatchAction.Start("2026-10-11").on(task(start = "2026-10-01")))
+    fun r109_a_date_goes_to_a_task_that_has_another() {
+        assertTrue(BatchAction.Due("2026-10-11").appliesTo(task()))
+        assertTrue(BatchAction.Due("2026-10-11").appliesTo(task(due = "2026-10-09T09:00")))
+        assertTrue(BatchAction.Start("2026-10-11").appliesTo(task(start = "2026-10-01")))
     }
 
     @Test
     fun r109_a_task_that_already_has_the_value_is_passed_over() {
-        assertNull(BatchAction.Due("2026-10-11").on(task(due = "2026-10-11")))
-        assertNull(BatchAction.Start("2026-10-11").on(task(start = "2026-10-11")))
-        assertNull(BatchAction.SetPriority(Priority.HIGH).on(task(priority = Priority.HIGH)))
-        assertNull(BatchAction.Tag("#Home").on(task(tags = listOf("home"))))
-        assertNull(BatchAction.MoveTo("work").on(task(listId = "work")))
+        assertFalse(BatchAction.Due("2026-10-11").appliesTo(task(due = "2026-10-11")))
+        assertFalse(BatchAction.Start("2026-10-11").appliesTo(task(start = "2026-10-11")))
+        assertFalse(BatchAction.SetPriority(Priority.HIGH).appliesTo(task(priority = Priority.HIGH)))
+        assertFalse(BatchAction.Tag("#Home").appliesTo(task(tags = listOf("home"))))
+        assertFalse(BatchAction.MoveTo("work").appliesTo(task(listId = "work")))
     }
 
     @Test
-    fun r109_a_priority_and_a_tag_are_taken_back() {
-        assertEquals(Step(Back.SetPriority(Priority.LOW)), BatchAction.SetPriority(Priority.HIGH).on(task(priority = Priority.LOW)))
-        assertEquals(Step(Back.Untag("home")), BatchAction.Tag("#Home").on(task(tags = listOf("work"))))
+    fun r109_a_priority_and_a_tag_go_to_a_task_without_them() {
+        assertTrue(BatchAction.SetPriority(Priority.HIGH).appliesTo(task(priority = Priority.LOW)))
+        assertTrue(BatchAction.Tag("#Home").appliesTo(task(tags = listOf("work"))))
     }
 
     @Test
-    fun r109_a_move_is_taken_back_to_the_former_list_or_parent() {
-        assertEquals(Step(Back.Place("inbox", null)), BatchAction.MoveTo("work").on(task()))
+    fun r109_a_task_moves_from_another_list_or_from_a_project() {
+        assertTrue(BatchAction.MoveTo("work").appliesTo(task()))
         // A subtask of a task in the same list still moves: it becomes a task of the list.
-        assertEquals(Step(Back.Place("work", "p")), BatchAction.MoveTo("work").on(task(listId = "work", parentId = "p")))
+        assertTrue(BatchAction.MoveTo("work").appliesTo(task(listId = "work", parentId = "p")))
     }
 
     @Test
-    fun r129_a_move_into_a_project_passes_over_what_a_drop_onto_it_does_and_is_taken_back() {
+    fun r129_a_move_into_a_project_passes_over_what_a_drop_onto_it_does() {
         val into = BatchAction.MoveToProject("p")
-        assertEquals(Step(Back.Place("inbox", null)), into.on(task()))
+        assertTrue(into.appliesTo(task()))
         // From another project: back to that one.
-        assertEquals(Step(Back.Place("work", "q")), into.on(task(listId = "work", parentId = "q")))
-        assertNull("the project itself", into.on(task(id = "p", isProject = true)))
-        assertNull("another project", into.on(task(isProject = true)))
-        assertNull("a task with subtasks", into.on(task(subtasksTotal = 2u)))
-        assertNull("a task already in the project", into.on(task(parentId = "p")))
-        assertNull(into.on(task(deleted = true)))
+        assertTrue(into.appliesTo(task(listId = "work", parentId = "q")))
+        assertFalse("the project itself", into.appliesTo(task(id = "p", isProject = true)))
+        assertFalse("another project", into.appliesTo(task(isProject = true)))
+        assertFalse("a task with subtasks", into.appliesTo(task(subtasksTotal = 2u)))
+        assertFalse("a task already in the project", into.appliesTo(task(parentId = "p")))
+        assertFalse(into.appliesTo(task(deleted = true)))
         assertFalse(task(subtasksTotal = 1u).goesInto("p"))
         assertTrue(task(parentId = "q").goesInto("p"))
         assertEquals(BatchAction.MoveTo("work").done(), into.done())
@@ -124,10 +123,10 @@ class SelectionTest {
     @Test
     fun r109_the_other_actions_pass_over_a_task_in_the_trash_and_a_record() {
         for (action in listOf(BatchAction.Complete, BatchAction.Due("2026-10-11"), BatchAction.MoveTo("work"))) {
-            assertNull(action.on(task(deleted = true)))
-            assertNull(action.on(task(isLog = true)))
+            assertFalse(action.appliesTo(task(deleted = true)))
+            assertFalse(action.appliesTo(task(isLog = true)))
         }
-        assertNull(BatchAction.Delete.on(task(deleted = true)))
+        assertFalse(BatchAction.Delete.appliesTo(task(deleted = true)))
     }
 
     @Test

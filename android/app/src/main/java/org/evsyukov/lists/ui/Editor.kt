@@ -318,7 +318,7 @@ fun EditorSheet(editing: Editing, state: UiState, model: MainViewModel, onRemind
     var fetchFailed by remember(task.id) { mutableStateOf(setOf<String>()) }
     val fetchScope = rememberCoroutineScope()
     val pickFiles = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
-        if (uris.isNotEmpty()) model.act { store -> attach(context, store, task.id, uris) }
+        if (uris.isNotEmpty()) model.change { store -> attach(context, store, task.id, uris) }
     }
     // R86: the attachment waiting for the place the system picker returns, and the row whose menu is open.
     var saving by remember(task.id) { mutableStateOf<Attachment?>(null) }
@@ -395,10 +395,10 @@ fun EditorSheet(editing: Editing, state: UiState, model: MainViewModel, onRemind
                     IconButton(onClick = { menu = true }) { Icon(Icons.Outlined.MoreVert, str(R.string.more)) }
                     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                         if (task.deleted) {
-                            DropdownMenuItem(text = { Text(str(R.string.restore)) }, onClick = { menu = false; model.act { it.restoreTask(task.id) } })
+                            DropdownMenuItem(text = { Text(str(R.string.restore)) }, onClick = { menu = false; model.change { it.restoreTask(task.id) } })
                         } else {
                             DropdownMenuItem(text = { Text(str(R.string.move_to_list)) }, onClick = { menu = false; dialog = "list" })
-                            DropdownMenuItem(text = { Text(str(R.string.duplicate)) }, onClick = { menu = false; model.act { it.duplicateTask(task.id) } })
+                            DropdownMenuItem(text = { Text(str(R.string.duplicate)) }, onClick = { menu = false; model.change(str(R.string.created_notice)) { it.duplicateTask(task.id) } })
                             if (several) {
                                 DropdownMenuItem(text = { Text(str(R.string.save_all_to)) }, onClick = { menu = false; saveAll.launch(null) })
                                 DropdownMenuItem(text = { Text(str(R.string.share_all)) }, onClick = { menu = false; shareAll() })
@@ -436,7 +436,7 @@ fun EditorSheet(editing: Editing, state: UiState, model: MainViewModel, onRemind
                             ValueChip(task.priority.title(), Icons.Outlined.Flag, str(R.string.priority), color = PriorityColor) { dialog = "priority" }
                         }
                         for (tag in task.tags) {
-                            ValueChip("#$tag", trailing = Icons.Outlined.Close, trailingLabel = str(R.string.remove_tag)) { model.act { it.removeTag(task.id, tag) } }
+                            ValueChip("#$tag", trailing = Icons.Outlined.Close, trailingLabel = str(R.string.remove_tag)) { model.change { it.removeTag(task.id, tag) } }
                         }
                     },
                     icons = {
@@ -510,7 +510,7 @@ fun EditorSheet(editing: Editing, state: UiState, model: MainViewModel, onRemind
                         }
                     }
                     if (!locked) {
-                        IconButton(onClick = { model.act { it.removeAttachment(file.id) } }) { Icon(Icons.Outlined.Close, str(R.string.detach)) }
+                        IconButton(onClick = { model.change { it.removeAttachment(file.id) } }) { Icon(Icons.Outlined.Close, str(R.string.detach)) }
                     }
                 }
             }
@@ -544,15 +544,15 @@ fun EditorSheet(editing: Editing, state: UiState, model: MainViewModel, onRemind
     }
 
     when (dialog) {
-        "due" -> MomentDialog(str(R.string.due), task.due, onPick = { v -> model.act { it.setDue(task.id, v) } }) { dialog = null }
-        "start" -> MomentDialog(str(R.string.start_title), task.start, onPick = { v -> model.act { it.setStart(task.id, v) } }) { dialog = null }
+        "due" -> MomentDialog(str(R.string.due), task.due, onPick = { v -> model.change { it.setDue(task.id, v) } }) { dialog = null }
+        "start" -> MomentDialog(str(R.string.start_title), task.start, onPick = { v -> model.change { it.setStart(task.id, v) } }) { dialog = null }
         "remind" -> MomentDialog(str(R.string.remind), task.remind, timeRequired = true, onPick = { v ->
             if (v != null) onReminderSet()
-            model.act { it.setRemind(task.id, v) }
+            model.change { it.setRemind(task.id, v) }
         }) { dialog = null }
-        "repeat" -> RepeatDialog(task.repeat, onPick = { rule -> model.act { it.setRepeat(task.id, rule) } }) { dialog = null }
+        "repeat" -> RepeatDialog(task.repeat, onPick = { rule -> model.change { it.setRepeat(task.id, rule) } }) { dialog = null }
         "priority" -> ChoiceDialog(str(R.string.priority), priorities.map { it.title() }, priorities.indexOf(task.priority), { dialog = null }) { index ->
-            model.act { it.setPriority(task.id, priorities[index]) }
+            model.change { it.setPriority(task.id, priorities[index]) }
         }
         "list" -> DestinationDialog(
             str(R.string.move_to_list),
@@ -563,11 +563,11 @@ fun EditorSheet(editing: Editing, state: UiState, model: MainViewModel, onRemind
             projectEnabled = { task.goesInto(it.id) },
         ) { to ->
             when (to) {
-                is Destination.ToList -> model.act { it.moveToList(task.id, to.id) }
-                is Destination.ToProject -> model.act { it.moveToProject(task.id, to.id) }
+                is Destination.ToList -> model.change { it.moveToList(task.id, to.id) }
+                is Destination.ToProject -> model.change { it.moveToProject(task.id, to.id) }
             }
         }
-        "tag" -> TagDialog(state.tags.map { it.name }.filter { it !in task.tags }, { dialog = null }) { tag -> model.act { it.addTag(task.id, tag) } }
+        "tag" -> TagDialog(state.tags.map { it.name }.filter { it !in task.tags }, { dialog = null }) { tag -> model.change { it.addTag(task.id, tag) } }
     }
 }
 

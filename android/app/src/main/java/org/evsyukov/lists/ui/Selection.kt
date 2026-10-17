@@ -21,22 +21,6 @@ sealed interface BatchAction {
     data class Tag(val name: String) : BatchAction
 }
 
-/** How the change an action made to one task is taken back. */
-sealed interface Back {
-    data object Reopen : Back
-    data object Restore : Back
-    /** Into the trash again, after a restoring that is taken back. */
-    data object Trash : Back
-    data class Due(val value: String?) : Back
-    data class Start(val value: String?) : Back
-    data class SetPriority(val value: Priority) : Back
-    data class Place(val listId: String, val parentId: String?) : Back
-    data class Untag(val name: String) : Back
-}
-
-/** What an action does to one task; [back] is null when the change cannot be taken back. */
-data class Step(val back: Back?)
-
 /** What the bar of the selection offers (R109): the usual actions, or the one action there is for the selected rows. */
 enum class SelectionActions { Usual, Restore, DeleteRecords }
 
@@ -57,25 +41,21 @@ internal fun cleanTag(tag: String): String = tag.trim().trimStart('#').lowercase
  */
 fun TaskItem.goesInto(projectId: String): Boolean = !(isProject || subtasksTotal > 0u || id == projectId || parentId == projectId)
 
-/** The step of the action for this task, or null when the action does not apply to it and the task is passed over. */
-fun BatchAction.on(task: TaskItem): Step? {
+/** Whether the action applies to this task; one it does not apply to is passed over. */
+fun BatchAction.appliesTo(task: TaskItem): Boolean {
     // A task in the trash is only restored, and a record of a completed occurrence only deleted.
-    if (task.deleted) return if (this == BatchAction.Restore) Step(Back.Trash) else null
-    if (task.isLog) return if (this == BatchAction.Delete) Step(Back.Restore) else null
+    if (task.deleted) return this == BatchAction.Restore
+    if (task.isLog) return this == BatchAction.Delete
     return when (this) {
-        BatchAction.Restore -> null
-        BatchAction.Complete, BatchAction.WontDo -> when {
-            task.done != null -> null
-            // A repeating task that moved on gets its dates back the same way (R128).
-            else -> Step(Back.Reopen)
-        }
-        BatchAction.Delete -> Step(Back.Restore)
-        is BatchAction.Due -> if (task.due == value) null else Step(Back.Due(task.due))
-        is BatchAction.Start -> if (task.start == value) null else Step(Back.Start(task.start))
-        is BatchAction.SetPriority -> if (task.priority == value) null else Step(Back.SetPriority(task.priority))
-        is BatchAction.MoveTo -> if (task.parentId == null && task.listId == listId) null else Step(Back.Place(task.listId, task.parentId))
-        is BatchAction.MoveToProject -> if (task.goesInto(projectId)) Step(Back.Place(task.listId, task.parentId)) else null
-        is BatchAction.Tag -> cleanTag(name).let { tag -> if (tag.isEmpty() || tag in task.tags) null else Step(Back.Untag(tag)) }
+        BatchAction.Restore -> false
+        BatchAction.Complete, BatchAction.WontDo -> task.done == null
+        BatchAction.Delete -> true
+        is BatchAction.Due -> task.due != value
+        is BatchAction.Start -> task.start != value
+        is BatchAction.SetPriority -> task.priority != value
+        is BatchAction.MoveTo -> !(task.parentId == null && task.listId == listId)
+        is BatchAction.MoveToProject -> task.goesInto(projectId)
+        is BatchAction.Tag -> cleanTag(name).let { tag -> tag.isNotEmpty() && tag !in task.tags }
     }
 }
 
@@ -91,21 +71,6 @@ fun BatchAction.run(store: Store, id: String) {
         is BatchAction.MoveTo -> store.moveToList(id, listId)
         is BatchAction.MoveToProject -> store.moveToProject(id, projectId)
         is BatchAction.Tag -> store.addTag(id, name)
-    }
-}
-
-fun Back.run(store: Store, id: String) {
-    when (this) {
-        // With the subtasks the action closed along with the task.
-        Back.Reopen -> store.undoCloseTask(id)
-        Back.Restore -> store.restoreTask(id)
-        Back.Trash -> store.deleteTask(id)
-        is Back.Due -> store.setDue(id, value)
-        is Back.Start -> store.setStart(id, value)
-        is Back.SetPriority -> store.setPriority(id, value)
-        // The former place among its neighbours is not kept: the task comes first.
-        is Back.Place -> store.moveTask(id, listId, parentId, null)
-        is Back.Untag -> store.removeTag(id, name)
     }
 }
 

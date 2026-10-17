@@ -109,7 +109,7 @@ fun SubtaskLine(task: TaskItem, renaming: Boolean, model: MainViewModel, onRenam
                         SubtaskAction.Reopen -> R.string.reopen to { model.toggleDone(task) }
                         SubtaskAction.WontDo -> R.string.wont_do to { model.wontDo(task) }
                         SubtaskAction.Delete -> R.string.delete to { model.delete(task) }
-                        SubtaskAction.Restore -> R.string.restore to { model.act { it.restoreTask(task.id) } }
+                        SubtaskAction.Restore -> R.string.restore to { model.change { it.restoreTask(task.id) } }
                         SubtaskAction.DeleteRecord -> R.string.delete_record to { model.delete(task) }
                     }
                     DropdownMenuItem(
