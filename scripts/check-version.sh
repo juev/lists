@@ -24,7 +24,13 @@ for pair in "core/Cargo.toml=$core" "web/Cargo.toml=$web" "apple/project.yml=$ap
 done
 
 # The install instructions name the image of this version, so that a new
-# server syncs with the apps of the same release.
+# server syncs with the apps of the same release. A pre-release keeps them on
+# the last release.
+target="${expected:-$core}"
+if [ "$target" != "${target%%-*}" ]; then
+    [ "$status" -eq 0 ] && echo "version: $core"
+    exit "$status"
+fi
 while IFS= read -r line; do
     file="${line%%:*}"
     version="${line##*:}"
