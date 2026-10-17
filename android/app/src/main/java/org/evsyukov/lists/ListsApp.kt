@@ -73,6 +73,7 @@ class ListsApp : Application() {
             StrictMode.setThreadPolicy(StrictMode.ThreadPolicy.Builder().detectDiskReads().detectDiskWrites().penaltyLog().build())
         }
         SyncWorker.schedule(this)
+        BackupWorker.schedule(this)
         Repo.scope.launch {
             // #320: opening may back the database up and migrate it; here, not in the first screen that asks.
             runCatching { store }.onFailure { android.util.Log.e("Lists", "the store did not open", it) }
@@ -232,6 +233,26 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
                 .build()
             WorkManager.getInstance(context)
                 .enqueueUniquePeriodicWork("sync", ExistingPeriodicWorkPolicy.KEEP, request)
+        }
+    }
+}
+
+/**
+ * R88: the automatic backup is looked at once an hour as a system job of its own. It needs no network,
+ * unlike the job of sync that looks at it as well, so a device that stays offline still gets its backups (#320).
+ */
+class BackupWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
+    // A failure is in the log already (R102); the next hour tries again.
+    override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
+        runCatching { Repo.store.backupIfDue() }
+        Result.success()
+    }
+
+    companion object {
+        fun schedule(context: Context) {
+            val request = PeriodicWorkRequestBuilder<BackupWorker>(1, TimeUnit.HOURS).build()
+            WorkManager.getInstance(context)
+                .enqueueUniquePeriodicWork("backup", ExistingPeriodicWorkPolicy.KEEP, request)
         }
     }
 }
