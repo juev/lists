@@ -147,7 +147,7 @@ const RU = {
   "Delete all completed tasks for good?": "Удалить навсегда всё выполненное?",
   "Password": "Пароль", "Sign in": "Войти", "Wrong password": "Неверный пароль", "Sign out": "Выйти", "All done for today": "На сегодня всё",
   "No tasks": "Задач нет", "Nothing found": "Ничего не найдено", "Synced": "Синхронизировано", "Sync failed": "Синхронизация не удалась",
-  "waiting": "ожидает отправки", "Deleted": "Удалено", "Undo": "Отменить", "Task completed": "Выполнено", "Moved to the next occurrence": "Перенесено на следующий повтор",
+  "waiting": "ожидает отправки", "Deleted": "Удалено", "Undo": "Отменить", "Created": "Создано", "Task completed": "Выполнено", "Moved to the next occurrence": "Перенесено на следующий повтор",
   "not downloaded yet": "ещё не загружено", "downloading…": "загружается…", "could not download, try later": "не удалось загрузить, попробуйте позже", "Attachments waiting to sync": "Вложения ждут синхронизации", "Download": "Скачать", "Close": "Закрыть", "from": "с", "Delete list": "Удалить список", "Delete this list and move its tasks to the trash?": "Удалить список и отправить его задачи в корзину?",
   "Sort": "Сортировка", "Manually": "Вручную", "By due date": "По сроку", "By priority": "По приоритету", "By title": "По названию", "Rename": "Переименовать", "time": "время",
   "Sign in with single sign-on": "Войти через единый вход", "Import…": "Импорт…", "tasks": "задач", "attachments": "вложений",
@@ -286,7 +286,25 @@ async function load() {
   }));
   render();
 }
-const act = async (op, args, note, undo) => { await call(op, args); if (note) toast(note, undo); await load(); };
+// R131: what changes a task can be taken back; the bar comes after every such action but an edit of a text.
+const UNDONE = new Set(["quickAdd", "addSubtask", "duplicate", "setStart", "setDue", "setRemind", "setPriority", "setRepeat", "addTag", "removeTag",
+  "complete", "wontDo", "reopen", "delete", "restore", "moveToList", "moveToProject", "setProject", "removeAttachment"]);
+const CREATED = new Set(["quickAdd", "addSubtask", "duplicate"]);
+const undo = () => call("undo").then(load);
+const act = async (op, args, note) => {
+  await call(op, args);
+  if (UNDONE.has(op)) toast(note || t(CREATED.has(op) ? "Created" : "Changed"), undo);
+  else if (note) toast(note);
+  await load();
+};
+// R131: Ctrl+Z or ⌘Z takes the last action back, unless a field has the keyboard and its own undo.
+document.addEventListener("keydown", e => {
+  const field = e.target.closest && e.target.closest("input, textarea, select, [contenteditable]");
+  if (e.code === "KeyZ" && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && !field && state.overview) {
+    e.preventDefault();
+    undo();
+  }
+});
 
 function sections() {
   const tasks = state.tasks, s = state.search ? "search" : state.scope;
@@ -324,10 +342,8 @@ function summary(x, origin) {
 
 // Closes a task as "won't do" (R69); what follows is the same as after completing it.
 function wontDo(x) {
-  // The record of the repeat stays in view and its mark takes the completion back; with nothing kept, the bar does (R128).
-  if (x.repeat) return act("wontDo", { id: x.id }, t("Moved to the next occurrence"), state.overview.keepDone ? null : () => act("undoClose", { id: x.id }));
-  if (state.overview.keepDone) return act("wontDo", { id: x.id });
-  act("wontDo", { id: x.id }, t("Won't do"), () => act("undoClose", { id: x.id }));
+  // The bar with Undo comes whatever R68 says (R131); the record of a repeat stays in view as well (R128).
+  act("wontDo", { id: x.id }, t(x.repeat ? "Moved to the next occurrence" : "Won't do"));
 }
 
 // A subtask is a line with a mark and a title (R10): it is renamed in place, completed, closed as
@@ -340,7 +356,7 @@ function subLine(s, plain) {
     plain ? $("div", { class: "title" }, $("div", { class: "t" + (s.done ? " done" : "") }, s.title))
       : commit($("input", { type: "text", class: s.done ? "done" : "", value: s.title, "aria-label": t("Title") }), "setTitle", id, s.title),
     plain || s.done ? null : $("button", { class: "link", onclick: () => act("wontDo", { id }) }, t("Won't do")),
-    plain ? null : $("button", { class: "link danger", "aria-label": t("Delete"), title: t("Delete"), onclick: () => act("delete", { id }, t("Deleted"), () => act("restore", { id })) }, "×"));
+    plain ? null : $("button", { class: "link danger", "aria-label": t("Delete"), title: t("Delete"), onclick: () => act("delete", { id }, t("Deleted")) }, "×"));
 }
 
 // R129: the lists and, under them as a group of their own, the projects a task goes to. The value of a
@@ -359,7 +375,7 @@ function selectionBar() {
     const r = await call("batch", { action, value, ids: chosen.map(x => x.id) });
     state.sel = null; state.more = false;
     // One bar for the whole action; nothing to say when no task was changed.
-    if (r.changed) toast(`${t(done)}: ${r.changed}`, r.backs.length ? () => call("batchBack", { steps: r.backs }).then(load) : null);
+    if (r.changed) toast(`${t(done)}: ${r.changed}`, undo);
     await load();
   };
   const button = (name, action, done, cls = "") => $("button", { class: "link " + cls, disabled: none, onclick: () => run(action, null, done) }, t(name));
@@ -397,10 +413,8 @@ function taskNode(x, origin) {
     e.stopPropagation();
     if (fixed) return;
     if (x.done) return act("reopen", { id: x.id });
-    // A completed task stays in view and its mark takes it back (R68); the Undo bar is for when it leaves at once.
-    if (x.repeat) return act("complete", { id: x.id }, t("Moved to the next occurrence"), state.overview.keepDone ? null : () => act("undoClose", { id: x.id }));
-    if (state.overview.keepDone) return act("complete", { id: x.id });
-    act("complete", { id: x.id }, t("Task completed"), () => act("undoClose", { id: x.id }));
+    // A completed task stays in view and its mark takes it back (R68); the Undo bar comes whatever R68 says (R131).
+    act("complete", { id: x.id }, t(x.repeat ? "Moved to the next occurrence" : "Task completed"));
   };
   const row = $("div", { class: "row", onclick: () => { open ? state.open.delete(x.id) : state.open.add(x.id); load(); } },
     $("button", { class: "check" + (x.done ? " done" : ""), "aria-label": x.done ? "reopen" : "complete", onclick: toggle }, x.wont ? "✕" : x.done ? "✓" : ""),
@@ -522,6 +536,7 @@ function editor(d) {
     destinations(p => x.project || x.subtasks > 0 || x.parent === p.id || x.id === p.id));
   const file = $("input", { type: "file", multiple: true, style: "display:none", onchange: async e => {
     for (const f of e.target.files) await api(`/api/upload?task=${encodeURIComponent(id)}&name=${encodeURIComponent(f.name)}`, { method: "POST", headers: { "X-Lists": "1" }, body: f });
+    toast(t("Changed"), undo);
     load();
   } });
   const sub = $("input", { type: "text", placeholder: t("Subtask"), onkeydown: e => { if (e.key === "Enter" && e.target.value.trim()) act("addSubtask", { parent: id, title: e.target.value.trim() }); } });
@@ -548,7 +563,7 @@ function editor(d) {
         x.done ? null : $("button", { class: "link", onclick: () => wontDo(x) }, t("Won't do")),
         // A project that has tasks stays a project (R32): as subtasks they would lose their fields.
         x.parent || (x.project && d.subtasks.length) ? null : $("button", { class: "link", onclick: () => act("setProject", { id, value: !x.project }) }, t(x.project ? "Turn back into a task" : "Make it a project")),
-        $("button", { class: "link danger", onclick: () => { state.open.delete(id); act("delete", { id }, t("Deleted"), () => act("restore", { id })); } }, t("Delete")))),
+        $("button", { class: "link danger", onclick: () => { state.open.delete(id); act("delete", { id }, t("Deleted")); } }, t("Delete")))),
     // The tasks of a project are full tasks with an editor of their own; anything else under a task is a line (R10).
     $("div", { class: "sub" }, d.subtasks.map(s => x.project && !x.parent ? taskNode(s, false) : subLine(s)), $("div", { class: "row" }, $("span", { class: "check", style: "border-style:dashed" }), sub)));
 }
@@ -560,10 +575,10 @@ function nav(scope, label, count, opts = {}) {
 }
 
 // R126: completes the project whatever the state of its tasks; they close with it (R11). It leaves the sidebar
-// at once, so the Undo bar comes whatever R68 says, and its own view gives way to the Inbox.
+// at once, and its own view gives way to the Inbox.
 function completeProject(p) {
   if (state.scope === "project:" + p.id) state.scope = "inbox";
-  act("complete", { id: p.id }, t("Project completed"), () => act("undoClose", { id: p.id }));
+  act("complete", { id: p.id }, t("Project completed"));
 }
 
 // R126: the row of a project is a large task: a circle filled by the share of its done tasks completes it.
@@ -647,7 +662,7 @@ function render() {
       // R127: the section is shown without projects as well, since a project is made from it.
       $("div", { class: "side-title" }, t("Projects")),
       o.projects.map(projectNav),
-      $("button", { class: "nav", style: "color:var(--muted)", onclick: () => { const title = prompt(t("Project name")); if (title && title.trim()) call("createProject", { title: title.trim(), scope: state.scope }).then(p => { state.scope = "project:" + p.id; load(); }); } }, "+ " + t("New project")),
+      $("button", { class: "nav", style: "color:var(--muted)", onclick: () => { const title = prompt(t("Project name")); if (title && title.trim()) call("createProject", { title: title.trim(), scope: state.scope }).then(p => { state.scope = "project:" + p.id; toast(t("Created"), undo); load(); }); } }, "+ " + t("New project")),
       $("div", { class: "side-title" }, t("Filters")), o.filters.map(f => nav("filter:" + f.id, f.name, f.open)),
       $("button", { class: "nav", style: "color:var(--muted)", onclick: () => { state.filterEdit = {}; state.drawer = false; render(); } }, "+ " + t("New filter")),
       o.tags.length ? $("div", { class: "side-title" }, t("Tags")) : null, o.tags.map(g => nav("tag:" + g.name, "#" + g.name, g.open)),
@@ -673,7 +688,7 @@ function render() {
         current && !state.search ? $("div", { class: "chips", style: "padding:8px 10px 0" }, listTools(current)) : null,
         // R126 and R32: the project is completed here, and an empty one turns back into a task, since a project is not a row of its list (R120).
         project && !state.search ? $("div", { class: "chips", style: "padding:8px 10px 0" }, $("button", { class: "link", onclick: () => completeProject(project) }, t("Complete project")),
-          project.subtasks ? null : $("button", { class: "link", onclick: async () => { await call("setProject", { id: project.id, value: false }); state.scope = project.list === "inbox" ? "inbox" : "list:" + project.list; load(); } }, t("Turn back into a task"))) : null,
+          project.subtasks ? null : $("button", { class: "link", onclick: async () => { await call("setProject", { id: project.id, value: false }); state.scope = project.list === "inbox" ? "inbox" : "list:" + project.list; toast(t("Changed"), undo); load(); } }, t("Turn back into a task"))) : null,
         empty ? $("div", { class: "empty" }, t(state.search ? "Nothing found" : state.scope === "today" ? "All done for today" : "No tasks"))
           : secs.map(s => [s.title ? $("div", { class: "section" + (s.bad ? " bad" : "") }, s.title) : null, s.tasks.map(x => taskNode(x, origin))]),
         state.scope === "trash" && !empty ? $("div", { style: "text-align:right;padding:14px" }, $("button", { class: "link danger", onclick: () => confirm(t("Delete everything in the trash for good?")) && act("emptyTrash") }, t("Empty Trash"))) : null,
