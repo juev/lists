@@ -2,6 +2,8 @@ name: Diag macos launch
 
 # Throwaway: builds the macOS disk image only and records what the release launch check cannot.
 on:
+  push:
+    branches: [hermes/release-launch-diag]
   workflow_dispatch:
 
 permissions:
