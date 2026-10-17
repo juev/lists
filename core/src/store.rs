@@ -1681,15 +1681,13 @@ impl Store {
     }
 
     pub fn add_tag(&self, id: String, tag: String) -> Result<()> {
-        let tag = clean_tag(&tag);
-        if tag.is_empty() || tag.chars().any(char::is_whitespace) {
-            return Err(AppError::invalid("a tag is one word"));
-        }
-        self.task_field(id, &format!("tag:{tag}"), json!(true))
+        let name = clean_tag(&tag);
+        self.task_field(id, &crate::tag::require(&name)?, json!(true))
     }
 
     pub fn remove_tag(&self, id: String, tag: String) -> Result<()> {
-        self.task_field(id, &format!("tag:{}", clean_tag(&tag)), json!(false))
+        let name = clean_tag(&tag);
+        self.task_field(id, &crate::tag::require_field(&name)?, json!(false))
     }
 
     // ---- state ----
@@ -2458,8 +2456,12 @@ fn create_task(w: &mut Writer, new: NewTask) -> Result<TaskItem> {
     if let Some(priority) = priority {
         w.task(&id, "priority", json!(priority.as_i64()))?;
     }
-    for tag in new.tags.iter().map(|t| clean_tag(t)).filter(|t| !t.is_empty()) {
-        w.task(&id, &format!("tag:{tag}"), json!(true))?;
+    for raw in &new.tags {
+        let name = clean_tag(raw);
+        if name.is_empty() {
+            continue;
+        }
+        w.task(&id, &crate::tag::require_field(&name)?, json!(true))?;
     }
     w.flush()?;
     get_task(w.tx, &id)

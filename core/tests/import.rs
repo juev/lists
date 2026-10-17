@@ -400,3 +400,33 @@ fn i8_twodo_attachment_gets_the_extension_kept_beside_its_name() {
     let plan = files("Ремонт");
     assert_eq!(plan[0].name, "План.jpg");
 }
+
+#[test]
+fn i10_a_tag_that_does_not_fit_a_register_is_not_imported() {
+    let d = device();
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("Long.csv");
+    let fits = "a".repeat(196);
+    let long = "b".repeat(197);
+    std::fs::write(
+        &file,
+        format!(
+            "TYPE,CONTENT,DESCRIPTION,PRIORITY,INDENT,AUTHOR,RESPONSIBLE,DATE,DATE_LANG,TIMEZONE\n\
+             task,Keep @{fits} @{long},,4,1,me (1),,,en,UTC\n"
+        ),
+    )
+    .unwrap();
+
+    let report = d.import_file(file.to_string_lossy().into_owned()).unwrap();
+    assert_eq!((report.source.as_str(), report.tasks), ("Todoist", 1));
+    assert!(
+        report
+            .notes
+            .iter()
+            .any(|n| n == "1 tag was longer than 196 bytes and was not imported."),
+        "{:?}",
+        report.notes
+    );
+    let task = d.tasks(Scope::All).unwrap().remove(0);
+    assert_eq!(task.tags, [fits], "the tag that fits is imported, the other one is not");
+}

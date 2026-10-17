@@ -20,6 +20,7 @@ use crate::error::{AppError, Result};
 use crate::hlc;
 use crate::model::{Repeat, SyncReport, INBOX_ID};
 use crate::store::{append_pos_in_list, complete_in, reopen_in, Store, Writer};
+use crate::tag;
 
 const INBOX_SLUG: &str = "lists-inbox";
 const MAX_ID: usize = 200;
@@ -49,6 +50,8 @@ fn registers(conn: &rusqlite::Connection, kind: &str, id: &str) -> Result<Regist
         let (field, value, stamp) = row?;
         out.insert(field, (serde_json::from_str(&value).unwrap_or(Value::Null), stamp));
     }
+    // A register no peer could take is not put into an object either (S51).
+    out.retain(|field, (_, stamp)| db::key_ok(field) && hlc::is_valid(stamp));
     Ok(out)
 }
 
@@ -117,7 +120,7 @@ fn encode_registers(registers: &Registers) -> String {
 fn decode_registers(value: &str) -> Option<Registers> {
     let json = base64::engine::general_purpose::STANDARD.decode(value.trim()).ok()?;
     let mut registers: Registers = serde_json::from_slice(&json).ok()?;
-    registers.retain(|field, (_, stamp)| !field.is_empty() && hlc::is_valid(stamp));
+    registers.retain(|field, (_, stamp)| db::key_ok(field) && hlc::is_valid(stamp));
     Some(registers)
 }
 
@@ -389,11 +392,15 @@ impl Store {
             if seen.priority != reference.priority {
                 set(w, "priority", json!(seen.priority))?;
             }
-            for tag in seen.tags.difference(&reference.tags) {
-                set(w, &format!("tag:{tag}"), json!(true))?;
+            for tag_name in seen.tags.difference(&reference.tags) {
+                if let Some(field) = tag::field(tag_name) {
+                    set(w, &field, json!(true))?;
+                }
             }
-            for tag in reference.tags.difference(&seen.tags) {
-                set(w, &format!("tag:{tag}"), json!(false))?;
+            for tag_name in reference.tags.difference(&seen.tags) {
+                if let Some(field) = tag::field(tag_name) {
+                    set(w, &field, json!(false))?;
+                }
             }
             if seen.parent != reference.parent && seen.parent.as_deref() != Some(id) {
                 set(w, "parent", json!(seen.parent))?;

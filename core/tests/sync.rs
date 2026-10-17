@@ -2397,3 +2397,30 @@ fn s48_a_device_that_reads_the_removal_does_not_remove_it_again() {
     assert!(counting.deleted.lock().unwrap().is_empty());
     assert!(!on_device(&b, &att.sha256));
 }
+
+#[test]
+fn s51_a_tag_at_the_limit_syncs_and_a_longer_one_from_before_is_not_shown() {
+    let storage = tempfile::tempdir().unwrap();
+    let (a, b) = (device(), device());
+    let t = add(&a, "задача");
+    // Both scripts at the byte limit: 196 Latin letters and 98 Cyrillic ones.
+    let latin = "a".repeat(196);
+    let cyrillic = "я".repeat(98);
+    a.add_tag(t.id.clone(), latin.clone()).unwrap();
+    a.add_tag(t.id.clone(), cyrillic.clone()).unwrap();
+    let long = "b".repeat(197);
+
+    // An earlier version took any word for a tag and left its field in the database.
+    let a = plant(a, &[("task", &t.id, &format!("tag:{long}"), serde_json::json!(true))]);
+    let shown = vec![latin, cyrillic];
+    assert_eq!(
+        a.task(t.id.clone()).unwrap().tags,
+        shown,
+        "a tag no register can carry is not shown"
+    );
+
+    sync(&a, &storage);
+    sync(&b, &storage);
+    assert_eq!(b.task(t.id.clone()).unwrap().tags, shown);
+    assert_eq!(a.task(t.id).unwrap().tags, shown);
+}
