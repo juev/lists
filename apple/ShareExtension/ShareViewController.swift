@@ -37,7 +37,10 @@ final class ShareViewController: NSViewController {
                 onCancel: { [weak self] in
                     self?.extensionContext?.cancelRequest(withError: NSError(domain: NSCocoaErrorDomain, code: NSUserCancelledError))
                 },
-                onSave: { [weak self] title, notes, listId in self?.save(title: title, notes: notes, listId: listId, files: content.files) ?? L("The extension was closed") })
+                onSave: { [weak self] title, notes, listId, done in
+                    guard let self else { return done(L("The extension was closed")) }
+                    self.save(title: title, notes: notes, listId: listId, files: content.files, done: done)
+                })
             let host = NSHostingView(rootView: form)
             host.frame = self.view.bounds
             host.autoresizingMask = [.width, .height]
@@ -47,25 +50,40 @@ final class ShareViewController: NSViewController {
 
     private static let noGroup = L("This build of Lists cannot save from Share: it is signed without a development team.")
 
-    /// Returns an error text, or nil after finishing the request.
-    private func save(title: String, notes: String, listId: String, files: [URL]) -> String? {
-        guard let container = Storage.groupContainer else { return Self.noGroup }
-        do {
-            let store = try Storage.openStore()
-            let task = try store.createTask(new: NewTask(title: title, listId: listId, notes: notes, first: true))
-            for file in files {
-                // R137: the database and the attachments of Lists do not leave through a task. The core logs a file it could not add.
-                if Self.isInside(file, container) {
-                    store.log(level: .error, source: "attachments", message: "a shared file from the data of Lists was not attached")
-                    continue
+    /// R140: the task and its files are written off the main thread; `done` is called on the main one.
+    private func save(
+        title: String,
+        notes: String,
+        listId: String,
+        files: [URL],
+        done: @escaping (String?) -> Void
+    ) {
+        guard let container = Storage.groupContainer else { return done(Self.noGroup) }
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                let store = try Storage.openStore()
+                let task = try store.createTask(new: NewTask(title: title, listId: listId, notes: notes, first: true))
+                for file in files {
+                    // R137: the database and the attachments of Lists do not leave through a task. The core logs a file it could not add.
+                    if Self.isInside(file, container) {
+                        store.log(level: .error, source: "attachments", message: "a shared file from the data of Lists was not attached")
+                        continue
+                    }
+                    do {
+                        _ = try store.addAttachment(taskId: task.id, path: file.path, name: nil)
+                    } catch {
+                        // R102: the reason, never the name of the file.
+                        store.log(level: .error, source: "attachments", message: "a shared file was not attached: \(logged(error))")
+                    }
                 }
-                _ = try? store.addAttachment(taskId: task.id, path: file.path, name: nil)
+                Storage.announceChange()
+                DispatchQueue.main.async {
+                    self.extensionContext?.completeRequest(returningItems: nil)
+                    done(nil)
+                }
+            } catch {
+                DispatchQueue.main.async { done(describe(error)) }
             }
-            Storage.announceChange()
-            extensionContext?.completeRequest(returningItems: nil)
-            return nil
-        } catch {
-            return describe(error)
         }
     }
 
@@ -159,12 +177,13 @@ struct ShareForm: View {
     let lists: [TaskList]
     let defaultListId: String
     let onCancel: () -> Void
-    /// Returns an error text or nil.
-    let onSave: (String, String, String) -> String?
+    /// Returns an error text or nil; the answer comes on the main thread.
+    let onSave: (String, String, String, @escaping (String?) -> Void) -> Void
 
     @State private var title = ""
     @State private var listId = "inbox"
     @State private var error: String?
+    @State private var saving = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -190,7 +209,7 @@ struct ShareForm: View {
                 Button(L("Cancel"), action: onCancel).keyboardShortcut(.cancelAction)
                 Button(L("Add"), action: save)
                     .keyboardShortcut(.defaultAction)
-                    .disabled(notice != nil || title.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .disabled(notice != nil || saving || title.trimmingCharacters(in: .whitespaces).isEmpty)
             }
         }
         .padding(16)
@@ -202,6 +221,12 @@ struct ShareForm: View {
 
     private func save() {
         guard notice == nil else { return }
-        error = onSave(title, content.notes, listId)
+        guard !saving else { return }
+        saving = true
+        error = nil
+        onSave(title, content.notes, listId) { failure in
+            saving = false
+            error = failure
+        }
     }
 }

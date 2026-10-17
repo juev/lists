@@ -1,6 +1,7 @@
 //! The object the apps talk to. Every public method is synchronous and safe
 //! to call from any thread; apps call them off the main thread.
 
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -23,6 +24,63 @@ use crate::undo::Step;
 use crate::{order, quickadd, recur, subtasks};
 
 const MOMENT_FMT: &str = "%Y-%m-%dT%H:%M";
+
+/// R140: where the limits of this device are kept in `meta`, next to the level of the log.
+const MAX_FILE_KEY: &str = "max_file_bytes";
+const MAX_TASK_KEY: &str = "max_task_bytes";
+
+/// R140: a file that grew past the limit while it was copied.
+fn over(limit: u64, amount: u64) -> bool {
+    limit != 0 && amount > limit
+}
+
+/// R142: a folder only its owner can look into, on Unix. Other systems have their own rules.
+pub(crate) fn private_dir(path: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))?;
+    }
+    let _ = path;
+    Ok(())
+}
+
+/// R142: a file only its owner can read, on Unix.
+pub(crate) fn private_file(path: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+    }
+    let _ = path;
+    Ok(())
+}
+
+/// R142: creates the folder and everything above it, closed from other users from the start.
+fn make_private_dir(path: &Path) -> std::io::Result<()> {
+    let mut builder = std::fs::DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        builder.mode(0o700);
+    }
+    builder.create(path)?;
+    private_dir(path)
+}
+
+/// R140: the limits kept in `meta`, or the defaults of a device that has none.
+fn stored_limits(conn: &Connection) -> Result<AttachmentLimits> {
+    let read = |key: &str, fallback: u64| -> Result<u64> {
+        Ok(db::meta_get(conn, key)?
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(fallback))
+    };
+    Ok(AttachmentLimits {
+        max_file: read(MAX_FILE_KEY, DEFAULT_MAX_FILE)?,
+        max_task: read(MAX_TASK_KEY, DEFAULT_MAX_TASK)?,
+    })
+}
 
 pub(crate) struct Inner {
     pub conn: Connection,
@@ -64,6 +122,8 @@ pub struct Store {
     pub(crate) caldav_renders: AtomicU64,
     /// What undo takes back (R131).
     pub(crate) history: Mutex<crate::undo::History>,
+    /// R140: how much content this device takes, kept by the device and not synced.
+    pub(crate) limits: Mutex<AttachmentLimits>,
 }
 
 /// One local write transaction: stamps and records field changes, then
@@ -785,14 +845,93 @@ pub(crate) fn new_device_id() -> String {
     simple[simple.len() - DEVICE_ID_LEN..].to_string()
 }
 
+/// R140: the content of the live attachments of one task, as the task quota counts it.
+fn task_attachment_bytes(conn: &Connection, task_id: &str) -> Result<u64> {
+    let sum: Option<i64> = conn.query_row(
+        "SELECT sum(size) FROM attachments WHERE task_id = ?1 AND deleted = 0",
+        [task_id],
+        |r| r.get(0),
+    )?;
+    Ok(sum.unwrap_or(0).max(0) as u64)
+}
+
+fn too_large_file(size: u64, limit: u64) -> AppError {
+    AppError::too_large(format!(
+        "the file is {size} bytes; this device takes files up to {limit} bytes"
+    ))
+}
+
+fn too_large_task(used: u64, size: u64, limit: u64) -> AppError {
+    AppError::too_large(format!(
+        "the task holds {used} bytes and the file is {size} bytes; this device takes {limit} bytes per task"
+    ))
+}
+
+/// R140: copies `source` into `tmp` in pieces, hashing each one; `tmp` is removed when anything fails.
+fn copy_hashing(source: &Path, tmp: &Path, limit: u64) -> Result<(String, u64)> {
+    let mut input = std::fs::File::open(source)?;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut output = options.open(tmp)?;
+    let mut hasher = Sha256::new();
+    let mut size = 0u64;
+    let mut buffer = [0u8; 64 * 1024];
+    let mut exceeded = false;
+    loop {
+        let read = match input.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(n) => n,
+            Err(e) => {
+                drop(output);
+                let _ = std::fs::remove_file(tmp);
+                return Err(e.into());
+            }
+        };
+        size += read as u64;
+        if over(limit, size) {
+            exceeded = true;
+            break;
+        }
+        if let Err(e) = output.write_all(&buffer[..read]) {
+            drop(output);
+            let _ = std::fs::remove_file(tmp);
+            return Err(e.into());
+        }
+        hasher.update(&buffer[..read]);
+    }
+    if exceeded {
+        drop(output);
+        let _ = std::fs::remove_file(tmp);
+        return Err(AppError::too_large(format!(
+            "the file became larger than {limit} bytes while it was copied"
+        )));
+    }
+    if let Err(e) = output.flush() {
+        drop(output);
+        let _ = std::fs::remove_file(tmp);
+        return Err(e.into());
+    }
+    drop(output);
+    Ok((hex(&hasher.finalize()), size))
+}
+
 #[uniffi::export]
 impl Store {
     /// Opens (creating if needed) the database in `dir`.
     #[uniffi::constructor]
     pub fn open(dir: String) -> Result<Arc<Store>> {
         let dir = PathBuf::from(dir);
-        std::fs::create_dir_all(dir.join("blobs"))?;
-        let conn = Connection::open(dir.join("lists.sqlite"))?;
+        // R142: the data folder and the content in it are for this user alone.
+        make_private_dir(&dir)?;
+        make_private_dir(&dir.join("blobs"))?;
+        let database = dir.join("lists.sqlite");
+        let conn = Connection::open(&database)?;
+        private_file(&database)?;
         // R92: a database of an earlier schema is backed up as it is, before anything in it is changed.
         let outdated = db::schema_version(&conn)?.is_some_and(|stored| stored < db::SCHEMA_VERSION);
         if !outdated {
@@ -825,9 +964,13 @@ impl Store {
             push_refused: Mutex::new((false, false)),
             caldav_renders: AtomicU64::new(0),
             history: Mutex::new(Default::default()),
+            limits: Mutex::new(AttachmentLimits::default()),
         });
         // An earlier schema has the table the level is kept in as well.
         store.load_log_level()?;
+        // R140: read after the migration, which may have created `meta`.
+        let limits = stored_limits(&store.lock().conn)?;
+        *store.limits.lock().unwrap_or_else(|p| p.into_inner()) = limits;
         if outdated {
             // Without the backup the migration does not start: the data stays as it was.
             // Asked of the registers alone: the derived tables are as the earlier version left them.
@@ -1965,35 +2108,77 @@ impl Store {
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
-    /// Copies the file at `path` into the store and attaches it to the task.
+    /// R140: copies the file at `path` into the store and attaches it to the task.
+    /// The content is read and written in pieces, so memory does not grow with the file.
     pub fn add_attachment(&self, task_id: String, path: String, name: Option<String>) -> Result<Attachment> {
         let added = (|| {
             let source = Path::new(&path);
-            let bytes = std::fs::read(source)?;
-            let sha256 = hex(&Sha256::digest(&bytes));
+            let limits = self.attachment_limits();
+            let meta = std::fs::metadata(source)?;
+            if !meta.is_file() {
+                return Err(AppError::invalid("not a file"));
+            }
+            let expected = meta.len();
+            if over(limits.max_file, expected) {
+                return Err(too_large_file(expected, limits.max_file));
+            }
+            // Asked before the file is copied: an unknown task, a subtask and a full task cost nothing.
+            {
+                let conn = self.lock();
+                get_task(&conn.conn, &task_id)?;
+                if subtasks::is_subtask(&conn.conn, &task_id)? {
+                    return Err(AppError::invalid("a subtask has a title only"));
+                }
+                let used = task_attachment_bytes(&conn.conn, &task_id)?;
+                if over(limits.max_task, used.saturating_add(expected)) {
+                    return Err(too_large_task(used, expected, limits.max_task));
+                }
+            }
+            let tmp = self
+                .dir
+                .join("blobs")
+                .join(format!(".upload-{}.part", Uuid::now_v7().simple()));
+            let (sha256, size) = copy_hashing(source, &tmp, limits.max_file)?;
             let target = self.blob_path(&sha256);
-            if !target.exists() {
-                let tmp = target.with_extension("part");
-                std::fs::write(&tmp, &bytes)?;
+            let created = !target.exists();
+            if created {
                 std::fs::rename(&tmp, &target)?;
+                private_file(&target)?;
+            } else {
+                let _ = std::fs::remove_file(&tmp);
             }
             let name = name
                 .filter(|n| !n.trim().is_empty())
                 .or_else(|| source.file_name().map(|n| n.to_string_lossy().into_owned()))
                 .unwrap_or_else(|| "file".into());
-            let id = self.act(|w| {
+            let written = self.act(|w| {
                 get_task(w.tx, &task_id)?;
                 if subtasks::is_subtask(w.tx, &task_id)? {
                     return Err(AppError::invalid("a subtask has a title only"));
+                }
+                // Asked again with the size the file really had: it may have grown while it was copied.
+                let used = task_attachment_bytes(w.tx, &task_id)?;
+                if over(limits.max_task, used.saturating_add(size)) {
+                    return Err(too_large_task(used, size, limits.max_task));
                 }
                 let id = new_id();
                 w.set(KIND_ATTACHMENT, &id, "task", json!(task_id))?;
                 w.set(KIND_ATTACHMENT, &id, "name", json!(name))?;
                 w.set(KIND_ATTACHMENT, &id, "mime", json!(guess_mime(&name)))?;
-                w.set(KIND_ATTACHMENT, &id, "size", json!(bytes.len()))?;
+                w.set(KIND_ATTACHMENT, &id, "size", json!(size))?;
                 w.set(KIND_ATTACHMENT, &id, "sha256", json!(sha256))?;
                 Ok(id)
-            })?;
+            });
+            let id = match written {
+                Ok(id) => id,
+                Err(e) => {
+                    // The content came with this call and the task did not take it: it is left to no one.
+                    if created {
+                        self.drop_blob_if_unused(&sha256);
+                    }
+                    return Err(e);
+                }
+            };
             self.attachments(task_id)?
                 .into_iter()
                 .find(|a| a.id == id)
@@ -2004,6 +2189,39 @@ impl Store {
             self.note(LogLevel::Error, "attachments", || format!("not added: {e}"));
         }
         added
+    }
+
+    /// R140: the limits this device takes.
+    pub fn attachment_limits(&self) -> AttachmentLimits {
+        *self.limits.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    /// R140: sets the limits of this device. Zero means no limit. Kept in the database of this
+    /// device, not in the shared registers, so it does not travel to other devices.
+    pub fn set_attachment_limits(&self, limits: AttachmentLimits) -> Result<()> {
+        {
+            let conn = self.lock();
+            db::meta_set(&conn.conn, MAX_FILE_KEY, &limits.max_file.to_string())?;
+            db::meta_set(&conn.conn, MAX_TASK_KEY, &limits.max_task.to_string())?;
+        }
+        *self.limits.lock().unwrap_or_else(|p| p.into_inner()) = limits;
+        Ok(())
+    }
+
+    /// R140: a blob this call wrote is removed when no attachment kept it, as after a failed add.
+    fn drop_blob_if_unused(&self, sha256: &str) {
+        let used: bool = self
+            .lock()
+            .conn
+            .query_row(
+                "SELECT EXISTS (SELECT 1 FROM attachments WHERE sha256 = ?1)",
+                [sha256],
+                |r| r.get(0),
+            )
+            .unwrap_or(true);
+        if !used {
+            let _ = std::fs::remove_file(self.blob_path(sha256));
+        }
     }
 
     pub fn remove_attachment(&self, id: String) -> Result<()> {

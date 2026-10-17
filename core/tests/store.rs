@@ -2605,6 +2605,157 @@ fn r91_a_file_that_cannot_be_written_is_named_and_the_rest_are_saved() {
     assert_eq!((report.saved.len(), report.failed.len()), (0, 2));
 }
 
+/// Attaches the content of `file` to a new task.
+fn attach_file(d: &Device, content: &[u8]) -> std::result::Result<Attachment, AppError> {
+    let task = add(d, "с файлом");
+    let src = tempfile::tempdir().unwrap();
+    let file = src.path().join("file.bin");
+    std::fs::write(&file, content).unwrap();
+    d.add_attachment(task.id, file.to_string_lossy().into_owned(), None)
+}
+
+#[test]
+fn r140_a_file_above_the_limit_is_not_added() {
+    let d = device();
+    d.set_attachment_limits(AttachmentLimits {
+        max_file: 10,
+        max_task: 1000,
+    })
+    .unwrap();
+
+    let error = attach_file(&d, b"0123456789A").unwrap_err();
+    assert!(matches!(error, AppError::TooLarge { .. }), "{error}");
+
+    // The task has no attachment and the content was not left behind.
+    let task = d.tasks(Scope::Inbox).unwrap().remove(0);
+    assert!(d.attachments(task.id).unwrap().is_empty());
+    assert_eq!(std::fs::read_dir(d.dir().join("blobs")).unwrap().count(), 0);
+}
+
+#[test]
+fn r140_the_task_limit_counts_the_live_attachments() {
+    let d = device();
+    d.set_attachment_limits(AttachmentLimits {
+        max_file: 100,
+        max_task: 10,
+    })
+    .unwrap();
+    let task = add(&d, "с двумя файлами");
+    let src = tempfile::tempdir().unwrap();
+    let file = src.path().join("six.bin");
+    std::fs::write(&file, b"123456").unwrap();
+    let path = file.to_string_lossy().into_owned();
+    let first = d.add_attachment(task.id.clone(), path.clone(), None).unwrap();
+
+    let error = d.add_attachment(task.id.clone(), path.clone(), None).unwrap_err();
+    assert!(matches!(error, AppError::TooLarge { .. }), "{error}");
+    assert_eq!(d.attachments(task.id.clone()).unwrap().len(), 1);
+
+    // A removed attachment no longer counts, and the same content goes in.
+    d.remove_attachment(first.id).unwrap();
+    let second = d.add_attachment(task.id.clone(), path, None).unwrap();
+    assert_eq!(second.size, 6);
+}
+
+#[test]
+fn r140_a_large_file_is_copied_in_pieces() {
+    let d = device();
+    d.set_attachment_limits(AttachmentLimits {
+        max_file: 64 * 1024 * 1024,
+        max_task: 128 * 1024 * 1024,
+    })
+    .unwrap();
+    let task = add(&d, "с большим файлом");
+    let src = tempfile::tempdir().unwrap();
+    let file = src.path().join("large.bin");
+    // Sparse: the file is large, the disk keeps only the marker at its end.
+    {
+        use std::io::{Seek, SeekFrom, Write};
+        let mut out = std::fs::File::create(&file).unwrap();
+        out.set_len(16 * 1024 * 1024).unwrap();
+        out.seek(SeekFrom::Start(16 * 1024 * 1024 - 4)).unwrap();
+        out.write_all(b"end!").unwrap();
+    }
+
+    let added = d
+        .add_attachment(task.id, file.to_string_lossy().into_owned(), None)
+        .unwrap();
+    assert_eq!(added.size, 16 * 1024 * 1024);
+    let stored = added.local_path.clone().unwrap();
+    assert_eq!(std::fs::metadata(&stored).unwrap().len(), added.size);
+    // The hash is of the whole file, the same one a whole read would give.
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    let mut input = std::fs::File::open(&stored).unwrap();
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        let read = std::io::Read::read(&mut input, &mut buffer).unwrap();
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    assert_eq!(added.sha256, format!("{:x}", hasher.finalize()));
+}
+
+#[test]
+fn r140_a_failed_add_does_not_leave_content() {
+    let d = device();
+    let src = tempfile::tempdir().unwrap();
+    let file = src.path().join("file.bin");
+    std::fs::write(&file, b"content nobody kept").unwrap();
+
+    let error = d
+        .add_attachment("no-such-task".into(), file.to_string_lossy().into_owned(), None)
+        .unwrap_err();
+    assert!(matches!(error, AppError::NotFound { .. }), "{error}");
+    assert_eq!(std::fs::read_dir(d.dir().join("blobs")).unwrap().count(), 0);
+}
+
+#[test]
+fn r140_the_limits_belong_to_the_device_and_stay() {
+    let d = device();
+    let dir = d.dir().to_path_buf();
+    d.set_attachment_limits(AttachmentLimits {
+        max_file: 3,
+        max_task: 4,
+    })
+    .unwrap();
+
+    // A second connection to the same database, as a restart of the app would open it.
+    let again = Store::open(dir.to_string_lossy().into_owned()).unwrap();
+    assert_eq!(
+        again.attachment_limits(),
+        AttachmentLimits {
+            max_file: 3,
+            max_task: 4
+        }
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn r142_the_data_folder_is_for_its_owner_alone() {
+    use std::os::unix::fs::PermissionsExt;
+    let mode = |path: &std::path::Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
+    let d = device();
+    assert_eq!(mode(d.dir()), 0o700);
+    assert_eq!(mode(&d.dir().join("blobs")), 0o700);
+    assert_eq!(mode(&d.dir().join("lists.sqlite")), 0o600);
+
+    let task = add(&d, "с файлом");
+    let src = tempfile::tempdir().unwrap();
+    let file = src.path().join("file.bin");
+    std::fs::write(&file, b"content").unwrap();
+    let added = d
+        .add_attachment(task.id, file.to_string_lossy().into_owned(), None)
+        .unwrap();
+    assert_eq!(mode(std::path::Path::new(added.local_path.as_ref().unwrap())), 0o600);
+
+    d.log(LogLevel::Error, "attachments".into(), "a reason for a line".into());
+    assert_eq!(mode(&d.dir().join("log.txt")), 0o600);
+}
+
 /// A project with tasks, all in Inbox: (project, tasks by title).
 fn project_with(d: &Device, dates: &[(&str, Option<&str>, Option<&str>)]) -> (TaskItem, Vec<TaskItem>) {
     let project = add(d, "Ремонт");

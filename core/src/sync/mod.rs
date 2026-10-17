@@ -16,6 +16,8 @@ pub mod remote;
 pub mod webdav;
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::io::Write;
+use std::path::Path;
 
 use chrono::NaiveDateTime;
 use rusqlite::{params, OptionalExtension};
@@ -204,6 +206,44 @@ fn newer_format(format: u32) -> AppError {
     AppError::sync(format!(
         "the storage uses format {format}, this version understands format {FORMAT}; update the app"
     ))
+}
+
+/// R140: hashes and counts content as it is written, so a large file never sits in memory.
+struct HashingWriter<W: Write> {
+    inner: W,
+    hasher: Sha256,
+}
+
+impl<W: Write> HashingWriter<W> {
+    fn new(inner: W) -> Self {
+        HashingWriter {
+            inner,
+            hasher: Sha256::new(),
+        }
+    }
+}
+
+impl<W: Write> Write for HashingWriter<W> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let written = self.inner.write(buf)?;
+        self.hasher.update(&buf[..written]);
+        Ok(written)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
+    }
+}
+
+/// R140, R142: a temporary file of the content, readable by its owner only.
+fn private_create(path: &Path) -> Result<std::fs::File> {
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    Ok(options.open(path)?)
 }
 
 /// What a download of attachment content came to.
@@ -663,7 +703,8 @@ impl Store {
         let remote_path = blob_remote_path(sha256);
         let sent = !remote.exists(&remote_path)?;
         if sent {
-            remote.put(&remote_path, &std::fs::read(self.blob_path(sha256))?)?;
+            // R140: the file goes from the disk, not from a copy of it in memory.
+            remote.put_file(&remote_path, &self.blob_path(sha256))?;
         }
         self.blob_uploaded(sha256)?;
         Ok(sent)
@@ -672,23 +713,57 @@ impl Store {
     /// Whether the content arrived, and why not when it did not.
     fn download_blob(&self, remote: &dyn Remote, sha256: &str) -> Result<Fetched> {
         let path = blob_remote_path(sha256);
-        let mut found = remote.get(&path)?;
-        // S49: content a device of an earlier version uploaded to the old place after the move.
-        if found.is_none() && remote.rename(&legacy_blob_path(sha256), &path)? {
-            found = remote.get(&path)?;
-        }
-        let Some(data) = found else {
-            return Ok(Fetched::Missing);
-        };
-        // The name is the hash: content that does not match is dropped, not stored.
-        if hex(&Sha256::digest(&data)) != sha256 {
-            return Ok(Fetched::Mismatch);
-        }
         let local = self.blob_path(sha256);
         // A pass and a request (S35) may fetch the same content at once: each writes its own file.
         let tmp = local.with_extension(format!("{}.part", uuid::Uuid::now_v7().simple()));
-        std::fs::write(&tmp, &data)?;
-        std::fs::rename(&tmp, &local)?;
+        let max = self.attachment_limits().max_file;
+        let mut out = HashingWriter::new(private_create(&tmp)?);
+        let mut found = match remote.get_to(&path, &mut out, max) {
+            Ok(found) => found,
+            Err(e) => {
+                let _ = std::fs::remove_file(&tmp);
+                return Err(e);
+            }
+        };
+        // S49: content a device of an earlier version uploaded to the old place after the move.
+        if !found {
+            match remote.rename(&legacy_blob_path(sha256), &path) {
+                Ok(true) => {
+                    found = match remote.get_to(&path, &mut out, max) {
+                        Ok(found) => found,
+                        Err(e) => {
+                            let _ = std::fs::remove_file(&tmp);
+                            return Err(e);
+                        }
+                    };
+                }
+                Ok(false) => {}
+                Err(e) => {
+                    let _ = std::fs::remove_file(&tmp);
+                    return Err(e);
+                }
+            }
+        }
+        if !found {
+            let _ = std::fs::remove_file(&tmp);
+            return Ok(Fetched::Missing);
+        }
+        if let Err(e) = out.flush() {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(e.into());
+        }
+        let HashingWriter { inner, hasher, .. } = out;
+        drop(inner);
+        // The name is the hash: content that does not match is dropped, not stored.
+        if hex(&hasher.finalize()) != sha256 {
+            let _ = std::fs::remove_file(&tmp);
+            return Ok(Fetched::Mismatch);
+        }
+        if let Err(e) = std::fs::rename(&tmp, &local) {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(e.into());
+        }
+        crate::store::private_file(&local)?;
         self.blob_uploaded(sha256)?;
         Ok(Fetched::Stored)
     }

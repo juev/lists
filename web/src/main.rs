@@ -18,6 +18,8 @@
 //! LISTS_SYNC_PATH=/path         for folder
 //! LISTS_PUSH_SERVER=https://…   ntfy server through which other devices ask this one to sync at once
 //! LISTS_PUSH_TOKEN=tk_…         access token for that server, when it requires sign-in
+//! LISTS_MAX_FILE_MB=512         R140: the largest attachment this server takes; 0 means no limit
+//! LISTS_MAX_TASK_MB=2048        R140: the most all attachments of one task may take here; 0 means no limit
 //! ```
 
 use lists_core::SyncConfig;
@@ -25,6 +27,13 @@ use lists_web::{start, Config, OidcConfig};
 
 fn env(name: &str) -> Option<String> {
     std::env::var(name).ok().filter(|v| !v.is_empty())
+}
+
+/// R140: a size in the environment is given in megabytes; an unreadable value leaves the device's limit.
+fn megabytes(name: &str) -> Option<u64> {
+    env(name)
+        .and_then(|v| v.parse::<u64>().ok())
+        .map(|mb| mb.saturating_mul(1024 * 1024))
 }
 
 fn main() {
@@ -72,6 +81,8 @@ fn main() {
         push_token: env("LISTS_PUSH_TOKEN"),
         trust_proxy: env("LISTS_TRUST_PROXY").as_deref() == Some("1"),
         secure_cookie: env("LISTS_WEB_URL").is_some_and(|u| u.to_ascii_lowercase().starts_with("https://")),
+        max_file: megabytes("LISTS_MAX_FILE_MB"),
+        max_task: megabytes("LISTS_MAX_TASK_MB"),
     };
     match start(config) {
         Ok(running) => {

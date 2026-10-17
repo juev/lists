@@ -127,6 +127,52 @@ fn r87_r90_a_backup_restores_on_a_clean_install() {
 }
 
 #[test]
+fn r140_a_large_file_survives_a_backup_and_a_restore() {
+    let old = device();
+    let task = add(&old, "с большим файлом");
+    let src = tempfile::tempdir().unwrap();
+    let file = src.path().join("large.bin");
+    {
+        use std::io::{Seek, SeekFrom};
+        let mut out = std::fs::File::create(&file).unwrap();
+        out.set_len(16 * 1024 * 1024).unwrap();
+        out.seek(SeekFrom::Start(16 * 1024 * 1024 - 4)).unwrap();
+        out.write_all(b"end!").unwrap();
+    }
+    let added = old
+        .add_attachment(task.id, file.to_string_lossy().into_owned(), None)
+        .unwrap();
+    let backup = old.create_backup().unwrap();
+
+    let fresh = device();
+    fresh.restore_backup(backup.path, false).unwrap();
+    let restored = fresh
+        .tasks(Scope::Search {
+            text: "большим".into()
+        })
+        .unwrap()
+        .remove(0);
+    let got = fresh.attachments(restored.id).unwrap().remove(0);
+    assert_eq!((got.name.as_str(), got.size), ("large.bin", 16 * 1024 * 1024));
+    assert_eq!(got.sha256, added.sha256);
+    let path = got.local_path.unwrap();
+    assert_eq!(std::fs::metadata(&path).unwrap().len(), got.size);
+    // The content is the same, read in pieces so the test does not hold it whole.
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    let mut input = std::fs::File::open(&path).unwrap();
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        let read = std::io::Read::read(&mut input, &mut buffer).unwrap();
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    assert_eq!(got.sha256, format!("{:x}", hasher.finalize()));
+}
+
+#[test]
 fn r87_what_belongs_to_the_device_is_not_in_the_backup() {
     let storage = tempfile::tempdir().unwrap();
     let old = furnished();

@@ -91,6 +91,8 @@ fn web(provider: &Provider, allow: &[&str]) -> Web {
         push_token: None,
         trust_proxy: false,
         secure_cookie: false,
+        max_file: None,
+        max_task: None,
     })
     .unwrap();
     Web {
@@ -284,6 +286,8 @@ fn configuration_mistakes_stop_the_server_from_starting() {
         push_token: None,
         trust_proxy: false,
         secure_cookie: false,
+        max_file: None,
+        max_task: None,
     };
     assert!(
         start(config("http://id.example.org", vec!["a@b.c".into()])).is_err(),

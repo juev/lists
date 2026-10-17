@@ -84,6 +84,7 @@ extension AppError {
         case .Invalid(let msg): return msg
         case .Storage(let msg): return L("Could not save: %@", "\(msg)")
         case .Sync(let msg): return msg
+        case .TooLarge(let msg): return msg
         }
     }
 }
@@ -100,6 +101,7 @@ func logged(_ error: Error) -> String {
     case .Invalid(let msg)?: return "invalid: \(msg)"
     case .Storage(let msg)?: return "storage: \(msg)"
     case .Sync(let msg)?: return "sync: \(msg)"
+    case .TooLarge(let msg)?: return "too large: \(msg)"
     case nil:
         let error = error as NSError
         return "\(error.domain) \(error.code)"

@@ -1,7 +1,8 @@
 //! What sync needs from storage: read, write, list and delete files by relative path.
 
 use std::fs;
-use std::path::PathBuf;
+use std::io::Write;
+use std::path::{Path, PathBuf};
 
 use crate::error::{AppError, Result};
 
@@ -13,6 +14,22 @@ pub trait Remote: Send + Sync {
     fn get(&self, path: &str) -> Result<Option<Vec<u8>>>;
     /// Creates parent directories as needed and replaces an existing file.
     fn put(&self, path: &str, data: &[u8]) -> Result<()>;
+    /// R140: writes the file at `local` as the content of `path`, without holding it whole in memory.
+    fn put_file(&self, path: &str, local: &Path) -> Result<()> {
+        self.put(path, &fs::read(local)?)
+    }
+    /// R140: copies the content at `path` into `out` in pieces. `false` when there is nothing there.
+    /// `max` bounds the bytes taken; zero means no limit. A storage used whole reads the file and writes it.
+    fn get_to(&self, path: &str, out: &mut dyn Write, max: u64) -> Result<bool> {
+        let Some(data) = self.get(path)? else {
+            return Ok(false);
+        };
+        if max != 0 && data.len() as u64 > max {
+            return Err(AppError::too_large(format!("the content is more than {max} bytes")));
+        }
+        out.write_all(&data)?;
+        Ok(true)
+    }
     /// Deleting a missing file is not an error.
     fn delete(&self, path: &str) -> Result<()>;
     fn exists(&self, path: &str) -> Result<bool>;
@@ -28,11 +45,34 @@ pub trait Remote: Send + Sync {
 }
 
 /// A move made of the operations every storage has: read, write, delete.
+/// R140: the content goes through a temporary file, so a large attachment is not held in memory.
 pub(crate) fn copy_over<R: Remote + ?Sized>(remote: &R, from: &str, to: &str) -> Result<bool> {
-    let Some(data) = remote.get(from)? else {
-        return Ok(false);
+    let tmp = std::env::temp_dir().join(format!("lists-copy-{}.part", uuid::Uuid::now_v7().simple()));
+    let found = {
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut out = options.open(&tmp)?;
+        match remote.get_to(from, &mut out, 0) {
+            Ok(found) => found,
+            Err(e) => {
+                drop(out);
+                let _ = fs::remove_file(&tmp);
+                return Err(e);
+            }
+        }
     };
-    remote.put(to, &data)?;
+    if !found {
+        let _ = fs::remove_file(&tmp);
+        return Ok(false);
+    }
+    let sent = remote.put_file(to, &tmp);
+    let _ = fs::remove_file(&tmp);
+    sent?;
     remote.delete(from)?;
     Ok(true)
 }
@@ -87,6 +127,22 @@ impl Remote for DirRemote {
         }
     }
 
+    fn get_to(&self, path: &str, out: &mut dyn Write, max: u64) -> Result<bool> {
+        let mut input = match fs::File::open(self.resolve(path)?) {
+            Ok(file) => file,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(e) => return Err(e.into()),
+        };
+        if max != 0 && input.metadata()?.len() > max {
+            return Err(AppError::too_large(format!("the content is more than {max} bytes")));
+        }
+        let copied = std::io::copy(&mut input, out)?;
+        if max != 0 && copied > max {
+            return Err(AppError::too_large(format!("the content is more than {max} bytes")));
+        }
+        Ok(true)
+    }
+
     fn put(&self, path: &str, data: &[u8]) -> Result<()> {
         let target = self.resolve(path)?;
         if let Some(parent) = target.parent() {
@@ -95,6 +151,17 @@ impl Remote for DirRemote {
         // Readers never see a half-written file: write aside, then rename.
         let tmp = target.with_extension("part");
         fs::write(&tmp, data)?;
+        fs::rename(&tmp, &target)?;
+        Ok(())
+    }
+
+    fn put_file(&self, path: &str, local: &Path) -> Result<()> {
+        let target = self.resolve(path)?;
+        if let Some(parent) = target.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let tmp = target.with_extension(format!("{}.part", uuid::Uuid::now_v7().simple()));
+        fs::copy(local, &tmp)?;
         fs::rename(&tmp, &target)?;
         Ok(())
     }

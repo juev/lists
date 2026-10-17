@@ -90,7 +90,11 @@ impl Store {
         if std::fs::metadata(&path).is_ok_and(|m| m.len() > MAX_BYTES) {
             let _ = std::fs::rename(&path, self.log_file(PREVIOUS));
         }
-        if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+        let mut options = std::fs::OpenOptions::new();
+        options.create(true).append(true);
+        if let Ok(mut file) = options.open(&path) {
+            // R142: the log names failures, so it is for this user alone like the data.
+            let _ = crate::store::private_file(&path);
             let _ = file.write_all(line.as_bytes());
         }
     }

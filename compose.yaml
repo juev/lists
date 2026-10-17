@@ -15,6 +15,9 @@ services:
       LISTS_SYNC_USER: ${LISTS_SYNC_USER:-}
       LISTS_SYNC_PASSWORD: ${LISTS_SYNC_PASSWORD:-}
       LISTS_PUSH_SERVER: ${LISTS_PUSH_SERVER:-}
+      # R136: attachment limits of this server, in megabytes; 0 disables one.
+      LISTS_MAX_FILE_MB: ${LISTS_MAX_FILE_MB:-512}
+      LISTS_MAX_TASK_MB: ${LISTS_MAX_TASK_MB:-2048}
       # Requests come through the reverse proxy; the client is in X-Forwarded-For (R134).
       LISTS_TRUST_PROXY: "1"
 

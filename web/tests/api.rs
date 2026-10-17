@@ -31,6 +31,8 @@ fn web_configured(password: Option<&str>, change: impl FnOnce(&mut Config)) -> W
         push_token: None,
         trust_proxy: false,
         secure_cookie: false,
+        max_file: None,
+        max_task: None,
     };
     change(&mut config);
     let running = start(config).unwrap();
@@ -464,6 +466,113 @@ fn r56_only_listed_types_are_shown_in_place() {
         );
         assert_eq!(got.header("Content-Security-Policy"), None, "{name}");
     }
+}
+
+/// R141: the part of a file a request asks for.
+#[allow(clippy::result_large_err)]
+fn partial(web: &Web, url: &str, range: &str) -> Result<ureq::Response, ureq::Error> {
+    ureq::get(&format!("{}{url}", web.base)).set("Range", range).call()
+}
+
+#[test]
+fn r141_a_file_is_served_whole_and_in_parts() {
+    let web = web(None);
+    let task = call(&web, "", json!({ "op": "quickAdd", "text": "с файлом" }));
+    let id = task["id"].as_str().unwrap();
+    let file = upload(&web, id, "digits.txt", b"0123456789");
+    let url = format!("/api/file?task={id}&id={}", file["id"].as_str().unwrap());
+
+    let whole = ureq::get(&format!("{}{url}", web.base)).call().unwrap();
+    assert_eq!(whole.status(), 200);
+    assert_eq!(whole.header("Accept-Ranges"), Some("bytes"));
+    assert_eq!(whole.header("Content-Range"), None);
+    assert_eq!(whole.into_string().unwrap(), "0123456789");
+
+    for (range, wanted, content_range) in [
+        ("bytes=2-4", "234", "bytes 2-4/10"),
+        ("bytes=8-", "89", "bytes 8-9/10"),
+        ("bytes=-3", "789", "bytes 7-9/10"),
+        ("bytes=0-100", "0123456789", "bytes 0-9/10"),
+    ] {
+        let part = partial(&web, &url, range).unwrap();
+        assert_eq!(part.status(), 206, "{range}");
+        assert_eq!(part.header("Content-Range"), Some(content_range), "{range}");
+        assert_eq!(part.header("Accept-Ranges"), Some("bytes"), "{range}");
+        assert_eq!(part.into_string().unwrap(), wanted, "{range}");
+    }
+
+    // Beyond the end, backwards, and of an empty file.
+    for range in ["bytes=20-", "bytes=5-3", "bytes=10-"] {
+        match partial(&web, &url, range) {
+            Err(ureq::Error::Status(416, response)) => {
+                assert_eq!(response.header("Content-Range"), Some("bytes */10"), "{range}");
+                assert_eq!(response.header("Accept-Ranges"), Some("bytes"), "{range}");
+            }
+            other => panic!("{range}: {other:?}"),
+        }
+    }
+    // A range that cannot be understood is ignored: the whole file is a valid answer.
+    let ignored = partial(&web, &url, "bytes=abc").unwrap();
+    assert_eq!(ignored.status(), 200);
+    assert_eq!(ignored.into_string().unwrap(), "0123456789");
+
+    // A range of a file shown in place keeps the headers that make it safe.
+    let image = upload(&web, id, "photo.png", b"png bytes");
+    let shown = format!("/api/file?task={id}&id={}&view=1", image["id"].as_str().unwrap());
+    let part = partial(&web, &shown, "bytes=0-2").unwrap();
+    assert_eq!(part.status(), 206);
+    assert_eq!(part.header("Content-Type"), Some("image/png"));
+    assert_eq!(part.header("Content-Range"), Some("bytes 0-2/9"));
+    assert!(part.header("Content-Security-Policy").unwrap().contains("sandbox"));
+
+    let empty = upload(&web, id, "empty.txt", b"");
+    let empty_url = format!("/api/file?task={id}&id={}", empty["id"].as_str().unwrap());
+    assert!(matches!(
+        partial(&web, &empty_url, "bytes=0-"),
+        Err(ureq::Error::Status(416, _))
+    ));
+
+    // HEAD has the headers of the whole file and no body.
+    let head = ureq::request("HEAD", &format!("{}{url}", web.base)).call().unwrap();
+    assert_eq!(head.status(), 200);
+    assert_eq!(head.header("Accept-Ranges"), Some("bytes"));
+    assert_eq!(head.into_string().unwrap(), "");
+}
+
+#[test]
+fn r140_an_upload_above_the_limit_is_refused() {
+    let web = web_configured(None, |c| {
+        c.max_file = Some(10);
+        c.max_task = Some(15);
+    });
+    let task = call(&web, "", json!({ "op": "quickAdd", "text": "с большим файлом" }));
+    let id = task["id"].as_str().unwrap();
+    let upload_with = |data: &[u8]| {
+        status(
+            ureq::post(&format!("{}/api/upload?task={id}&name=file.bin", web.base))
+                .set("X-Lists", "1")
+                .send_bytes(data),
+        )
+    };
+    assert_eq!(upload_with(b"0123456789A"), 413, "one file above the file limit");
+    // Chunked, without a declared length: the limit stops the body while it is read.
+    assert_eq!(
+        status(
+            ureq::post(&format!("{}/api/upload?task={id}&name=file.bin", web.base))
+                .set("X-Lists", "1")
+                .send(std::io::Cursor::new(b"0123456789A".to_vec()))
+        ),
+        413
+    );
+
+    let listed = get(&web, "", &format!("/api/task?id={id}"));
+    assert_eq!(listed["attachments"].as_array().unwrap().len(), 0);
+
+    // The task limit counts what the task already holds.
+    assert_eq!(upload_with(b"0123456789"), 200, "exactly the file limit");
+    assert_eq!(upload_with(b"0123456789"), 413, "the task has no room for another");
+    let listed = get(&web, "", &format!("/api/task?id={id}"));
+    assert_eq!(listed["attachments"].as_array().unwrap().len(), 1);
 }
 
 #[test]
