@@ -3,6 +3,7 @@ name = "lists-web"
 version = "0.5.2"
 edition = "2021"
 license = "MIT"
+publish = false
 description = "Self-hosted web interface for Lists: one more device in the sync, reachable from a browser"
 
 [dependencies]

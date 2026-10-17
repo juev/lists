@@ -134,6 +134,7 @@ Core and web server, on any machine with Rust:
 ```sh
 make test    # unit tests, behaviour tests, sync tests, sync over a local WebDAV server
 make lint    # rustfmt and clippy
+make deny    # advisories and licenses of the dependencies (brew install cargo-deny)
 make web     # web/target/release/lists-web
 ```
 

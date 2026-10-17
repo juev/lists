@@ -4,7 +4,7 @@ JAVA_HOME ?= /opt/homebrew/opt/openjdk@21
 ANDROID_HOME ?= $(HOME)/Library/Android/sdk
 export JAVA_HOME ANDROID_HOME
 
-.PHONY: test lint fmt apple apple-run android android-install web clean
+.PHONY: test lint deny fmt apple apple-run android android-install web clean
 
 # --locked: a lockfile that no longer matches Cargo.toml is an error here, as it
 # is in the Docker build, instead of being rewritten on the way.
@@ -15,6 +15,11 @@ test:
 lint:
 	cd core && cargo fmt --check && cargo clippy --locked --all-targets --all-features -- -D warnings
 	cd web && cargo fmt --check && cargo clippy --locked --all-targets --all-features -- -D warnings
+
+# Advisories, licenses and sources of the dependencies (deny.toml).
+deny:
+	cargo deny --manifest-path core/Cargo.toml --config deny.toml check
+	cargo deny --manifest-path web/Cargo.toml --config deny.toml check
 
 fmt:
 	cd core && cargo fmt

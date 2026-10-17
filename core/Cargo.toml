@@ -3,6 +3,7 @@ name = "lists-core"
 version = "0.5.2"
 edition = "2021"
 license = "MIT"
+publish = false
 description = "Shared core of the Lists to-do app: storage, merge, sync, recurrence"
 
 [lib]
