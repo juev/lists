@@ -1836,3 +1836,42 @@ fn r152_tokens_are_limited_and_wrong_ones_count_as_failed_logins() {
         "the password login of that client waits as well"
     );
 }
+
+#[test]
+fn r155_r156_the_export_downloads_as_a_file() {
+    let web = web(Some("secret"));
+    let cookie = login(&web, "secret").unwrap();
+    call(
+        &web,
+        &cookie,
+        json!({ "op": "quickAdd", "text": "в выгрузке", "scope": "inbox" }),
+    );
+    let response = ureq::get(&format!("{}/api/export", web.base))
+        .set("Cookie", &cookie)
+        .call()
+        .unwrap();
+    assert!(response
+        .header("Content-Disposition")
+        .unwrap()
+        .starts_with("attachment; filename=\"Lists-"));
+    assert_eq!(response.content_type(), "application/json");
+    let v: Value = response.into_json().unwrap();
+    assert_eq!(v["format"], "lists");
+    assert_eq!(v["tasks"][0]["title"], "в выгрузке");
+
+    let md = ureq::get(&format!("{}/api/export?format=markdown&list=inbox", web.base))
+        .set("Cookie", &cookie)
+        .call()
+        .unwrap();
+    assert!(md.header("Content-Disposition").unwrap().ends_with(".md\""));
+    assert!(md.into_string().unwrap().contains("## Inbox\n\n- [ ] в выгрузке\n"));
+    assert_eq!(
+        status(
+            ureq::get(&format!("{}/api/export?list=nope", web.base))
+                .set("Cookie", &cookie)
+                .call()
+        ),
+        404
+    );
+    assert_eq!(status(ureq::get(&format!("{}/api/export", web.base)).call()), 401);
+}
