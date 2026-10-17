@@ -100,7 +100,7 @@ A custom rule repeats every N days, weeks, months or years. Weekly rules take a 
 
 Completing a repeating task moves its dates to the next occurrence, reopens its subtasks and adds a record to Completed. After the last occurrence the task completes like any other.
 
-The completion of a repeat can be taken back like any change: ⌘Z on macOS, Undo in the "Moved to the next occurrence" bar or in the menu on Android, Undo or Ctrl+Z in the web interface, or a tap on the mark of the record while it still stands in the view. The task gets back its dates, its reminder and the repeats it had left, the subtasks that were done before are done again, and the record leaves Completed. Once the task has moved on again, or its date was changed, the earlier completion is no longer taken back.
+The completion of a repeat can be taken back like any change: ⌘Z on macOS, Undo in the "Moved to the next occurrence" bar or in the menu on Android, Undo or Ctrl+Z in the web interface, or a tap on the mark of the record, while it still stands in the view or later in Completed and Won't do. The task gets back its dates, its reminder and the repeats it had left, the subtasks that were done before are done again, and the record leaves Completed. Taking a completion back this way is itself a change that can be undone. Once the task has moved on again, or its date was changed, the earlier completion is no longer taken back: its record shows the repeat icon in place of the mark, and the icon does nothing.
 
 On Android the end date of a repeat cannot be set; the web interface offers the presets only.
 
