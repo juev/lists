@@ -1832,6 +1832,57 @@ fn r68_until_the_end_of_the_day_keeps_what_was_completed_today_until_midnight() 
 }
 
 #[test]
+fn r135_today_is_the_day_of_the_zone_the_call_is_made_in() {
+    let d = device();
+    // 22:30 UTC: 01:30 the next day three hours east, 12:30 the same day ten hours west.
+    d.set_now_for_tests("2026-10-04T22:30");
+    let (east, west) = (180, -600);
+    for (title, due) in [("четвёртое", "2026-10-04"), ("пятое", "2026-10-05")] {
+        d.create_task(NewTask {
+            title: title.into(),
+            due: Some(due.into()),
+            ..NewTask::default()
+        })
+        .unwrap();
+    }
+    let today = |zone| {
+        let mut titles = d.in_zone(zone, || view(&d, Scope::Today));
+        titles.sort();
+        titles
+    };
+    assert_eq!(today(east), ["пятое", "четвёртое"]);
+    assert_eq!(today(west), ["четвёртое"]);
+    assert_eq!(d.in_zone(east, || d.counts().unwrap().overdue), 1);
+    assert_eq!(d.in_zone(west, || d.counts().unwrap().overdue), 0);
+
+    let call = |zone| {
+        d.in_zone(zone, || {
+            d.quick_add("позвонить 9:00".into(), None, false, None).unwrap()
+        })
+    };
+    assert_eq!(call(east).due.as_deref(), Some("2026-10-05T09:00"));
+    assert_eq!(call(west).due.as_deref(), Some("2026-10-04T09:00"));
+
+    d.set_keep_done(KeepDone::EndOfDay).unwrap();
+    let task = add(&d, "полить цветы");
+    let done = d.in_zone(east, || d.complete_task(task.id.clone()).unwrap());
+    assert_eq!(
+        done.done.as_deref(),
+        Some("2026-10-05T01:30"),
+        "written on the clock of the zone"
+    );
+    assert_eq!(
+        d.in_zone(east, || d.seconds_until_kept_leaves().unwrap()),
+        Some(22 * 3600 + 30 * 60),
+        "kept until midnight of that zone"
+    );
+    assert!(
+        !view(&d, Scope::Today).contains(&"пятое".to_string()),
+        "outside, the clock is the device's again"
+    );
+}
+
+#[test]
 fn s32_the_time_is_stored_so_that_a_version_that_knows_only_minutes_can_read_it() {
     let d = device();
     let stored = |keep| {

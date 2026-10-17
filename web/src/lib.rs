@@ -37,6 +37,8 @@ const COOKIE: &str = "lists_session";
 /// Request bodies above this are refused; it bounds one uploaded attachment.
 const MAX_BODY: usize = 64 * 1024 * 1024;
 const SESSION_TTL: Duration = Duration::from_secs(30 * 24 * 3600);
+/// R135: no zone is further from UTC than fourteen hours.
+const MAX_ZONE_MINUTES: i32 = 14 * 60;
 /// R134: a login carries a password and nothing more.
 const LOGIN_MAX_BODY: usize = 4 * 1024;
 /// R134: this many failed logins within `LOGIN_WINDOW` and the client is refused until the window frees up.
@@ -807,7 +809,15 @@ impl App {
         if method == Method::Post && !request.headers().iter().any(|h| h.field.equiv("X-Lists")) {
             return fail(400, "missing X-Lists header");
         }
-        let result: Result<Reply, AppError> = (|| {
+        // R135: today and the time of day are the browser's. A request that does not give its zone
+        // is answered in the server's, as before.
+        let zone = request
+            .headers()
+            .iter()
+            .find(|h| h.field.equiv("X-Lists-Zone"))
+            .and_then(|h| h.value.as_str().trim().parse::<i32>().ok())
+            .filter(|minutes| minutes.abs() <= MAX_ZONE_MINUTES);
+        let mut run = || -> Result<Reply, AppError> {
             Ok(match (&method, path.as_str()) {
                 (Method::Get, "/api/overview") => json_reply(200, self.overview()?),
                 (Method::Get, "/api/tasks") => {
@@ -951,7 +961,11 @@ impl App {
                 }
                 _ => fail(404, "not found"),
             })
-        })();
+        };
+        let result = match zone {
+            Some(minutes) => self.store.in_zone(minutes, run),
+            None => run(),
+        };
         result.unwrap_or_else(|e| {
             let code = match e {
                 AppError::NotFound { .. } => 404,
