@@ -140,4 +140,3 @@ enum ClearCompleted: CaseIterable {
         return Calendar.current.date(byAdding: .month, value: -months, to: Date()).map { Moment.string($0, withTime: false) }
     }
 }
-

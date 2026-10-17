@@ -154,7 +154,7 @@ final class FileRowView: NSView, QLPreviewPanelDataSource, QLPreviewPanelDelegat
     }
 
     override func keyDown(with event: NSEvent) {
-        guard event.modifierFlags.intersection([.command, .option, .control]).isEmpty else { return super.keyDown(with: event) }
+        guard event.modifierFlags.isDisjoint(with: [.command, .option, .control]) else { return super.keyDown(with: event) }
         switch event.keyCode {
         case 49: show()
         case 53: actions.cancel()

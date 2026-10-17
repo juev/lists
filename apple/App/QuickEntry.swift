@@ -42,7 +42,7 @@ final class QuickEntryPanel: NSPanel {
     #endif
 
     func toggle() {
-        isVisible ? close() : present()
+        if isVisible { close() } else { present() }
     }
 
     func present() {
