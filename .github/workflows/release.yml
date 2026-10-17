@@ -340,3 +340,14 @@ jobs:
             gh release create "$tag" dist/* --verify-tag --title "Lists $VERSION" \
               --notes-file "$RUNNER_TEMP/notes.md" --generate-notes "${release_flags[@]}"
           fi
+      # What a user downloads must match the published checksums, and the release must hold
+      # exactly the files that were built.
+      - name: Check the published files against SHA256SUMS
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          published="$RUNNER_TEMP/published"
+          gh release download "$GITHUB_REF_NAME" --dir "$published"
+          diff <(ls dist) <(ls "$published")
+          (cd "$published" && sha256sum --check --strict SHA256SUMS)
