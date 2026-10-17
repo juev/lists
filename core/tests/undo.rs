@@ -261,3 +261,32 @@ fn r131_undo_itself_is_not_taken_back_and_settings_are_not_in_the_history() {
     );
     assert!(!d.can_undo());
 }
+
+#[test]
+fn r131_the_revision_grows_with_each_action_and_stays_when_a_text_edit_joins_the_last() {
+    let d = device();
+    assert_eq!(d.undo_revision(), 0);
+    let t = add(&d, "а");
+    assert_eq!(d.undo_revision(), 1);
+    // As the app on macOS makes every change: one group, whatever it holds.
+    for title in ["аб", "абв"] {
+        d.begin_group();
+        d.set_title(t.id.clone(), title.into()).unwrap();
+        d.end_group();
+    }
+    assert_eq!(d.undo_revision(), 2, "the second edit of the title joins the first");
+    d.begin_group();
+    d.end_group();
+    assert_eq!(d.undo_revision(), 2, "an empty group is no action");
+    d.begin_group();
+    d.set_due(t.id.clone(), Some("2026-10-06".into())).unwrap();
+    d.set_priority(t.id.clone(), Priority::High).unwrap();
+    d.end_group();
+    assert_eq!(d.undo_revision(), 3);
+    d.undo().unwrap();
+    assert_eq!(d.undo_revision(), 3, "undo takes nothing in");
+    let back = d.task(t.id.clone()).unwrap();
+    assert_eq!((back.due, back.priority), (None, Priority::None));
+    d.undo().unwrap();
+    assert_eq!(d.task(t.id).unwrap().title, "а");
+}

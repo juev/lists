@@ -152,18 +152,24 @@ pub(crate) struct History {
     stacks: HashMap<String, Vec<Action>>,
     /// Actions on several tasks being put together (`Store::begin_group`).
     open: HashMap<String, Action>,
+    /// How many actions each history has taken in (`Store::undo_revision`).
+    revisions: HashMap<String, u64>,
 }
 
 impl History {
     fn push(&mut self, actor: String, step: Step) {
-        if let Some(group) = self.open.get_mut(&actor) {
-            group.push(step);
-            return;
+        match self.open.get_mut(&actor) {
+            Some(group) => group.push(step),
+            None => self.add(actor, vec![step]),
         }
-        let stack = self.stacks.entry(actor).or_default();
-        if let (Some(text), Some([last])) = (&step.text, stack.last_mut().map(Vec::as_mut_slice)) {
-            if last.text.as_ref() == Some(text) {
-                for r in step.registers {
+    }
+
+    /// Puts an action on top of the history, or into the one on top when both edit the same text.
+    fn add(&mut self, actor: String, mut action: Action) {
+        let stack = self.stacks.entry(actor.clone()).or_default();
+        if let ([step], Some([last])) = (action.as_mut_slice(), stack.last_mut().map(Vec::as_mut_slice)) {
+            if step.text.is_some() && last.text == step.text {
+                for r in std::mem::take(&mut step.registers) {
                     match last
                         .registers
                         .iter_mut()
@@ -176,10 +182,11 @@ impl History {
                 return;
             }
         }
-        stack.push(vec![step]);
+        stack.push(action);
         if stack.len() > DEPTH {
             stack.remove(0);
         }
+        *self.revisions.entry(actor).or_default() += 1;
     }
 
     /// A register undo wrote has a new stamp: a step lower in any history that left the old one
@@ -265,16 +272,16 @@ impl Store {
 
     pub fn end_group(&self) {
         let mut history = self.history();
-        let Some(group) = history.open.remove(&actor()) else {
-            return;
-        };
-        if group.is_empty() {
-            return;
+        let actor = actor();
+        if let Some(group) = history.open.remove(&actor).filter(|g| !g.is_empty()) {
+            history.add(actor, group);
         }
-        let stack = history.stacks.entry(actor()).or_default();
-        stack.push(group);
-        if stack.len() > DEPTH {
-            stack.remove(0);
-        }
+    }
+
+    /// Grows by one with every action that goes into this history, and stays when an edit of a text
+    /// joins the one before. An app that keeps an undo stack of its own (macOS) compares it before
+    /// and after a change to know whether to put a step there.
+    pub fn undo_revision(&self) -> u64 {
+        self.history().revisions.get(&actor()).copied().unwrap_or(0)
     }
 }
