@@ -89,6 +89,15 @@
     <string name="backups_restore_merge">Восстановить и объединить с хранилищем</string>
     <string name="backups_restore_replace">Восстановить и заменить данные хранилища</string>
     <string name="backups_restore_confirm">Восстановить</string>
+    <string name="backups_storage">В хранилище синхронизации</string>
+    <string name="backups_storage_keep">Хранить копии в хранилище синхронизации</string>
+    <string name="backups_storage_hint">В копии в хранилище задачи и списки; вложения в хранилище уже есть. Копия создаётся по расписанию выше, при следующей синхронизации. Нажмите на копию, чтобы восстановить её.</string>
+    <string name="backups_storage_failed">Последняя копия не попала в хранилище: %1$s</string>
+    <string name="backups_storage_last">Последняя копия в хранилище: %1$s</string>
+    <string name="backups_storage_no_own">В хранилище копий этого устройства пока нет.</string>
+    <string name="backups_storage_none">В хранилище копий нет.</string>
+    <string name="backups_storage_this">это устройство</string>
+    <string name="backups_storage_other">другое устройство</string>
     <string name="save_and_sync">Сохранить и синхронизировать</string>
     <string name="sync_both_title">Задачи есть и на этом устройстве, и в хранилище</string>
     <string name="sync_both_hint">«Объединить» сохраняет задачи обеих сторон. Два других варианта оставляют одну сторону и заменяют другую.</string>

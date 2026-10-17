@@ -90,6 +90,15 @@
     <string name="backups_restore_merge">Restore and merge with the storage</string>
     <string name="backups_restore_replace">Restore and replace the data of the storage</string>
     <string name="backups_restore_confirm">Restore</string>
+    <string name="backups_storage">In the sync storage</string>
+    <string name="backups_storage_keep">Keep copies in the sync storage</string>
+    <string name="backups_storage_hint">A copy in the storage holds the tasks and the lists; the attachments are in the storage already. It is made on the schedule above, with the next sync. Tap a copy to restore it.</string>
+    <string name="backups_storage_failed">The last copy did not reach the storage: %1$s</string>
+    <string name="backups_storage_last">Last copy in the storage: %1$s</string>
+    <string name="backups_storage_no_own">No copy of this device in the storage yet.</string>
+    <string name="backups_storage_none">No copies in the storage.</string>
+    <string name="backups_storage_this">this device</string>
+    <string name="backups_storage_other">another device</string>
     <string name="save_and_sync">Save and sync</string>
     <string name="sync_both_title">This device and the storage both hold tasks</string>
     <string name="sync_both_hint">Merge keeps the tasks of both sides. The other two choices keep one side and replace the other.</string>
