@@ -108,6 +108,12 @@ pub struct Store {
     /// S45: own log files that make a snapshot whatever they weigh.
     pub(crate) compact_after: Mutex<u32>,
     pub(crate) sync_password: Mutex<Option<String>>,
+    /// S58: the passphrase of an encrypted storage. Like the password, never on disk.
+    pub(crate) sync_passphrase: Mutex<Option<String>>,
+    /// S54: the storage whose `vault.json` was read last, and what it said.
+    pub(crate) sealed: Mutex<Option<(String, crate::sync::Sealing)>>,
+    /// S54: the data key opened last, so that the key derivation does not run on every look.
+    pub(crate) vault_key: Mutex<Option<crate::sync::VaultKey>>,
     /// The storage this process has already checked the format of and listed the snapshots of.
     pub(crate) storage_seen: Mutex<Option<String>>,
     /// Names in the log of the sync folder when it was last looked at.
@@ -957,6 +963,9 @@ impl Store {
             log_lock: Mutex::new(()),
             compact_after: Mutex::new(256),
             sync_password: Mutex::new(None),
+            sync_passphrase: Mutex::new(None),
+            sealed: Mutex::new(None),
+            vault_key: Mutex::new(None),
             storage_seen: Mutex::new(None),
             folder_seen: Mutex::new(None),
             push_retry: Mutex::new(std::time::Duration::from_secs(10)),

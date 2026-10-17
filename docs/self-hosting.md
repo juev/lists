@@ -25,7 +25,7 @@ The image holds only the server, linked statically, and a minimal init; there is
 
 `GET /healthz` answers `ok` without a login, for the health check of a reverse proxy or a monitor. The image checks itself with `lists-web healthcheck` every 30 seconds, and `docker ps` shows the container as `healthy` or `unhealthy`.
 
-The repository carries a ready [`compose.yaml`](../compose.yaml) that reads its settings from an `.env` file; copy [`.env.example`](../.env.example) to `.env` and fill it in. Git ignores `.env`, so the passwords in it are not committed. The file sets the version of the image (`LISTS_VERSION`), the port, the password and the settings of WebDAV sync and of the push server. The Compose file also sets `LISTS_TRUST_PROXY=1`, since it publishes the port for a reverse proxy only, and runs the container with a read-only root filesystem, without capabilities and with `no-new-privileges`. The other variables (`LISTS_SYNC_PATH`, `LISTS_WEB_URL`, `LISTS_PUSH_TOKEN`, `LISTS_OIDC_*`) are not passed on by it and need a line of their own under `environment`. A Compose file of your own, syncing through WebDAV:
+The repository carries a ready [`compose.yaml`](../compose.yaml) that reads its settings from an `.env` file; copy [`.env.example`](../.env.example) to `.env` and fill it in. Git ignores `.env`, so the passwords in it are not committed. The file sets the version of the image (`LISTS_VERSION`), the port, the password and the settings of WebDAV sync, including the passphrase of an encrypted storage, and of the push server. The Compose file also sets `LISTS_TRUST_PROXY=1`, since it publishes the port for a reverse proxy only, and runs the container with a read-only root filesystem, without capabilities and with `no-new-privileges`. The other variables (`LISTS_SYNC_PATH`, `LISTS_WEB_URL`, `LISTS_PUSH_TOKEN`, `LISTS_OIDC_*`) are not passed on by it and need a line of their own under `environment`. A Compose file of your own, syncing through WebDAV:
 
 ```yaml
 services:
@@ -80,6 +80,7 @@ Everything is configured through environment variables, so that no password show
 | `LISTS_SYNC_URL` | storage address for `webdav` and `caldav` | none |
 | `LISTS_SYNC_USER` | storage user name | none |
 | `LISTS_SYNC_PASSWORD` | storage password | none |
+| `LISTS_SYNC_PASSPHRASE` | passphrase of a WebDAV or folder storage encrypted on another device; the server opens such a storage but does not encrypt one itself; see [Sync](usage.md#encrypting-the-storage) | none |
 | `LISTS_SYNC_PATH` | directory for `folder` | none |
 | `LISTS_PUSH_SERVER` | address of an [ntfy](https://ntfy.sh) server through which other devices ask this one to sync at once; see [Sync](usage.md#sync) | none |
 | `LISTS_PUSH_TOKEN` | access token for that server, when it requires sign-in; see [Sync](usage.md#an-ntfy-server-that-requires-sign-in) | none |

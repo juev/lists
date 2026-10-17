@@ -574,3 +574,59 @@ fn s49_a_server_that_answers_403_for_a_missing_folder_gets_the_folders() {
     assert_eq!(tree(&dav.storage().join("v1")), ["vault.json"]);
     assert_eq!(b.sync_attachments().unwrap().downloaded, 1);
 }
+
+/// S54–S56 over HTTP: the storage is encrypted from the settings, the other
+/// device enters the passphrase, and nothing on the server reads in the clear.
+#[test]
+fn s54_two_devices_converge_through_an_encrypted_webdav_storage() {
+    let dav = start();
+    let (a, b) = (device(), device());
+    connect(&a, &dav, "secret");
+    connect(&b, &dav, "secret");
+    let t = add(&a, "зашифровано на сервере");
+    let src = tempfile::tempdir().unwrap();
+    let file = src.path().join("plan.bin");
+    let bytes: Vec<u8> = (0..150_000u32).map(|i| (i % 253) as u8).collect();
+    std::fs::write(&file, &bytes).unwrap();
+    let attached = a
+        .add_attachment(t.id.clone(), file.to_string_lossy().into_owned(), None)
+        .unwrap();
+    a.sync_now().unwrap();
+    a.sync_attachments().unwrap();
+    b.sync_now().unwrap();
+
+    a.encrypt_storage("фраза-пароль".into()).unwrap();
+    assert!(b.sync_now().unwrap_err().to_string().contains("enter its passphrase"));
+    b.set_sync_passphrase(Some("фраза-пароль".into()));
+    b.sync_now().unwrap();
+    assert_eq!(b.sync_attachments().unwrap().downloaded, 1);
+    let got = b.attachments(t.id.clone()).unwrap();
+    assert_eq!(std::fs::read(got[0].local_path.as_ref().unwrap()).unwrap(), bytes);
+    let u = add(&b, "ответ с B");
+    b.sync_now().unwrap();
+    a.sync_now().unwrap();
+    assert_eq!(a.task(u.id.clone()).unwrap().title, "ответ с B");
+
+    let mut stack = vec![dav.storage()];
+    let mut seen = 0;
+    while let Some(dir) = stack.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            let name = path.file_name().unwrap().to_string_lossy().into_owned();
+            if path.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            assert!(!name.contains(&attached.sha256), "{name}");
+            let data = std::fs::read(&path).unwrap();
+            // `vault.json` (here and the one that says the storage moved, S49), the empty marks
+            // and what the server keeps next to the files.
+            if name == "vault.json" || name.ends_with(".snap") || name.starts_with('.') {
+                continue;
+            }
+            assert!(data.starts_with(b"LSE1"), "{} is not sealed", path.display());
+            seen += 1;
+        }
+    }
+    assert!(seen >= 3, "logs, a snapshot and the content");
+}

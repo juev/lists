@@ -59,6 +59,8 @@ pub struct Config {
     pub oidc: Option<OidcConfig>,
     pub sync: SyncConfig,
     pub sync_password: Option<String>,
+    /// S58: the passphrase of an encrypted storage.
+    pub sync_passphrase: Option<String>,
     /// ntfy server through which other devices ask this one to sync.
     pub push_server: Option<String>,
     /// Access token for that server, when it requires sign-in (S27).
@@ -1186,6 +1188,7 @@ pub fn start(config: Config) -> Result<Running, Box<dyn std::error::Error>> {
     })?;
     store.set_sync_config(config.sync)?;
     store.set_sync_password(config.sync_password);
+    store.set_sync_passphrase(config.sync_passphrase);
     store.set_push_server(config.push_server)?;
     store.set_push_token(config.push_token);
     let server =
