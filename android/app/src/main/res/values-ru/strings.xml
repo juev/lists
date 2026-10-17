@@ -99,6 +99,7 @@
     <string name="configure">Настроить</string>
     <string name="lists">Списки</string>
     <string name="delete_list">Удалить список</string>
+    <string name="delete_list_question">Удалить список «%1$s» и отправить его задачи в корзину?</string>
     <string name="tags">Теги</string>
     <string name="archive">Архив</string>
     <string name="new_list">Новый список</string>

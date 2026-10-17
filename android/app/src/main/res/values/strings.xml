@@ -100,6 +100,7 @@
     <string name="configure">Configure</string>
     <string name="lists">Lists</string>
     <string name="delete_list">Delete list</string>
+    <string name="delete_list_question">Delete the list “%1$s” and move its tasks to the trash?</string>
     <string name="tags">Tags</string>
     <string name="archive">Archived lists</string>
     <string name="new_list">New list</string>

@@ -947,6 +947,7 @@ fun ListDialog(list: TaskList?, model: MainViewModel, onDismiss: () -> Unit) {
     var priority by remember { mutableStateOf(list?.defaultPriority ?: Priority.NONE) }
     var dueToday by remember { mutableStateOf(list?.defaultDueToday ?: false) }
     var archived by remember { mutableStateOf(list?.archived ?: false) }
+    var confirmDelete by remember { mutableStateOf(false) }
     val sorts = listOf(SortMode.MANUAL to str(R.string.sort_manual), SortMode.DUE to str(R.string.sort_due), SortMode.PRIORITY to str(R.string.sort_priority), SortMode.TITLE to str(R.string.sort_title))
 
     FormDialog(
@@ -977,7 +978,7 @@ fun ListDialog(list: TaskList?, model: MainViewModel, onDismiss: () -> Unit) {
                 SwitchRow(str(R.string.due_today), dueToday) { dueToday = it }
                 if (list != null && !inbox) {
                     SwitchRow(str(R.string.archived_switch), archived) { archived = it }
-                    TextButton(onClick = { onDismiss(); model.select(uniffi.lists_core.Scope.Inbox); model.act { it.deleteList(list.id) } }) {
+                    TextButton(onClick = { confirmDelete = true }) {
                         Text(str(R.string.delete_list), color = MaterialTheme.colorScheme.error)
                     }
                 }
@@ -1002,6 +1003,19 @@ fun ListDialog(list: TaskList?, model: MainViewModel, onDismiss: () -> Unit) {
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text(str(R.string.cancel)) } },
     )
+    // R136: a list goes only once the user agrees, since undo does not bring it back (R131).
+    if (confirmDelete && list != null) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            text = { Text(str(R.string.delete_list_question, list.displayName())) },
+            confirmButton = {
+                TextButton(onClick = { confirmDelete = false; onDismiss(); model.deleteList(list.id) }) {
+                    Text(str(R.string.delete), color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text(str(R.string.cancel)) } },
+        )
+    }
 }
 
 /** R127: a new project, its title only; the list is taken from the view. */
