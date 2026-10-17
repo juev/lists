@@ -9,6 +9,7 @@ import org.evsyukov.lists.logError
 import org.evsyukov.lists.logged
 import org.evsyukov.lists.EntryPrefs
 import org.evsyukov.lists.ListsApp
+import org.evsyukov.lists.Secrets
 import org.evsyukov.lists.dateLabel
 import org.evsyukov.lists.dayHeading
 import org.evsyukov.lists.dayOf
@@ -32,6 +33,8 @@ import uniffi.lists_core.NewTask
 import uniffi.lists_core.SavedFilter
 import uniffi.lists_core.Scope
 import uniffi.lists_core.Store
+import uniffi.lists_core.SyncConfig
+import uniffi.lists_core.SyncSide
 import uniffi.lists_core.SyncStatus
 import uniffi.lists_core.TagCount
 import uniffi.lists_core.TaskItem
@@ -144,6 +147,9 @@ fun describe(error: Throwable): String = when (error) {
     is AppException.TooLarge -> error.msg
     else -> error.message ?: error.toString()
 }
+
+/** What the settings of sync keep outside the database: the password of the storage and the sign-in for sending nudges. */
+data class SyncSecrets(val password: String?, val pushServer: String?, val pushToken: String?)
 
 class MainViewModel : ViewModel() {
     private val _state = MutableStateFlow(UiState())
@@ -470,5 +476,42 @@ class MainViewModel : ViewModel() {
 
     fun sync() {
         viewModelScope.launch { Repo.sync() }
+    }
+
+    /** S52: the save of the settings of sync under way; a second one does not start meanwhile. */
+    private var joining: Job? = null
+
+    /**
+     * S52: stores where to sync and which side to keep there (S36) in the scope of the model, so that
+     * closing the settings does not cut it short half way. The password and the token go in before the
+     * data of this device is replaced, and the former ones come back when the storage is not saved.
+     */
+    suspend fun joinStorage(config: SyncConfig, side: SyncSide, secrets: SyncSecrets): Result<Unit> {
+        if (joining?.isActive == true) return Result.failure(IllegalStateException(str(R.string.sync_still_saving)))
+        val job = viewModelScope.async(Dispatchers.IO) {
+            val context = ListsApp.instance
+            val store = Repo.store
+            val before = SyncSecrets(Secrets.load(context), runCatching { store.pushSendServer() }.getOrNull(), Secrets.load(context, Secrets.PUSH_TOKEN))
+            fun keep(s: SyncSecrets) {
+                Secrets.save(context, s.password)
+                store.setSyncPassword(s.password)
+                store.setPushSendServer(s.pushServer)
+                Secrets.save(context, s.pushToken, Secrets.PUSH_TOKEN)
+                store.setPushToken(s.pushToken)
+            }
+            // Replacing a side waits for a run that is under way: not on the main thread.
+            runCatching {
+                keep(secrets)
+                store.joinStorage(config, side)
+                // With sync switched off nothing runs, so the main screen would keep its icon and the pull (R67).
+                Repo.revision.update { it + 1 }
+                sync()
+            }.onFailure {
+                // A storage stored before the failure goes with the new sign-in.
+                if (runCatching { store.syncConfig() }.getOrNull() != config) runCatching { keep(before) }
+            }
+        }
+        joining = job
+        return job.await()
     }
 }

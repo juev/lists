@@ -191,6 +191,7 @@
     <string name="collapse_card">Collapse</string>
     <string name="file">File</string>
     <string name="added">Added</string>
+    <string name="sync_still_saving">The settings of sync are still being saved.</string>
     <string name="created_not_attached">Created, but not attached: %1$s</string>
     <string name="not_attached">Not attached: %1$s</string>
     <string name="done_notice">Task completed</string>
