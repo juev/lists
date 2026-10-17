@@ -1,5 +1,19 @@
 package org.evsyukov.lists.ui
 
+import androidx.compose.animation.core.animate
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.foundation.layout.offset
+import kotlin.math.roundToInt
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.activity.compose.BackHandler
@@ -83,8 +97,6 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
-import androidx.compose.material3.SwipeToDismissBox
-import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
@@ -95,7 +107,6 @@ import androidx.compose.material3.pulltorefresh.pullToRefresh
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.material3.rememberModalBottomSheetState
-import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -740,41 +751,73 @@ private fun Modifier.edgeSwipe(onSwipe: () -> Unit) = pointerInput(Unit) {
     }
 }
 
-/** Swipe right to complete, left to set the due date. Neither removes the row by itself. */
-@OptIn(ExperimentalMaterial3Api::class)
+/** What letting go of a swipe does (R132): it acts only past the threshold, however fast the finger moved. */
+enum class Swipe { Complete, Due }
+
+/** The share of the width of the row a swipe has to pass to act (R132). */
+const val SWIPE_THRESHOLD = 0.4f
+
+fun swipeAction(offset: Float, width: Float): Swipe? = when {
+    width <= 0f -> null
+    offset >= width * SWIPE_THRESHOLD -> Swipe.Complete
+    offset <= -width * SWIPE_THRESHOLD -> Swipe.Due
+    else -> null
+}
+
+/**
+ * Swipe right to complete, left to set the due date. Neither removes the row by itself. R132: the icon under the row
+ * grows pale with the finger and turns bright with a vibration at the threshold; only letting go past it acts.
+ */
 @Composable
 private fun SwipeRow(task: TaskItem, state: UiState, onToggle: () -> Unit, onOpen: () -> Unit, onPickDue: () -> Unit, model: MainViewModel) {
     val locked = task.deleted || task.isLog
-    // The state keeps the callback it was made with: it must reach the task as it is now, not as it was then.
+    // The drag keeps the callback it was made with: it must reach the task as it is now, not as it was then.
     val toggle by rememberUpdatedState(onToggle)
     val pickDue by rememberUpdatedState(onPickDue)
-    val swipe = rememberSwipeToDismissBoxState(
-        confirmValueChange = { value ->
-            when (value) {
-                SwipeToDismissBoxValue.StartToEnd -> toggle()
-                SwipeToDismissBoxValue.EndToStart -> pickDue()
-                SwipeToDismissBoxValue.Settled -> {}
-            }
-            false
-        },
-    )
-    SwipeToDismissBox(
-        state = swipe,
-        enableDismissFromStartToEnd = !locked,
-        enableDismissFromEndToStart = !locked,
-        backgroundContent = {
-            val toEnd = swipe.dismissDirection == SwipeToDismissBoxValue.StartToEnd
-            // R95: a coloured tile with the icon of the action.
+    var width by remember { mutableIntStateOf(0) }
+    var offset by remember { mutableFloatStateOf(0f) }
+    val armed = swipeAction(offset, width.toFloat()) != null
+    val haptic = LocalHapticFeedback.current
+    LaunchedEffect(armed) { if (armed) haptic.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate) }
+    Box(Modifier.fillMaxWidth().onSizeChanged { width = it.width }.clipToBounds()) {
+        if (offset != 0f) {
+            val toEnd = offset > 0
+            val progress = if (width > 0) (abs(offset) / (width * SWIPE_THRESHOLD)).coerceIn(0f, 1f) else 0f
+            // R95: a coloured tile with the icon of the action, pale until the swipe would act.
             Row(
-                Modifier.fillMaxSize().background(viewTint(if (toEnd) ViewTint.Green else ViewTint.Yellow)).padding(horizontal = 20.dp),
+                Modifier.matchParentSize()
+                    .background(viewTint(if (toEnd) ViewTint.Green else ViewTint.Yellow).copy(alpha = if (armed) 1f else 0.25f))
+                    .padding(horizontal = 20.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = if (toEnd) Arrangement.Start else Arrangement.End,
             ) {
-                Icon(if (toEnd) Icons.Outlined.Check else Icons.Outlined.CalendarMonth, null, tint = if (toEnd) Color.White else Color.Black)
+                Icon(
+                    if (toEnd) Icons.Outlined.Check else Icons.Outlined.CalendarMonth,
+                    null,
+                    tint = (if (toEnd && armed) Color.White else Color.Black).copy(alpha = if (armed) 1f else 0.2f + 0.5f * progress),
+                    modifier = Modifier.scale(if (armed) 1.3f else 0.6f + 0.4f * progress),
+                )
             }
-        },
-    ) {
-        Surface { TaskRow(task, state, onToggle, onOpen, model, showOrigin = state.showsOrigin(), selectable = true) }
+        }
+        Surface(
+            Modifier
+                .offset { IntOffset(offset.roundToInt(), 0) }
+                .then(
+                    if (locked) Modifier
+                    else Modifier.draggable(
+                        orientation = Orientation.Horizontal,
+                        state = rememberDraggableState { delta -> offset += delta },
+                        onDragStopped = {
+                            when (swipeAction(offset, width.toFloat())) {
+                                Swipe.Complete -> toggle()
+                                Swipe.Due -> pickDue()
+                                null -> {}
+                            }
+                            animate(offset, 0f) { value, _ -> offset = value }
+                        },
+                    )
+                ),
+        ) { TaskRow(task, state, onToggle, onOpen, model, showOrigin = state.showsOrigin(), selectable = true) }
     }
 }
 
