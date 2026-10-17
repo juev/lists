@@ -1182,7 +1182,8 @@ private fun Drawer(
                 Box {
                     // R126: the row is a large task, its mark completes the project. A project is not a row of its list (R120).
                     DrawerItem(
-                        project.title, Icons.Outlined.Folder, project.subtasksTotal - project.subtasksDone, state.scope == scope,
+                        project.title, Icons.Outlined.Folder, 0u, state.scope == scope,
+                        counter = projectCounter(project.subtasksDone, project.subtasksTotal),
                         onLong = { menu = true },
                         leading = {
                             ProjectMark(project.subtasksDone, project.subtasksTotal, state.list(project.listId)?.tint() ?: MaterialTheme.colorScheme.primary) {
@@ -1232,7 +1233,13 @@ private fun DrawerHeading(text: String) {
     Text(text, Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }
 
-/** A row of the panel of lists. A long press opens the settings of what it shows; there is no gear at the row (R95). */
+/** R30: the counter of a project in the drawer, "done/total", shown for an empty project as well (R127). */
+internal fun projectCounter(done: UInt, total: UInt): String = "$done/$total"
+
+/**
+ * A row of the panel of lists. A long press opens the settings of what it shows; there is no gear at the row (R95).
+ * [counter] replaces [count] when the row shows a text of its own, as a project does.
+ */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun DrawerItem(
@@ -1242,6 +1249,7 @@ private fun DrawerItem(
     selected: Boolean,
     alert: Boolean = false,
     tint: Color? = null,
+    counter: String? = null,
     onLong: (() -> Unit)? = null,
     leading: (@Composable () -> Unit)? = null,
     onClick: () -> Unit,
@@ -1271,8 +1279,9 @@ private fun DrawerItem(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-        if (count > 0u) {
-            Text("$count", style = MaterialTheme.typography.labelLarge, color = if (alert) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
+        val shown = counter ?: if (count > 0u) "$count" else null
+        if (shown != null) {
+            Text(shown, style = MaterialTheme.typography.labelLarge, color = if (alert) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
