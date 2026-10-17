@@ -22,6 +22,9 @@ services:
       LISTS_SYNC_PASSWORD: ${LISTS_SYNC_PASSWORD:-}
       LISTS_SYNC_PASSPHRASE: ${LISTS_SYNC_PASSPHRASE:-}
       LISTS_PUSH_SERVER: ${LISTS_PUSH_SERVER:-}
+      # The address the browser sees, and the contact for Web Push (R146).
+      LISTS_WEB_URL: ${LISTS_WEB_URL:-}
+      LISTS_VAPID_SUBJECT: ${LISTS_VAPID_SUBJECT:-}
       # R136: attachment limits of this server, in megabytes; 0 disables one.
       LISTS_MAX_FILE_MB: ${LISTS_MAX_FILE_MB:-512}
       LISTS_MAX_TASK_MB: ${LISTS_MAX_TASK_MB:-2048}
