@@ -201,7 +201,7 @@ thread_local! {
 }
 
 impl Store {
-    /// R144: what came due after `since` and by `until` (`YYYY-MM-DDTHH:MM[:SS]`, local time),
+    /// R146: what came due after `since` and by `until` (`YYYY-MM-DDTHH:MM[:SS]`, local time),
     /// earliest first. The web server sends these; it has no system to schedule notifications
     /// with. The caller gives both ends, so that windows which follow each other neither overlap
     /// nor leave a gap. A moment that cannot be read gives nothing.

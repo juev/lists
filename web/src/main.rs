@@ -21,7 +21,7 @@
 //! LISTS_PUSH_TOKEN=tk_…         access token for that server, when it requires sign-in
 //! LISTS_MAX_FILE_MB=512         R140: the largest attachment this server takes; 0 means no limit
 //! LISTS_MAX_TASK_MB=2048        R140: the most all attachments of one task may take here; 0 means no limit
-//! LISTS_VAPID_SUBJECT=mailto:…  R146: the contact push services see for this server; LISTS_WEB_URL by default
+//! LISTS_VAPID_SUBJECT=mailto:…  R148: the contact push services see for this server; LISTS_WEB_URL by default
 //! ```
 //!
 //! `lists-web healthcheck` asks the server on LISTS_WEB_LISTEN whether it answers and exits

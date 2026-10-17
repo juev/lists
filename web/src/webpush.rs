@@ -1,5 +1,5 @@
 //! Web Push on the wire: the message encrypted for one browser (`aes128gcm`, RFC 8291) and the
-//! request signed for the push service (VAPID, RFC 8292). Rules: R146 in docs/specs/product.md.
+//! request signed for the push service (VAPID, RFC 8292). Rules: R148 in docs/specs/product.md.
 
 use std::path::Path;
 
@@ -203,7 +203,7 @@ mod tests {
     }
 
     #[test]
-    fn r146_message_matches_the_example_of_rfc_8291() {
+    fn r147_message_matches_the_example_of_rfc_8291() {
         let ua_public = d("BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcx aOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4");
         let sender = SecretKey::from_slice(&d("yfWPiYE-n46HLnH0KqZOF1fJJU3MYrct3AELtAQ-oRw")).unwrap();
         let salt: [u8; 16] = d("DGv6ra1nlYgDCS1FRnbzlw").try_into().unwrap();
@@ -229,7 +229,7 @@ mod tests {
     }
 
     #[test]
-    fn r146_each_message_has_its_own_key_and_salt() {
+    fn r147_each_message_has_its_own_key_and_salt() {
         let browser = SecretKey::random(&mut OsRng);
         let public = browser.public_key().to_encoded_point(false);
         let (a, b) = (
@@ -247,7 +247,7 @@ mod tests {
     }
 
     #[test]
-    fn r146_the_key_is_made_once_and_signs_for_the_origin() {
+    fn r147_the_key_is_made_once_and_signs_for_the_origin() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("key");
         let vapid = Vapid::load_or_create(&path, "mailto:me@example.org".into()).unwrap();

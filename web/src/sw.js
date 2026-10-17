@@ -1,5 +1,5 @@
-// The service worker of the web interface. It shows what the server sends through Web Push (R144)
-// and keeps the page for when the server cannot be reached (R147). Answers of `/api/` are never kept.
+// The service worker of the web interface. It shows what the server sends through Web Push (R146)
+// and keeps the page for when the server cannot be reached (R149). Answers of `/api/` are never kept.
 "use strict";
 const CACHE = "lists-shell-1";
 const SHELL = ["/", "/manifest.json", "/icon.svg", "/icon-32.png", "/icon-180.png", "/icon-192.png", "/icon-512.png"];

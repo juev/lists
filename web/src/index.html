@@ -228,7 +228,7 @@ const state = { fetching: {}, filterEdit: null, notifyEdit: false, push: null, s
 const root = document.getElementById("root");
 
 // R135: the server takes today and the time of day from the zone of the browser, in minutes east of UTC.
-// R147: no answer, or a proxy that has no server behind it, is an error with `offline` set.
+// R149: no answer, or a proxy that has no server behind it, is an error with `offline` set.
 async function api(path, options = {}) {
   const unreachable = () => { toast(t("The server cannot be reached.")); return Object.assign(new Error("offline"), { offline: true }); };
   let res;
@@ -691,7 +691,7 @@ function render() {
           keepChoices(o.keepDone).map(([v, n]) => $("option", { value: v, selected: o.keepDone === v }, n)))),
       $("button", { class: "nav", style: "color:var(--muted)", onclick: openNotify }, t("Notifications…")),
       $("button", { class: "nav", style: "color:var(--muted)", onclick: () => importer.click() }, t("Import…")), importer,
-      // R146: a browser that signs out stops getting notifications first.
+      // R148: a browser that signs out stops getting notifications first.
       $("button", { class: "nav", style: "color:var(--muted)", onclick: async () => { await pushOff().catch(() => {}); api("/api/logout", { method: "POST", headers: { "X-Lists": "1" } }).then(showLogin); } }, t("Sign out"))),
     $("div", { id: "shade", onclick: () => { state.drawer = false; render(); } }),
     $("div", { id: "main" },
@@ -735,7 +735,7 @@ function clearCompleted() {
   } }, $("option", { value: "" }, t("Clear…")), choices.map(c => $("option", { value: c[0] }, t(c[1]))));
 }
 
-// R144–R146: the notifications of this browser. The subscription is the browser's; the server keeps
+// R146–R148: the notifications of this browser. The subscription is the browser's; the server keeps
 // it with the settings and the zone, and sends what comes due.
 const zoneInfo = () => ({ zone: Intl.DateTimeFormat().resolvedOptions().timeZone || "", offset: -new Date().getTimezoneOffset() });
 const keyBytes = text => Uint8Array.from(atob(text.replace(/-/g, "+").replace(/_/g, "/")), c => c.charCodeAt(0));
@@ -743,7 +743,7 @@ const postJson = (path, body) => api(path, { method: "POST", headers: { "Content
 const subscribeOnServer = (sub, extra = {}) => postJson("/api/notifications/subscribe", { ...sub.toJSON(), ...zoneInfo(), ...extra });
 const pushRegistration = async () => ("serviceWorker" in navigator ? navigator.serviceWorker.getRegistration() : null);
 
-// R145: what the form can offer: a reason why not, or the subscription and its settings.
+// R147: what the form can offer: a reason why not, or the subscription and its settings.
 async function pushState() {
   if (!isSecureContext) return { reason: "Notifications work over HTTPS only." };
   if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) {
@@ -779,7 +779,7 @@ async function pushOff() {
   }
   if (state.push) state.push = { sub: null, settings: null };
 }
-// R146: an open page gives its zone again, so the server follows a move to another zone.
+// R148: an open page gives its zone again, so the server follows a move to another zone.
 async function refreshPush() {
   try {
     const reg = await pushRegistration();
@@ -813,7 +813,7 @@ function notifyForm() {
     $("div", { class: "chips" }, $("button", { class: "link", onclick: () => { state.notifyEdit = false; render(); } }, t("Close"))));
 }
 
-// R147: without the server the page says so, and offers to look again; it shows no stale data.
+// R149: without the server the page says so, and offers to look again; it shows no stale data.
 function lost(e) { if (e && e.offline) showOffline(); }
 function showOffline() {
   root.replaceChildren($("div", { class: "empty", style: "margin-top:15vh" },
@@ -847,10 +847,10 @@ function writeHash() {
 }
 document.documentElement.lang = locale;
 readHash();
-// R147: the worker keeps the page for when the server cannot be reached; it needs HTTPS or localhost.
+// R149: the worker keeps the page for when the server cannot be reached; it needs HTTPS or localhost.
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
 load().then(refreshPush, lost);
-// A click on a notification moves an open page to its task (R144).
+// A click on a notification moves an open page to its task (R146).
 addEventListener("hashchange", () => { readHash(); load().catch(lost); });
 // Changes made on other devices arrive through the server's own sync.
 setInterval(() => { if (!document.hidden && state.overview && !state.typing) load().catch(lost); }, 20000);
