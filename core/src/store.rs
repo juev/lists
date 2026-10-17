@@ -19,6 +19,7 @@ use crate::hlc::{Clock, DEVICE_ID_LEN};
 use crate::log::LogLevel;
 use crate::model::*;
 use crate::recur::DATE_FMT;
+use crate::undo::Step;
 use crate::{order, quickadd, recur, subtasks};
 
 const MOMENT_FMT: &str = "%Y-%m-%dT%H:%M";
@@ -61,6 +62,8 @@ pub struct Store {
     pub(crate) push_refused: Mutex<(bool, bool)>,
     /// How many objects CalDAV sync has built for upload or comparison.
     pub(crate) caldav_renders: AtomicU64,
+    /// What undo takes back (R131).
+    pub(crate) history: Mutex<crate::undo::History>,
 }
 
 /// One local write transaction: stamps and records field changes, then
@@ -71,19 +74,36 @@ pub(crate) struct Writer<'a> {
     now_ms: u64,
     pub now: NaiveDateTime,
     touched: Touched,
+    /// What an action that undo can take back has written so far (R131).
+    noted: Option<Step>,
 }
 
 impl Writer<'_> {
     pub fn set(&mut self, kind: &str, id: &str, field: &str, value: Value) -> Result<()> {
+        self.set_stamped(kind, id, field, value).map(drop)
+    }
+    /// The same, returning the stamp the register got.
+    pub(crate) fn set_stamped(&mut self, kind: &str, id: &str, field: &str, value: Value) -> Result<String> {
+        let stamp = self.clock.tick(self.now_ms);
+        if let Some(step) = &mut self.noted {
+            step.note(self.tx, kind, id, field, &stamp)?;
+        }
         let change = Change {
             kind: kind.into(),
             id: id.into(),
             field: field.into(),
             value,
-            stamp: self.clock.tick(self.now_ms),
+            stamp,
         };
         db::apply(self.tx, &change, true, &mut self.touched)?;
-        Ok(())
+        Ok(change.stamp)
+    }
+    /// Writes that keep the data whole rather than carry out the action stay out of its step.
+    fn unnoted<T>(&mut self, f: impl FnOnce(&mut Self) -> Result<T>) -> Result<T> {
+        let noted = self.noted.take();
+        let out = f(self);
+        self.noted = noted;
+        out
     }
     pub(crate) fn task(&mut self, id: &str, field: &str, value: Value) -> Result<()> {
         self.set(KIND_TASK, id, field, value)
@@ -141,6 +161,20 @@ impl Inner {
     }
 
     pub fn write<T>(&mut self, f: impl FnOnce(&mut Writer) -> Result<T>) -> Result<T> {
+        self.write_with(None, f).map(|(out, _)| out)
+    }
+
+    /// A write that notes what it changes, for undo (R131).
+    pub(crate) fn write_noted<T>(&mut self, f: impl FnOnce(&mut Writer) -> Result<T>) -> Result<(T, Step)> {
+        self.write_with(Some(Step::default()), f)
+            .map(|(out, step)| (out, step.unwrap_or_default()))
+    }
+
+    fn write_with<T>(
+        &mut self,
+        noted: Option<Step>,
+        f: impl FnOnce(&mut Writer) -> Result<T>,
+    ) -> Result<(T, Option<Step>)> {
         let now = self.now();
         let now_ms = self.now_ms();
         let tx = self
@@ -153,10 +187,11 @@ impl Inner {
                 now_ms,
                 now,
                 touched: Touched::new(),
+                noted,
             };
             let out = f(&mut w)?;
             w.flush()?;
-            out
+            (out, w.noted)
         };
         tx.commit()?;
         Ok(out)
@@ -744,6 +779,7 @@ impl Store {
             push_token: Mutex::new(None),
             push_refused: Mutex::new((false, false)),
             caldav_renders: AtomicU64::new(0),
+            history: Mutex::new(Default::default()),
         });
         // An earlier schema has the table the level is kept in as well.
         store.load_log_level()?;
@@ -1135,7 +1171,7 @@ impl Store {
     /// R113: the subtasks typed in the card of a new task, added in one step and in the order they
     /// were typed. A title is taken as it stands; an empty one is passed over.
     pub fn add_subtasks(&self, parent_id: String, titles: Vec<String>) -> Result<Vec<TaskItem>> {
-        self.write(|w| {
+        self.act(|w| {
             let mut added = Vec::new();
             for title in titles.iter().map(|t| t.trim()).filter(|t| !t.is_empty()) {
                 added.push(create_task(
@@ -1357,7 +1393,7 @@ impl Store {
     /// Turns a top-level task into a project or back. Nothing else about it changes:
     /// a project is a task whose subtasks are shown as a list of their own.
     pub fn set_project(&self, id: String, project: bool) -> Result<()> {
-        self.write(|w| {
+        self.act(|w| {
             let task = get_task(w.tx, &id)?;
             if project && task.parent_id.is_some() {
                 return Err(AppError::invalid("only a top-level task can be a project"));
@@ -1386,7 +1422,7 @@ impl Store {
         first: bool,
         after: Option<String>,
     ) -> Result<TaskItem> {
-        self.write(|w| {
+        self.act(|w| {
             // R10: under anything but a project the line is the title of a subtask, as it is typed.
             if !subtasks::is_project(w.tx, &parent_id)? {
                 return create_task(
@@ -1506,14 +1542,14 @@ impl Store {
     // ---- creating ----
 
     pub fn create_task(&self, new: NewTask) -> Result<TaskItem> {
-        self.write(|w| create_task(w, new))
+        self.act(|w| create_task(w, new))
     }
 
     /// Creates an empty project with only a title (R127). Without a list it goes to the default
     /// list for new tasks (R40). The defaults of the list are not applied: the due date of a
     /// project becomes that of its tasks (R125).
     pub fn create_project(&self, title: String, list_id: Option<String>) -> Result<TaskItem> {
-        self.write(|w| {
+        self.act(|w| {
             let title = title.trim().to_string();
             if title.is_empty() {
                 return Err(AppError::invalid("title is empty"));
@@ -1548,7 +1584,7 @@ impl Store {
         first: bool,
         after: Option<String>,
     ) -> Result<TaskItem> {
-        self.write(|w| {
+        self.act(|w| {
             let parsed = quickadd::parse(&text, w.today());
             let mut title = parsed.title;
             let mut list = list_id;
@@ -1577,7 +1613,7 @@ impl Store {
 
     /// Copies a task with its subtasks and attachments, placing the copy right after it.
     pub fn duplicate_task(&self, id: String) -> Result<TaskItem> {
-        self.write(|w| {
+        self.act(|w| {
             let original = get_task(w.tx, &id)?;
             let copy = duplicate(w, &original, original.parent_id.clone())?;
             w.flush()?;
@@ -1621,7 +1657,7 @@ impl Store {
     }
 
     pub fn set_repeat(&self, id: String, repeat: Option<Repeat>) -> Result<()> {
-        self.write(|w| {
+        self.act(|w| {
             let task = get_task(w.tx, &id)?;
             if repeat.is_some() && subtasks::is_subtask(w.tx, &id)? {
                 return Err(AppError::invalid("a subtask has a title only"));
@@ -1653,18 +1689,18 @@ impl Store {
     /// Completes the task and its open subtasks. A repeating task moves to
     /// its next occurrence instead and leaves a record in Completed.
     pub fn complete_task(&self, id: String) -> Result<TaskItem> {
-        self.write(|w| complete_in(w, &id, false))
+        self.act(|w| complete_in(w, &id, false))
     }
 
     /// Closes the task and its open subtasks as "won't do" (R69). A repeating
     /// task skips the occurrence: it moves on and leaves a "won't do" record.
     pub fn wont_do_task(&self, id: String) -> Result<TaskItem> {
-        self.write(|w| complete_in(w, &id, true))
+        self.act(|w| complete_in(w, &id, true))
     }
 
     /// The mark of a record of a completed repeat takes the completion back (R128).
     pub fn reopen_task(&self, id: String) -> Result<()> {
-        self.write(|w| {
+        self.act(|w| {
             if get_task(w.tx, &id)?.is_log {
                 return undo_repeat_in(w, &id);
             }
@@ -1678,7 +1714,7 @@ impl Store {
     /// Subtasks closed earlier stay closed. A repeating task that moved on gets back what its last
     /// completion changed (R128); so does the task of a record given here.
     pub fn undo_close_task(&self, id: String) -> Result<()> {
-        self.write(|w| {
+        self.act(|w| {
             let task = get_task(w.tx, &id)?;
             if task.is_log {
                 return undo_repeat_in(w, &id);
@@ -1756,7 +1792,7 @@ impl Store {
 
     /// Moves a top-level task (with its subtasks) to the end of another list.
     pub fn move_to_list(&self, id: String, list_id: String) -> Result<()> {
-        self.write(|w| {
+        self.act(|w| {
             get_task(w.tx, &id)?;
             get_list(w.tx, &list_id)?;
             if subtasks::is_subtask(w.tx, &id)? {
@@ -1773,7 +1809,7 @@ impl Store {
     /// Makes a task a task of the project, at the project's end (R129). A task that is already
     /// there stays where it is. R32: a project, a task with subtasks and a subtask are refused.
     pub fn move_to_project(&self, id: String, project_id: String) -> Result<()> {
-        self.write(|w| {
+        self.act(|w| {
             heal_tree(w)?;
             let task = get_task(w.tx, &id)?;
             let project = get_task(w.tx, &project_id)?;
@@ -1808,7 +1844,7 @@ impl Store {
         parent_id: Option<String>,
         after: Option<String>,
     ) -> Result<()> {
-        self.write(|w| {
+        self.act(|w| {
             heal_tree(w)?;
             let task = get_task(w.tx, &id)?;
             if task.parent_id != parent_id {
@@ -1902,7 +1938,7 @@ impl Store {
                 .filter(|n| !n.trim().is_empty())
                 .or_else(|| source.file_name().map(|n| n.to_string_lossy().into_owned()))
                 .unwrap_or_else(|| "file".into());
-            let id = self.write(|w| {
+            let id = self.act(|w| {
                 get_task(w.tx, &task_id)?;
                 if subtasks::is_subtask(w.tx, &task_id)? {
                     return Err(AppError::invalid("a subtask has a title only"));
@@ -1928,7 +1964,7 @@ impl Store {
     }
 
     pub fn remove_attachment(&self, id: String) -> Result<()> {
-        self.write(|w| w.set(KIND_ATTACHMENT, &id, "deleted", json!(true)))
+        self.act(|w| w.set(KIND_ATTACHMENT, &id, "deleted", json!(true)))
     }
 
     /// R91: writes every attachment of the task into the folder under its own name.
@@ -2011,7 +2047,8 @@ fn copy_under_free_name(source: &Path, dir: &Path, name: &str) -> std::io::Resul
 
 impl Store {
     fn task_field(&self, id: String, field: &str, value: Value) -> Result<()> {
-        self.write(|w| {
+        let text = matches!(field, "title" | "notes").then(|| (id.clone(), field.to_string()));
+        self.act_on(text, |w| {
             get_task(w.tx, &id)?;
             // R10: a subtask is renamed, closed, reordered and deleted, and nothing else.
             if !matches!(field, "title" | "deleted") && subtasks::is_subtask(w.tx, &id)? {
@@ -2519,13 +2556,15 @@ fn heal_tree(w: &mut Writer) -> Result<()> {
     )?;
     let cut: Vec<String> = stmt.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
     drop(stmt);
-    for id in &cut {
-        w.task(id, "parent", Value::Null)?;
-    }
-    if !cut.is_empty() {
-        w.flush()?;
-    }
-    Ok(())
+    w.unnoted(|w| {
+        for id in &cut {
+            w.task(id, "parent", Value::Null)?;
+        }
+        if !cut.is_empty() {
+            w.flush()?;
+        }
+        Ok(())
+    })
 }
 
 fn sibling_positions(conn: &Connection, filter: &str, arg: &str, except: &str) -> Result<Vec<(String, String)>> {
