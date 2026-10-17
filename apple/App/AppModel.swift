@@ -1307,7 +1307,7 @@ final class AppModel {
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
-        panel.message = L("A 2Do backup (.2dodb), a Todoist CSV, a Trello board JSON or Microsoft To Do lists as JSON")
+        panel.message = L("A Lists export (.json), a 2Do backup (.2dodb), a Todoist CSV, a Trello board JSON or Microsoft To Do lists as JSON")
         guard panel.runModal() == .OK, let url = panel.url, let store else { return }
         // R140: reading a large export and writing its tasks runs off the main thread.
         _Concurrency.Task { [weak self] in
@@ -1336,6 +1336,47 @@ final class AppModel {
             self.scheduleSync()
             self.alertIsError = !outcome.success
             self.alert = outcome.message
+        }
+    }
+
+    // MARK: Export
+
+    /// The list on screen, which the export can be limited to (R155).
+    var exportableList: String? {
+        switch scope {
+        case .inbox: return "inbox"
+        case .list(let id): return id
+        default: return nil
+        }
+    }
+
+    /// R155, R156: asks where to save and writes everything, or the list `listId`, as JSON or Markdown.
+    func export(markdown: Bool, listId: String?) {
+        guard let store else { return }
+        let panel = NSSavePanel()
+        let format = DateFormatter()
+        format.locale = Locale(identifier: "en_US_POSIX")
+        format.dateFormat = "yyyy-MM-dd"
+        let day = format.string(from: Date())
+        panel.nameFieldStringValue = "Lists-\(day).\(markdown ? "md" : "json")"
+        panel.canCreateDirectories = true
+        guard panel.runModal() == .OK, let target = panel.url else { return }
+        _Concurrency.Task { [weak self] in
+            let failure = await _Concurrency.Task.detached(priority: .userInitiated) { () -> String? in
+                do {
+                    if markdown {
+                        try store.exportMarkdown(path: target.path, listId: listId)
+                    } else {
+                        try store.exportJson(path: target.path, listId: listId)
+                    }
+                    return nil
+                } catch {
+                    return describe(error)
+                }
+            }.value
+            guard let self, let failure else { return }
+            self.alertIsError = true
+            self.alert = failure
         }
     }
 
