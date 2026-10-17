@@ -58,6 +58,7 @@ class ListsApp : Application() {
         Store.open(File(filesDir, "lists").absolutePath).also {
             it.setSyncPassword(Secrets.load(this) { error -> it.log(LogLevel.ERROR, "sync", "the stored password was not decrypted: ${logged(error)}") })
             it.setPushToken(Secrets.load(this, Secrets.PUSH_TOKEN) { error -> it.log(LogLevel.ERROR, "push", "the stored token was not decrypted: ${logged(error)}") })
+            it.setSyncPassphrase(Secrets.load(this, Secrets.PASSPHRASE) { error -> it.log(LogLevel.ERROR, "sync", "the stored passphrase was not decrypted: ${logged(error)}") })
             // R102: where a log of events begins for this run.
             val version = runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrNull() ?: "?"
             it.log(LogLevel.INFO, "app", "started $version on Android ${android.os.Build.VERSION.RELEASE}")

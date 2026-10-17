@@ -280,6 +280,8 @@ struct SettingsView: View {
     @Environment(AppModel.self) private var model
 
     private enum Kind: Hashable { case off, webdav, caldav, folder }
+    /// R145: what the passphrase window does.
+    enum Sealing: Identifiable { case encrypt, change; var id: Self { self } }
     /// A storage being joined with one side replacing the other, until that is confirmed (S36).
     private struct Replacement { let config: SyncConfig; let side: SyncSide }
     private static let times = ["07:00", "08:00", "09:00", "10:00", "12:00", "18:00", "20:00"]
@@ -330,6 +332,10 @@ struct SettingsView: View {
     /// The storage being joined while the person chooses a side (S36).
     @State private var joining: SyncConfig?
     @State private var replacing: Replacement?
+    /// R145: the passphrase of an encrypted storage, and the window that sets a new one.
+    @State private var passphrase = ""
+    @State private var sealing: Sealing?
+    @State private var sealingBusy: Sealing?
 
     /// R115: why a login item is not on although it was asked for, and the way to the place where the system keeps them.
     @ViewBuilder
@@ -561,8 +567,9 @@ struct SettingsView: View {
                         TextField(L("Address"), text: $url, prompt: Text("https://example.org/remote.php/dav/files/me"))
                         TextField(L("User name"), text: $user)
                         SecureField(L("Password"), text: $password)
-                        Text(L("For Nextcloud and similar servers use an app password. Data on the server is not encrypted."))
+                        Text(L("For Nextcloud and similar servers use an app password."))
                             .font(AppFont.style(.caption)).foregroundStyle(.secondary)
+                        passphraseField
                     case .caldav:
                         TextField(L("Address"), text: $url, prompt: Text("https://example.org/remote.php/dav"))
                         TextField(L("User name"), text: $user)
@@ -576,6 +583,7 @@ struct SettingsView: View {
                         }
                         Text(L("A folder synced by another tool or a network drive will do."))
                             .font(AppFont.style(.caption)).foregroundStyle(.secondary)
+                        passphraseField
                     }
                     if kind != .off {
                         TextField(L("Push server"), text: $pushServer, prompt: Text("https://ntfy.sh"))
@@ -600,6 +608,21 @@ struct SettingsView: View {
                         if model.syncing || testing { ProgressView().controlSize(.small) }
                         Spacer()
                     }
+                    // R145: the storage that is saved, not the one being typed, is encrypted.
+                    if savedFiles {
+                        HStack {
+                            Button(model.syncStatus.encrypted ? L("Change passphrase…") : L("Encrypt the storage…")) {
+                                sealing = model.syncStatus.encrypted ? .change : .encrypt
+                            }
+                            .disabled(sealingBusy != nil)
+                            if let busy = sealingBusy {
+                                ProgressView().controlSize(.small)
+                                Text(busy == .encrypt ? L("Encrypting the storage…") : L("Changing the passphrase…"))
+                                    .font(AppFont.style(.caption)).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                        }
+                    }
                     if let text = message ?? status {
                         Text(text).font(AppFont.style(.caption)).foregroundStyle(.secondary).textSelection(.enabled)
                     }
@@ -617,6 +640,9 @@ struct SettingsView: View {
         }
         .frame(width: 520)
         .onAppear(perform: load)
+        .sheet(item: $sealing) { what in
+            PassphraseSheet(what: what) { chosen in seal(what, with: chosen) }
+        }
         .confirmationDialog(
             L("This Mac and the storage both hold tasks"),
             isPresented: Binding(get: { joining != nil }, set: { if !$0 { joining = nil } }),
@@ -652,6 +678,55 @@ struct SettingsView: View {
         }
     }
 
+    @ViewBuilder
+    private var passphraseField: some View {
+        SecureField(L("Storage passphrase"), text: $passphrase)
+        Text(L("Only for a storage encrypted with a passphrase."))
+            .font(AppFont.style(.caption)).foregroundStyle(.secondary)
+    }
+
+    /// Whether the saved settings are a storage that can be encrypted (R145).
+    private var savedFiles: Bool {
+        switch try? model.store?.syncConfig() {
+        case .webDav?, .folder?: return true
+        default: return false
+        }
+    }
+
+    /// R145: encrypts the saved storage or gives it a new passphrase, off the main thread;
+    /// the passphrase goes where the password goes once the core has taken it.
+    private func seal(_ what: Sealing, with chosen: String) {
+        guard let store = model.store, let config = try? store.syncConfig(),
+              let account = Keychain.passphraseAccount(config) else { return }
+        message = nil
+        sealingBusy = what
+        Task {
+            let done = await Task.detached {
+                Result {
+                    switch what {
+                    case .encrypt: try store.encryptStorage(passphrase: chosen)
+                    case .change: try store.changeStoragePassphrase(passphrase: chosen)
+                    }
+                }
+            }.value
+            sealingBusy = nil
+            switch done {
+            case .success:
+                passphrase = chosen
+                do {
+                    try Keychain.save(chosen, account: account)
+                } catch {
+                    message = L("The passphrase could not be saved in the system keychain: %@", error.localizedDescription)
+                    store.log(level: .error, source: "sync", message: "the passphrase was not saved in the keychain: \(logged(error))")
+                }
+                model.reload()
+                model.syncNow()
+            case .failure(let error):
+                message = describe(error)
+            }
+        }
+    }
+
     private var status: String? {
         let s = model.syncStatus
         if let error = s.lastError { return L("The last attempt failed: %@", "\(error)") }
@@ -675,6 +750,7 @@ struct SettingsView: View {
             user = name
             password = Keychain.load(account: Keychain.account(url: u, user: name)) ?? ""
         }
+        passphrase = Keychain.passphraseAccount(config).flatMap { Keychain.load(account: $0) } ?? ""
     }
 
     private func chooseFolder() {
@@ -774,12 +850,62 @@ struct SettingsView: View {
                 }
                 store.setSyncPassword(password: password)
             }
+            // S58: kept like the password, one per storage.
+            if let account = Keychain.passphraseAccount(try store.syncConfig()) {
+                if passphrase.isEmpty {
+                    Keychain.delete(account: account)
+                } else {
+                    do {
+                        try Keychain.save(passphrase, account: account)
+                    } catch {
+                        message = L("The passphrase could not be saved in the system keychain: %@", error.localizedDescription)
+                        store.log(level: .error, source: "sync", message: "the passphrase was not saved in the keychain: \(logged(error))")
+                    }
+                }
+                store.setSyncPassphrase(passphrase: passphrase)
+            }
             model.reload()
             model.watchSyncFolder()
             model.syncNow()
         } catch {
             message = describe(error)
         }
+    }
+}
+
+/// R145: a new passphrase, typed twice, with the warning that a forgotten one loses the storage.
+struct PassphraseSheet: View {
+    let what: SettingsView.Sealing
+    let done: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var first = ""
+    @State private var second = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(what == .encrypt ? L("Encrypt the storage") : L("Change passphrase")).font(.headline)
+            Text(what == .encrypt
+                ? L("This Mac syncs first, then writes the storage again, encrypted. This takes as long as downloading the attachments it does not have yet. Other devices ask for the passphrase.")
+                : L("Other devices ask for the new passphrase the next time they start."))
+                .fixedSize(horizontal: false, vertical: true)
+            SecureField(L("Passphrase"), text: $first)
+            SecureField(L("Passphrase again"), text: $second)
+            Text(L("A forgotten passphrase cannot be recovered, and the data in the storage is lost with it. The copies on your devices stay."))
+                .font(AppFont.style(.caption)).foregroundStyle(.orange)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Spacer()
+                Button(L("Cancel"), role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction)
+                Button(what == .encrypt ? L("Encrypt") : L("Change")) {
+                    done(first)
+                    dismiss()
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(first.isEmpty || first != second)
+            }
+        }
+        .padding(20)
+        .frame(width: 420)
     }
 }
 

@@ -83,7 +83,7 @@ final class AppModel {
     var creatingFilter = false
     var creatingProject = false
 
-    var syncStatus = SyncStatus(configured: false, pending: 0, attachmentsWaiting: 0, lastOk: nil, lastError: nil)
+    var syncStatus = SyncStatus(configured: false, pending: 0, attachmentsWaiting: 0, lastOk: nil, lastError: nil, encrypted: false)
     /// Moves when attachment content has arrived: an open card reads its files again (R76).
     var attachmentsArrived = 0
     var syncing = false
@@ -502,10 +502,14 @@ final class AppModel {
                 }
             }
             // The helper does not sync (R115): the passwords stay with Lists.
-            switch LoginItems.isHelper ? nil : read("sync", "sync settings", opened.syncConfig) {
+            let syncConfig = LoginItems.isHelper ? nil : read("sync", "sync settings", opened.syncConfig)
+            switch syncConfig {
             case .webDav(let url, let user)?, .calDav(let url, let user)?:
                 opened.setSyncPassword(password: Keychain.load(account: Keychain.account(url: url, user: user)))
             default: break
+            }
+            if let account = syncConfig.flatMap(Keychain.passphraseAccount) {
+                opened.setSyncPassphrase(passphrase: Keychain.load(account: account))
             }
             if !LoginItems.isHelper, let server = read("push", "push settings", opened.pushServer) ?? nil {
                 opened.setPushToken(token: Keychain.load(account: Keychain.pushAccount(server: server)))

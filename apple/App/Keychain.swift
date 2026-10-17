@@ -91,6 +91,15 @@ enum Keychain {
     /// The access token of an ntfy server that requires sign-in (S27), one secret per server.
     static func pushAccount(server: String) -> String { "ntfy:\(server)" }
 
+    /// S58: the passphrase of an encrypted storage, one secret per storage; CalDAV has none.
+    static func passphraseAccount(_ config: SyncConfig) -> String? {
+        switch config {
+        case .webDav(let url, let user): return "passphrase:\(user)@\(url)"
+        case .folder(let path): return "passphrase:\(path)"
+        case .calDav, .off: return nil
+        }
+    }
+
     static func load(account: String) -> String? {
         lock.lock()
         defer { lock.unlock() }

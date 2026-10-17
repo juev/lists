@@ -1103,6 +1103,12 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
     var user by remember { mutableStateOf((saved as? SyncConfig.WebDav)?.user ?: (saved as? SyncConfig.CalDav)?.user ?: "") }
     val context = LocalContext.current
     var password by remember { mutableStateOf(if (enabled) Secrets.load(context).orEmpty() else "") }
+    var passphrase by remember { mutableStateOf(if (saved is SyncConfig.WebDav) Secrets.load(context, Secrets.PASSPHRASE).orEmpty() else "") }
+    // R145: the storage that is saved, which encrypting acts on; the window that sets a passphrase (true: encrypt,
+    // false: change) and the one of the two under way.
+    var stored by remember { mutableStateOf(saved) }
+    var sealing by remember { mutableStateOf<Boolean?>(null) }
+    var sealingBusy by remember { mutableStateOf<Boolean?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     // What the last connection test found and whether that was a failure; shown under its button.
     var tested by remember { mutableStateOf<String?>(null) }
@@ -1198,11 +1204,14 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
             val sender = enabled && pushSignIn && pushServer.isNotEmpty()
             // S53: the model carries it to the end when the settings are closed meanwhile.
             val joined = model.joinStorage(
-                config, side, SyncSecrets(password.takeIf { enabled }, pushServer.takeIf { sender }, pushToken.takeIf { sender }),
+                config,
+                side,
+                SyncSecrets(password.takeIf { enabled }, pushServer.takeIf { sender }, pushToken.takeIf { sender }, passphrase.takeIf { kind == "webdav" }),
             )
             testing = false
             joined
                 .onSuccess {
+                    stored = config
                     error = null
                     tested = null
                     pushRefused = false
@@ -1366,6 +1375,19 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.padding(top = 8.dp),
                                 )
+                                if (kind == "webdav") {
+                                    OutlinedTextField(passphrase, { passphrase = it }, singleLine = true, label = { Text(str(R.string.storage_passphrase)) }, visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false))
+                                    Text(str(R.string.storage_passphrase_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp))
+                                }
+                                // R145: the storage that is saved, not the one being typed, is encrypted.
+                                if (stored is SyncConfig.WebDav) {
+                                    TextButton(enabled = sealingBusy == null, onClick = { sealing = !state.sync.encrypted }) {
+                                        Text(str(if (state.sync.encrypted) R.string.change_passphrase else R.string.encrypt_storage))
+                                    }
+                                    sealingBusy?.let { encrypting ->
+                                        Text(str(if (encrypting) R.string.encrypting_storage else R.string.changing_passphrase), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                }
                                 // Asks the server with what the fields hold now; nothing is saved (S26).
                                 TextButton(enabled = !testing, onClick = {
                                     val config = if (kind == "caldav") SyncConfig.CalDav(url, user) else SyncConfig.WebDav(url, user)
@@ -1453,6 +1475,19 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
             if (section == null) TextButton(onClick = onDismiss) { Text(str(R.string.close)) }
         },
     )
+    sealing?.let { encrypt ->
+        PassphraseDialog(encrypt, onDismiss = { sealing = null }) { chosen ->
+            sealing = null
+            sealingBusy = encrypt
+            error = null
+            scope.launch {
+                model.sealStorage(encrypt, chosen)
+                    .onSuccess { passphrase = chosen }
+                    .onFailure { error = describe(it) }
+                sealingBusy = null
+            }
+        }
+    }
     joining?.let { config ->
         when (val side = replacing) {
             null -> AlertDialog(
@@ -1703,6 +1738,31 @@ fun FilterDialog(filter: SavedFilter?, state: UiState, model: MainViewModel, onD
                 onDismiss()
                 model.act { store -> if (filter == null) store.createFilter(name, spec) else store.updateFilter(filter.id, name, spec) }
             }) { Text(str(if (filter == null) R.string.create else R.string.done)) }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(str(R.string.cancel)) } },
+    )
+}
+
+/** R145: a new passphrase, typed twice, with the warning that a forgotten one loses the storage. */
+@Composable
+private fun PassphraseDialog(encrypt: Boolean, onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
+    var first by remember { mutableStateOf("") }
+    var second by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(str(if (encrypt) R.string.encrypt_storage_title else R.string.change_passphrase_title)) },
+        text = {
+            Column {
+                Text(str(if (encrypt) R.string.encrypt_storage_text else R.string.change_passphrase_text), style = MaterialTheme.typography.bodyMedium)
+                OutlinedTextField(first, { first = it }, singleLine = true, label = { Text(str(R.string.passphrase)) }, visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false))
+                OutlinedTextField(second, { second = it }, singleLine = true, label = { Text(str(R.string.passphrase_again)) }, visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false))
+                Text(str(R.string.passphrase_warning), Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = first.isNotEmpty() && first == second, onClick = { onConfirm(first) }) {
+                Text(str(if (encrypt) R.string.encrypt else R.string.change))
+            }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text(str(R.string.cancel)) } },
     )
