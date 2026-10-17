@@ -23,6 +23,8 @@ The container listens on port 8080, keeps its data in `/data` and runs as user 1
 
 The image holds only the server, linked statically, and a minimal init; there is no shell inside, so `docker exec` has nothing to run.
 
+`GET /healthz` answers `ok` without a login, for the health check of a reverse proxy or a monitor. The image checks itself with `lists-web healthcheck` every 30 seconds, and `docker ps` shows the container as `healthy` or `unhealthy`.
+
 The repository carries a ready [`compose.yaml`](../compose.yaml) that reads its settings from an `.env` file; copy [`.env.example`](../.env.example) to `.env` and fill it in. Git ignores `.env`, so the passwords in it are not committed. The file sets the version of the image (`LISTS_VERSION`), the port, the password and the settings of WebDAV sync and of the push server. The Compose file also sets `LISTS_TRUST_PROXY=1`, since it publishes the port for a reverse proxy only. The other variables (`LISTS_SYNC_PATH`, `LISTS_WEB_URL`, `LISTS_PUSH_TOKEN`, `LISTS_OIDC_*`) are not passed on by it and need a line of their own under `environment`. A Compose file of your own, syncing through WebDAV:
 
 ```yaml

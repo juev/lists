@@ -21,9 +21,12 @@
 //! LISTS_MAX_FILE_MB=512         R140: the largest attachment this server takes; 0 means no limit
 //! LISTS_MAX_TASK_MB=2048        R140: the most all attachments of one task may take here; 0 means no limit
 //! ```
+//!
+//! `lists-web healthcheck` asks the server on LISTS_WEB_LISTEN whether it answers and exits
+//! with 0 when it does (R144); the Docker image has no shell or curl to do it otherwise.
 
 use lists_core::SyncConfig;
-use lists_web::{start, Config, OidcConfig};
+use lists_web::{check_health, start, Config, OidcConfig};
 
 fn env(name: &str) -> Option<String> {
     std::env::var(name).ok().filter(|v| !v.is_empty())
@@ -38,6 +41,13 @@ fn megabytes(name: &str) -> Option<u64> {
 
 fn main() {
     let listen = env("LISTS_WEB_LISTEN").unwrap_or_else(|| "127.0.0.1:8080".into());
+    if std::env::args().nth(1).as_deref() == Some("healthcheck") {
+        if let Err(e) = check_health(&listen) {
+            eprintln!("lists-web: healthcheck: {e}");
+            std::process::exit(1);
+        }
+        return;
+    }
     let password = env("LISTS_WEB_PASSWORD");
     let loopback = listen.starts_with("127.") || listen.starts_with("localhost:") || listen.starts_with("[::1]");
     let oidc = env("LISTS_OIDC_ISSUER").map(|issuer| OidcConfig {
