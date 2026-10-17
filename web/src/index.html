@@ -169,7 +169,7 @@ const RU = {
   "On iPhone and iPad, add Lists to the Home Screen first.": "На iPhone и iPad сначала добавьте Lists на экран «Домой».",
   "The browser does not allow notifications for this site.": "Браузер запретил уведомления для этого сайта.",
   "The server cannot be reached.": "Сервер недоступен.", "Try again": "Повторить",
-  "API tokens…": "Токены API…", "API tokens": "Токены API", "Read": "Чтение", "Read and write": "Чтение и запись", "Name": "Название",
+  "API tokens…": "Токены API…", "API tokens": "Токены API", "Read": "Чтение", "Read and write": "Чтение и запись", "Name": "Название", "Scope": "Область",
   "Create": "Создать", "New token": "Новый токен", "Export…": "Экспорт…", "Export": "Экспорт", "Format": "Формат", "What": "Что",
   "JSON, which Lists and scripts can read back": "JSON — его читают Lists и сценарии", "Markdown, for reading": "Markdown — для чтения", "This list": "Этот список",
   "Attachment content is not exported; the JSON names each file.": "Содержимое вложений не выгружается; в JSON названо каждое вложение.", "Revoke": "Отозвать", "Copy": "Скопировать", "Copied": "Скопировано", "Last used": "Использован", "never": "никогда",
@@ -833,8 +833,8 @@ function tokensForm() {
   const row = (label, ...kids) => $("div", { class: "chips" }, $("span", { style: "min-width:150px;color:var(--muted)" }, label), kids);
   const when = v => (v ? new Date(v + "Z").toLocaleString(locale, { dateStyle: "medium", timeStyle: "short" }) : t("never"));
   const refresh = async () => { state.tokens = await api("/api/tokens").catch(() => state.tokens); render(); };
-  const name = $("input", { type: "text", placeholder: t("Name"), maxlength: 100 });
-  const scope = $("select", {}, [["read", "Read"], ["write", "Read and write"]].map(([v, n]) => $("option", { value: v }, t(n))));
+  const name = $("input", { type: "text", placeholder: t("Name"), "aria-label": t("Name"), maxlength: 100 });
+  const scope = $("select", { "aria-label": t("Scope") }, [["read", "Read"], ["write", "Read and write"]].map(([v, n]) => $("option", { value: v }, t(n))));
   const create = async () => {
     if (!name.value.trim()) return name.focus();
     state.newToken = (await postJson("/api/tokens", { name: name.value.trim(), scope: scope.value })).token;
