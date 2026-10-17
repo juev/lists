@@ -36,13 +36,17 @@ enum Storage {
     static let debugDirectory: URL? = ProcessInfo.processInfo.environment["LISTS_DEBUG_DIR"].map { URL(fileURLWithPath: $0, isDirectory: true) }
     #endif
 
+    /// The App Group container; nil in a build without a signing team.
+    static var groupContainer: URL? {
+        groupIdentifier.flatMap { FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: $0) }
+    }
+
     static func directory() -> URL {
         let fm = FileManager.default
         #if DEBUG
         if let debugDirectory { return debugDirectory }
         #endif
-        if let group = groupIdentifier,
-           let container = fm.containerURL(forSecurityApplicationGroupIdentifier: group) {
+        if let container = groupContainer {
             return container.appendingPathComponent("Lists", isDirectory: true)
         }
         let support = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]

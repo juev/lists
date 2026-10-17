@@ -22,12 +22,14 @@ final class ShareViewController: NSViewController {
         super.viewDidLoad()
         collect { [weak self] content in
             guard let self else { return }
-            let store = try? Storage.openStore()
+            // R137: without the group the extension would open a database of its own, which Lists never reads.
+            let store = Storage.groupContainer == nil ? nil : try? Storage.openStore()
             for failure in content.failures {
                 store?.log(level: .error, source: "attachments", message: "a shared item was not received: \(failure)")
             }
             let form = ShareForm(
                 content: content,
+                notice: Storage.groupContainer == nil ? Self.noGroup : nil,
                 // R121: hidden Inbox is not offered. R40: the form starts with the default list; the list used last
                 // is a setting of the app, which the extension does not see.
                 lists: (try? store?.lists())?.filter { !$0.archived && ($0.id != "inbox" || (try? store?.inboxHidden()) != true) } ?? [],
@@ -43,12 +45,20 @@ final class ShareViewController: NSViewController {
         }
     }
 
+    private static let noGroup = L("This build of Lists cannot save from Share: it is signed without a development team.")
+
     /// Returns an error text, or nil after finishing the request.
     private func save(title: String, notes: String, listId: String, files: [URL]) -> String? {
+        guard let container = Storage.groupContainer else { return Self.noGroup }
         do {
             let store = try Storage.openStore()
             let task = try store.createTask(new: NewTask(title: title, listId: listId, notes: notes, first: true))
             for file in files {
+                // R137: the database and the attachments of Lists do not leave through a task. The core logs a file it could not add.
+                if Self.isInside(file, container) {
+                    store.log(level: .error, source: "attachments", message: "a shared file from the data of Lists was not attached")
+                    continue
+                }
                 _ = try? store.addAttachment(taskId: task.id, path: file.path, name: nil)
             }
             Storage.announceChange()
@@ -127,6 +137,13 @@ final class ShareViewController: NSViewController {
         }
     }
 
+    /// Whether the file lies in `folder` or under it, links followed.
+    static func isInside(_ file: URL, _ folder: URL) -> Bool {
+        let path = file.resolvingSymlinksInPath().standardizedFileURL.path
+        let root = folder.resolvingSymlinksInPath().standardizedFileURL.path
+        return path == root || path.hasPrefix(root + "/")
+    }
+
     private static func url(from value: NSSecureCoding?) -> URL? {
         if let url = value as? URL { return url }
         if let data = value as? Data { return URL(dataRepresentation: data, relativeTo: nil) }
@@ -137,6 +154,8 @@ final class ShareViewController: NSViewController {
 
 struct ShareForm: View {
     let content: SharedContent
+    /// Why nothing can be saved (R137), shown in place of an error.
+    let notice: String?
     let lists: [TaskList]
     let defaultListId: String
     let onCancel: () -> Void
@@ -159,7 +178,7 @@ struct ShareForm: View {
                 Label(content.files.map(\.lastPathComponent).joined(separator: ", "), systemImage: "paperclip")
                     .font(.callout).foregroundStyle(.secondary).lineLimit(1)
             }
-            if let error { Text(error).font(.caption).foregroundStyle(.red) }
+            if let error = error ?? notice { Text(error).font(.caption).foregroundStyle(.red) }
             Spacer(minLength: 0)
             HStack {
                 Picker("", selection: $listId) {
@@ -171,7 +190,7 @@ struct ShareForm: View {
                 Button(L("Cancel"), action: onCancel).keyboardShortcut(.cancelAction)
                 Button(L("Add"), action: save)
                     .keyboardShortcut(.defaultAction)
-                    .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .disabled(notice != nil || title.trimmingCharacters(in: .whitespaces).isEmpty)
             }
         }
         .padding(16)
@@ -182,6 +201,7 @@ struct ShareForm: View {
     }
 
     private func save() {
+        guard notice == nil else { return }
         error = onSave(title, content.notes, listId)
     }
 }
