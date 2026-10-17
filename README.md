@@ -144,7 +144,7 @@ make apple        # apple/build/Build/Products/Debug/Lists.app
 make apple-run
 ```
 
-The share extension and the app share one database through an App Group, which needs a signing team. The build takes the team from `LISTS_TEAM_ID` or from the first "Apple Development" certificate in the keychain. Without a team the app is signed ad hoc and keeps its data in Application Support; the share extension then has no access to it.
+The share extension and the app share one database through an App Group, which needs a signing team. The build takes the team from `LISTS_TEAM_ID` or from the first "Apple Development" certificate in the keychain. Without a team the app is signed ad hoc and keeps its data in Application Support; the share extension then has no access to it and says so in its form instead of saving.
 
 Android app (JDK 17 or newer, Android SDK with platform 36 and an NDK, `rustup target add aarch64-linux-android x86_64-linux-android`, `cargo install cargo-ndk`):
 
