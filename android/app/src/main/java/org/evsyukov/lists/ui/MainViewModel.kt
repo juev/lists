@@ -322,6 +322,8 @@ class MainViewModel : ViewModel() {
     }
 
     fun toggleDone(task: TaskItem) {
+        // R133: a record whose completion can no longer be taken back is history.
+        if (task.markState() == MarkState.History) return
         if (task.done != null) return change { it.reopenTask(task.id) }
         // The bar comes whatever R68 says (R131); a repeating task moves on and says so (R128).
         change(str(if (task.repeat != null) R.string.moved_to_next else R.string.done_notice)) { it.completeTask(task.id) }

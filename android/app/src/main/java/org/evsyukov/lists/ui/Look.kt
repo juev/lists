@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Repeat
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -78,7 +79,7 @@ fun PriorityBar(priority: Priority, tall: Boolean) {
     )
 }
 
-enum class MarkState { Open, Done, Wont }
+enum class MarkState { Open, Done, Wont, History }
 
 /**
  * The completion mark (R95): small, thin and muted, without the colour of the
@@ -87,6 +88,11 @@ enum class MarkState { Open, Done, Wont }
 @Composable
 fun Mark(state: MarkState, description: String?, modifier: Modifier = Modifier, round: Boolean = false) {
     val color = MaterialTheme.colorScheme.outline
+    // R133: a record of a repeat whose completion can no longer be taken back shows the repeat icon instead.
+    if (state == MarkState.History) {
+        Icon(Icons.Outlined.Repeat, description, modifier.size(16.dp), tint = color)
+        return
+    }
     Box(
         modifier
             .size(16.dp)
@@ -97,7 +103,7 @@ fun Mark(state: MarkState, description: String?, modifier: Modifier = Modifier, 
         when (state) {
             MarkState.Done -> Icon(Icons.Outlined.Check, null, Modifier.size(12.dp), tint = color)
             MarkState.Wont -> Icon(Icons.Outlined.Close, null, Modifier.size(12.dp), tint = color)
-            MarkState.Open -> {}
+            MarkState.Open, MarkState.History -> {}
         }
     }
 }
