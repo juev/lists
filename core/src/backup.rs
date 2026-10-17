@@ -332,7 +332,11 @@ impl Store {
         // Content first: it only adds files named by what they hold.
         for i in 0..zip.len() {
             let mut entry = zip.by_index(i).map_err(refused)?;
-            let Some(hash) = entry.name().strip_prefix(BLOBS).map(str::to_string) else {
+            let Some(hash) = entry
+                .name()
+                .ok()
+                .and_then(|n| n.strip_prefix(BLOBS).map(str::to_string))
+            else {
                 continue;
             };
             let target = self.blob_path(&hash);

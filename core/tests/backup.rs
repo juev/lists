@@ -284,7 +284,7 @@ fn r90_content_that_does_not_match_its_name_is_not_taken() {
     let mut out = zip::ZipWriter::new(std::fs::File::create(&forged).unwrap());
     for i in 0..source.len() {
         let mut entry = source.by_index(i).unwrap();
-        let name = entry.name().to_string();
+        let name = entry.name().unwrap().to_string();
         out.start_file(name.as_str(), zip::write::SimpleFileOptions::default())
             .unwrap();
         if name.starts_with("blobs/") {

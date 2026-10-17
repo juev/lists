@@ -8,14 +8,6 @@ all-features = true
 [advisories]
 version = 2
 yanked = "deny"
-ignore = [
-    # zip 2: all three are about extracting an archive to disk (`ZipArchive::extract`,
-    # `ZipStreamReader::extract`). The core opens archives with `ZipArchive::new` and reads
-    # the entries it names (import.rs, backup.rs); it never extracts. The fix is zip 9 (#336).
-    { id = "RUSTSEC-2026-0367", reason = "no extraction to disk; fixed in zip 9 only" },
-    { id = "RUSTSEC-2026-0368", reason = "no extraction to disk; fixed in zip 9 only" },
-    { id = "RUSTSEC-2026-0369", reason = "no extraction to disk; fixed in zip 9 only" },
-]
 
 [licenses]
 version = 2
