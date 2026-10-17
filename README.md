@@ -191,7 +191,7 @@ Known gaps:
 - no iOS app; the web interface covers the phone;
 - the data in the storage is not encrypted;
 - on Android, tasks and lists cannot be reordered by dragging, and the end date of a repeat can only be set on macOS;
-- the web interface has no custom repeat rules and does not notify;
+- the web interface has no custom repeat rules;
 - the macOS app is built for Apple silicon only, the released APK for arm64 only.
 
 ## License

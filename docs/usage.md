@@ -211,7 +211,9 @@ Each device has its own notification settings, and they do not sync:
 - an optional summary of the day and its time;
 - the sound. On macOS turn it on or off and choose the standard notification sound or one of the system alert sounds; a system sound plays when you choose it. On Android tap "Sound" to open the system settings of the "Reminders" channel and choose the sound there.
 
-A reminder set on a task itself replaces the one derived from its due date. The web interface does not notify.
+A reminder set on a task itself replaces the one derived from its due date.
+
+The web interface notifies through the browser: open "Notifications…" in the side panel and turn on "Show notifications in this browser". The same settings apply, except the sound, which the browser decides. This needs a page opened over HTTPS; on iPhone and iPad, Lists has to be added to the Home Screen first. A click on a notification opens the task. Signing out stops the notifications of that browser. Without a connection to the server the page still opens and says "The server cannot be reached." with "Try again".
 
 On macOS the system decides whether Lists may show notifications. When it does not allow them, Settings → Notifications shows "macOS does not allow notifications for Lists." with the button "Open System Settings…": click it and allow the notifications of Lists there. Until then no notification is shown, whatever the other settings say.
 

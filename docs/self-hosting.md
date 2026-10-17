@@ -87,6 +87,7 @@ Everything is configured through environment variables, so that no password show
 | `LISTS_OIDC_ISSUER` | address of the OpenID Connect provider | none |
 | `LISTS_OIDC_CLIENT_ID` | client id registered with the provider | none |
 | `LISTS_OIDC_CLIENT_SECRET` | client secret; leave out for a public client | none |
+| `LISTS_VAPID_SUBJECT` | the contact that push services see for this server, `mailto:` or `https:`; see [Notifications](#notifications) | `LISTS_WEB_URL`, or the address of the project |
 | `LISTS_OIDC_ALLOW` | comma-separated e-mail addresses or subject ids that may sign in | none; required with OpenID Connect |
 
 Without `LISTS_WEB_PASSWORD` and without the `LISTS_OIDC_*` variables the server refuses to listen on anything but a loopback address.
@@ -132,7 +133,7 @@ Caddy passes the client's address in `X-Forwarded-For`, which `LISTS_TRUST_PROXY
 
 ## Backup and updates
 
-The whole state is the `/data` volume. With sync configured it is a copy of what the storage holds, and a lost volume is rebuilt on the next sync; without sync it is the only copy, so back it up. CalDAV is the exception: the shared settings and an attachment over 5 MB do not travel through it and exist on the volume only.
+The whole state is the `/data` volume, including the notification key and the subscriptions of the browsers. With sync configured it is a copy of what the storage holds, and a lost volume is rebuilt on the next sync; without sync it is the only copy, so back it up. CalDAV is the exception: the shared settings and an attachment over 5 MB do not travel through it and exist on the volume only.
 
 Before a new version changes how the data is stored, the server puts a backup of the data into `/data/backups`. It is an ordinary backup of Lists, and the app for macOS or Android restores from it; the server has no command for that.
 
@@ -142,13 +143,20 @@ To update, pull the new image and recreate the container:
 docker compose pull && docker compose up -d
 ```
 
+## Notifications
+
+The web interface sends the notifications of the apps through Web Push: reminders, notifications derived from due dates and the summary of the day. Open "Notifications…" in the side panel and turn on "Show notifications in this browser". Each browser has its own settings, kept on the server and not synced. "Send a test notification" sends one at once.
+
+A browser takes notifications only from a page opened over HTTPS, so the server has to sit behind the reverse proxy below; `localhost` works too. On iPhone and iPad, add Lists to the Home Screen first (iOS 16.4 or newer) and turn the notifications on there. The server reaches the push service of the browser (Google, Mozilla, Apple) over outbound HTTPS.
+
+The message is encrypted for the browser, so the push service sees neither the title nor the due date. The server signs its requests with a key it makes on first start and keeps in `/data/web-push-key`; the subscriptions live in `/data/web-push.json`. Losing the key means every browser has to turn notifications on again. The server looks for due notifications every 30 seconds and sends each once. A notification whose time passed while the server was down is not sent.
+
 ## Time zone
 
 The server needs no time zone of its own, and the image has none. Each request from the page carries the browser's offset from UTC, and the server takes today, the time of a quick entry without a date and the end of the day from it. People in different zones can use one server. A request without the offset, from a script for example, is answered on the server's clock, which is UTC in the image.
 
 ## Limits
 
-- No notifications.
 - Repeats are set from the presets; custom rules made in the apps are kept and shown.
 - No reordering by dragging.
 - OpenID Connect was tested against a fake provider only. The signature of the ID token is not verified: the token comes straight from the provider over TLS, which OpenID Connect Core 3.1.3.7 allows.
