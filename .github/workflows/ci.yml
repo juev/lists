@@ -133,3 +133,10 @@ jobs:
           cache-to: type=gha,scope=image-amd64,mode=max
       - name: Start the image as compose.yaml does and upload a file
         run: ./scripts/check-image.sh lists:ci
+      # Trivy reads the Dockerfile; it finds no packages in the image, whose only program is a
+      # static binary: the dependencies of that binary are checked by cargo-deny in the core job.
+      - name: Check the Dockerfile with Trivy
+        run: >-
+          docker run --rm -v "$PWD:/src:ro"
+          aquasec/trivy:0.75.0@sha256:af6acf9a6b85dfe389a1941505c0ce9efef52a4719635e1a962f022a3d855daa
+          config --exit-code 1 /src
