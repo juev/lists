@@ -311,11 +311,28 @@ struct TaskTable: NSViewRepresentable {
             let card = TaskCard(task: task, lines: state.lines)
             card.depth = state.depth
             card.onHeightChange = { [weak self, weak card] in
-                guard let self, let card, let table = self.table, let row = self.rows.firstIndex(where: { $0.isCard && $0.taskId == card.task.id }) else { return }
-                table.noteHeightOfRows(withIndexesChanged: [row])
+                guard let self, let card else { return }
+                let id = card.task.id
+                self.noteHeight { $0.isCard && $0.taskId == id }
             }
             cards[task.id] = card
             return card
+        }
+
+        /// How deep the table is in asking the delegate for a view or a height; the calls may nest. A card measured or
+        /// configured then may report a new height, and telling the table about it from inside its own call is a
+        /// reentrant operation that AppKit warns of and means to stop with an assertion (#357).
+        private var answering = 0
+
+        /// Tells the table that the row matching `which` has a new height; from inside a call of the table, once the
+        /// call is over. The row is looked up again then, since rows may have moved.
+        private func noteHeight(of which: @escaping (TaskTableRow) -> Bool) {
+            guard answering == 0 else {
+                DispatchQueue.main.async { [weak self] in self?.noteHeight(of: which) }
+                return
+            }
+            guard let table, let row = rows.firstIndex(where: which) else { return }
+            table.noteHeightOfRows(withIndexesChanged: [row])
         }
 
         private func pruneCards() {
@@ -335,10 +352,7 @@ struct TaskTable: NSViewRepresentable {
             let card = DraftCard(draft: value, footer: false, escSaves: true)
             card.onChange = { [model] new in if model.draft != nil { model.draft = new } }
             card.onClose = { [model] in model.draft = nil }
-            card.onResize = { [weak self] in
-                guard let self, let table = self.table, let row = self.rows.firstIndex(where: { $0.key == "draft" }) else { return }
-                table.noteHeightOfRows(withIndexesChanged: [row])
-            }
+            card.onResize = { [weak self] in self?.noteHeight { $0.key == "draft" } }
             draft = card
             // R37: the keyboard is in the title at once, the panel of quick entry used before or not (#152): the card asks
             // again while it is not given the keyboard.
@@ -384,6 +398,8 @@ struct TaskTable: NSViewRepresentable {
         func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
 
         func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+            answering += 1
+            defer { answering -= 1 }
             switch rows[row] {
             case .events(let events):
                 let cell = tableView.makeView(withIdentifier: EventsCell.identifier, owner: nil) as? EventsCell ?? EventsCell()
@@ -419,7 +435,9 @@ struct TaskTable: NSViewRepresentable {
         }
 
         func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
-            switch rows[row] {
+            answering += 1
+            defer { answering -= 1 }
+            return switch rows[row] {
             case .events(let events): TaskTableMetrics.events(events.count)
             case .heading: TaskTableMetrics.heading()
             case .task(let state) where state.open: card(state).height(width: tableView.tableColumns.first?.width ?? tableView.bounds.width)
