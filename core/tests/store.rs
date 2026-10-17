@@ -3098,3 +3098,86 @@ fn r130_a_subtask_goes_last_whatever_it_asks_for() {
     .unwrap();
     assert_eq!(titles(&d.subtasks(a.id).unwrap()), ["w", "x", "y"]);
 }
+
+#[test]
+fn r144_due_notifications_are_those_of_the_window() {
+    let d = device(); // now is 2026-10-05T10:00
+    let mk = |title: &str, due: Option<&str>, remind: Option<&str>| {
+        let t = d
+            .create_task(NewTask {
+                title: title.into(),
+                due: due.map(str::to_string),
+                ..NewTask::default()
+            })
+            .unwrap();
+        if let Some(r) = remind {
+            d.set_remind(t.id, Some(r.into())).unwrap();
+        }
+    };
+    mk("а", None, Some("2026-10-05T10:01"));
+    mk("б", Some("2026-10-05T10:02"), None);
+    mk("в", Some("2026-10-06"), None);
+    mk("г", Some("2026-10-05T11:00"), None);
+    let settings = NotifySettings {
+        enabled: true,
+        lead_minutes: vec![0, 15],
+        all_day_at: Some("09:00".into()),
+        summary_at: Some("08:00".into()),
+    };
+    let due = |now: &str, since: &str, s: NotifySettings| {
+        d.set_now_for_tests(now);
+        d.due_notifications(s, since)
+            .unwrap()
+            .into_iter()
+            .map(|n| (n.key.split(':').next().unwrap().to_string(), n.title, n.at, n.count))
+            .collect::<Vec<_>>()
+    };
+    let one = |title: &str, at: &str| vec![("task".to_string(), title.to_string(), at.to_string(), 0)];
+    assert_eq!(
+        due("2026-10-05T10:01:30", "2026-10-05T10:00:00", settings.clone()),
+        one("а", "2026-10-05T10:01")
+    );
+    assert!(
+        due("2026-10-05T10:01:30", "2026-10-05T10:01:30", settings.clone()).is_empty(),
+        "a moment before the window is not sent again"
+    );
+    assert_eq!(
+        due("2026-10-05T10:02:00", "2026-10-05T10:01:30", settings.clone()),
+        one("б", "2026-10-05T10:02"),
+        "the end of the window is in it; the lead of 15 minutes was before the window"
+    );
+    assert_eq!(
+        due("2026-10-05T10:45:10", "2026-10-05T10:44:40", settings.clone()),
+        one("г", "2026-10-05T10:45")
+    );
+    assert_eq!(
+        due("2026-10-06T08:00:20", "2026-10-06T07:59:50", settings.clone()),
+        vec![("summary".to_string(), String::new(), "2026-10-06T08:00".to_string(), 3)]
+    );
+    assert_eq!(
+        due("2026-10-06T09:00:05", "2026-10-06T08:59:35", settings.clone()),
+        one("в", "2026-10-06T09:00")
+    );
+    assert_eq!(
+        due(
+            "2026-10-06T00:00:10",
+            "2026-10-05T23:59:40",
+            NotifySettings {
+                summary_at: Some("00:00".into()),
+                ..settings.clone()
+            }
+        ),
+        vec![("summary".to_string(), String::new(), "2026-10-06T00:00".to_string(), 3)],
+        "a window across midnight takes the summary of the new day"
+    );
+    assert!(due(
+        "2026-10-05T10:01:30",
+        "2026-10-05T10:00:00",
+        NotifySettings {
+            enabled: false,
+            ..settings.clone()
+        }
+    )
+    .is_empty());
+    assert!(due("2026-10-05T10:01:30", "yesterday", settings).is_empty());
+}
