@@ -207,6 +207,7 @@
 "Medium" = "Средний";
 "High" = "Высокий";
 "The extension was closed" = "Расширение закрыто";
+"This build of Lists cannot save from Share: it is signed without a development team." = "Эта сборка Lists не может сохранять из «Поделиться»: она подписана без команды разработчика.";
 "Add" = "Добавить";
 "New tag…" = "Новый тег…";
 "Files: %@" = "Файлов: %@";
