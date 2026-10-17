@@ -647,10 +647,10 @@ enum DebugScript {
                     }
                     print("debug: keychain \(argument) \(said), items opened \(Keychain.opened)")
                 case "undostate":
-                    // Whether a group of changes is still open. A press of the script is handed to the app directly, and the
-                    // undo manager closes a group only after an event taken from the queue: the changes of several scripted
-                    // presses fall into one group and are undone together. Presses of `scripts/postkey.swift` come through
-                    // the queue, and each is a group of its own, as with a keyboard (#230).
+                    // Whether a group of changes is still open. The undo manager closes a group only after an event taken
+                    // from the queue (#230). A press of the script ends with such an event (`press`, #356), so each press is
+                    // a group of its own, as with a keyboard; changes of steps that call the model directly stay in one
+                    // group until the next press.
                     let manager = AppModel.shared.undoManager
                     print("debug: undo state level \(manager?.groupingLevel ?? -1), by event \(manager?.groupsByEvent == true), can undo \(manager?.canUndo == true), run loop modes \(manager?.runLoopModes.map(\.rawValue) ?? []), same as the window's \(manager === NSApp.mainWindow?.undoManager)")
                 case "undo":
@@ -984,6 +984,15 @@ enum DebugScript {
                     window.sendEvent(event)
                 }
             }
+        }
+        // A press of the keyboard is an event taken from the queue, and the undo manager closes its
+        // group when that event is done. A press handed over directly is not, so the group stays open
+        // over the following presses, and the undo actions of a field that has closed since stay in
+        // it: undoing them crashed the app (#356). An empty event through the queue ends the press.
+        if let done = NSEvent.otherEvent(
+            with: .applicationDefined, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: window.windowNumber, context: nil, subtype: 0, data1: 0, data2: 0) {
+            NSApp.postEvent(done, atStart: false)
         }
     }
 
