@@ -22,5 +22,26 @@ for pair in "core/Cargo.toml=$core" "web/Cargo.toml=$web" "apple/project.yml=$ap
         status=1
     fi
 done
+
+# The install instructions name the image of this version, so that a new
+# server syncs with the apps of the same release.
+while IFS= read -r line; do
+    file="${line%%:*}"
+    version="${line##*:}"
+    if [ "$version" != "${expected:-$core}" ]; then
+        echo "version: $file names image '$version', expected '${expected:-$core}'" >&2
+        status=1
+    fi
+done < <(cd "$root" && grep -o 'ghcr\.io/juev/lists:[0-9][^ `"]*' README.md docs/self-hosting.md)
+readme="$(sed -n 's/^Version \(.*\)\. .*/\1/p' "$root/README.md")"
+example="$(sed -n 's/^LISTS_VERSION=//p' "$root/.env.example")"
+for pair in "README.md=$readme" ".env.example=$example"; do
+    file="${pair%%=*}"
+    version="${pair#*=}"
+    if [ "$version" != "${expected:-$core}" ]; then
+        echo "version: $file has '$version', expected '${expected:-$core}'" >&2
+        status=1
+    fi
+done
 [ "$status" -eq 0 ] && echo "version: $core"
 exit "$status"
