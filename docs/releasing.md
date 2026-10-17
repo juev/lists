@@ -6,7 +6,7 @@ A release is a tag. Pushing `v<version>` starts the [Release workflow](../.githu
 
 1. Set the new version in four places: `core/Cargo.toml`, `web/Cargo.toml`, `MARKETING_VERSION` in `apple/project.yml`, `versionName` in `android/app/build.gradle.kts`. Run `cargo build` in `core/` and `web/` so that both `Cargo.lock` files follow.
 2. Raise `versionCode` in `android/app/build.gradle.kts` and `CURRENT_PROJECT_VERSION` in `apple/project.yml` by one. Android refuses to install an APK whose `versionCode` is lower than the installed one.
-3. Update the version in the Status section of the README, in the image tags of the install commands in `README.md` and `docs/self-hosting.md`, and in `LISTS_VERSION` of `.env.example`.
+3. Update the version in the Status section of the README, in the image tags of the install commands in `README.md` and `docs/self-hosting.md`, and in `LISTS_VERSION` of `.env.example`. A pre-release leaves these on the last release.
 4. `./scripts/check-version.sh` confirms that the four places and the documentation agree. The workflow runs it again with the tag, so a tag that names another version stops the release.
 5. Commit, push, wait for CI.
 6. Tag and push the tag:
