@@ -369,7 +369,8 @@ impl Notifier {
                 let text: String = response.into_string().unwrap_or_default().chars().take(200).collect();
                 Sent::Failed(format!("{code} {text}"))
             }
-            Err(e) => Sent::Failed(e.to_string()),
+            // The message of the error names the endpoint, which is the secret of the subscription.
+            Err(ureq::Error::Transport(t)) => Sent::Failed(format!("the push service cannot be reached: {}", t.kind())),
         }
     }
 
@@ -658,6 +659,15 @@ mod tests {
             Some(Sent::Failed(_))
         ));
         assert_eq!(s.notifier.lock().len(), 1, "a failure keeps the subscription");
+        // Nothing listens on port 1; the page shows the error, which must not give the address away.
+        s.notifier.lock()[0].endpoint = "http://127.0.0.1:1/push/secret-token".into();
+        match s
+            .notifier
+            .test("http://127.0.0.1:1/push/secret-token", at("2026-10-05T10:00:00"))
+        {
+            Some(Sent::Failed(e)) => assert!(!e.contains("secret-token"), "{e}"),
+            other => panic!("{other:?}"),
+        }
     }
 
     #[test]
