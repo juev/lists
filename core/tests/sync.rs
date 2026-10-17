@@ -915,6 +915,8 @@ impl Remote for CutShort {
 fn legacy_storage(format_1: bool) -> (TempDir, Device, Attachment, String) {
     let storage = tempfile::tempdir().unwrap();
     let a = device();
+    // A stands for an earlier version, which kept no copies in the storage (S60).
+    a.set_storage_backups(false).unwrap();
     a.set_compact_after_for_tests(0);
     let task = add(&a, "из снимка");
     let att = attach(&a, &task, "a.txt", b"content of A");
@@ -1051,9 +1053,10 @@ fn s49_two_devices_moving_at_once_lose_nothing() {
     assert!(b.sync_with(&cut).is_err());
     sync(&c, &storage);
     sync(&b, &storage);
+    // The copies B and C put into the storage are their own (S60), not moved files of A.
     let moved: Vec<String> = tree(&storage.path().join(ROOT))
         .into_iter()
-        .filter(|n| !n.starts_with("v1/") && n != "vault.json")
+        .filter(|n| !n.starts_with("v1/") && n != "vault.json" && !n.starts_with("backups/"))
         .collect();
     assert_eq!(moved, before);
     assert_eq!(dump(&b), dump(&c));
