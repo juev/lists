@@ -201,24 +201,32 @@ thread_local! {
 }
 
 impl Store {
-    /// R144: what came due after `since` and by now (`YYYY-MM-DDTHH:MM[:SS]`, on the clock of the
-    /// zone in force), earliest first. The web server sends these; it has no system to schedule
-    /// notifications with. A `since` that cannot be read gives nothing.
-    pub fn due_notifications(&self, settings: NotifySettings, since: &str) -> Result<Vec<PlannedNotification>> {
-        let Some(since) = NaiveDateTime::parse_from_str(since, "%Y-%m-%dT%H:%M:%S")
-            .or_else(|_| NaiveDateTime::parse_from_str(since, MOMENT_FMT))
-            .ok()
-        else {
+    /// R144: what came due after `since` and by `until` (`YYYY-MM-DDTHH:MM[:SS]`, local time),
+    /// earliest first. The web server sends these; it has no system to schedule notifications
+    /// with. The caller gives both ends, so that windows which follow each other neither overlap
+    /// nor leave a gap. A moment that cannot be read gives nothing.
+    pub fn due_notifications(
+        &self,
+        settings: NotifySettings,
+        since: &str,
+        until: &str,
+    ) -> Result<Vec<PlannedNotification>> {
+        let read = |text: &str| {
+            NaiveDateTime::parse_from_str(text, "%Y-%m-%dT%H:%M:%S")
+                .or_else(|_| NaiveDateTime::parse_from_str(text, MOMENT_FMT))
+                .ok()
+        };
+        let (Some(since), Some(until)) = (read(since), read(until)) else {
             return Ok(vec![]);
         };
-        self.notifications(settings, Some(since))
+        self.notifications(settings, Some((since, until)))
     }
 
-    /// The plan of `planned_notifications` (`since` is `None`) or the window of `due_notifications`.
+    /// The plan of `planned_notifications` (no window) or the window of `due_notifications`.
     fn notifications(
         &self,
         settings: NotifySettings,
-        since: Option<NaiveDateTime>,
+        window: Option<(NaiveDateTime, NaiveDateTime)>,
     ) -> Result<Vec<PlannedNotification>> {
         let planned = (|| {
             if !settings.enabled {
@@ -241,9 +249,9 @@ impl Store {
                 &[],
             )?;
             // From now on for a plan; for a window, what fell into it.
-            let wanted = |at: &NaiveDateTime| match since {
+            let wanted = |at: &NaiveDateTime| match window {
                 None => *at > now,
-                Some(since) => *at > since && *at <= now,
+                Some((since, until)) => *at > since && *at <= until,
             };
             let mut out = Vec::new();
             for task in &tasks {
@@ -300,7 +308,7 @@ impl Store {
                 }
             }
             if let Some(time) = clock(&settings.summary_at) {
-                let first = since.map_or(now.date(), |since| since.date().min(now.date()));
+                let first = window.map_or(now.date(), |(since, _)| since.date().min(now.date()));
                 for offset in 0..7 {
                     let day = first + chrono::Duration::days(offset);
                     let at = day.and_time(time);
@@ -325,7 +333,7 @@ impl Store {
                 }
             }
             out.sort_by(|a, b| (&a.at, &a.key).cmp(&(&b.at, &b.key)));
-            if since.is_none() {
+            if window.is_none() {
                 out.truncate(60);
             }
             Ok(out)

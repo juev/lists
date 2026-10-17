@@ -3126,7 +3126,7 @@ fn r144_due_notifications_are_those_of_the_window() {
     };
     let due = |now: &str, since: &str, s: NotifySettings| {
         d.set_now_for_tests(now);
-        d.due_notifications(s, since)
+        d.due_notifications(s, since, now)
             .unwrap()
             .into_iter()
             .map(|n| (n.key.split(':').next().unwrap().to_string(), n.title, n.at, n.count))
@@ -3179,5 +3179,11 @@ fn r144_due_notifications_are_those_of_the_window() {
         }
     )
     .is_empty());
-    assert!(due("2026-10-05T10:01:30", "yesterday", settings).is_empty());
+    assert!(due("2026-10-05T10:01:30", "yesterday", settings.clone()).is_empty());
+    // The end of the window is the caller's, not the clock's.
+    d.set_now_for_tests("2026-10-05T10:05");
+    assert!(d
+        .due_notifications(settings, "2026-10-05T10:00:00", "2026-10-05T10:00:59")
+        .unwrap()
+        .is_empty());
 }
