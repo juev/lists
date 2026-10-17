@@ -190,6 +190,8 @@
     <string name="collapse_card">Свернуть</string>
     <string name="file">Файл</string>
     <string name="added">Добавлено</string>
+    <string name="created_not_attached">Создано, но не приложено: %1$s</string>
+    <string name="not_attached">Не приложено: %1$s</string>
     <string name="done_notice">Выполнено</string>
     <string name="moved_to_next">Перенесено на следующий повтор</string>
     <string name="deleted">Удалено</string>

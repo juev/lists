@@ -191,6 +191,8 @@
     <string name="collapse_card">Collapse</string>
     <string name="file">File</string>
     <string name="added">Added</string>
+    <string name="created_not_attached">Created, but not attached: %1$s</string>
+    <string name="not_attached">Not attached: %1$s</string>
     <string name="done_notice">Task completed</string>
     <string name="moved_to_next">Moved to the next occurrence</string>
     <string name="deleted">Deleted</string>

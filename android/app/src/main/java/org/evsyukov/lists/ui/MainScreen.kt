@@ -666,7 +666,7 @@ private suspend fun SnackbarHostState.offerRestore(): Boolean = coroutineScope {
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun NewTaskSheet(state: UiState, restored: NewTaskEntry?, onAdd: (TaskDraft) -> Unit, onDismiss: (NewTaskEntry) -> Unit) {
+private fun NewTaskSheet(state: UiState, restored: NewTaskEntry?, onAdd: suspend (TaskDraft) -> Boolean, onDismiss: (NewTaskEntry) -> Unit) {
     val context = LocalContext.current
     val entry = rememberSaveable(saver = NewTaskEntry.Saver) { restored ?: NewTaskEntry(listId = state.newTaskListId()).apply { projectId = (state.scope as? Scope.Project)?.id } }
     // No width limit: expanded, the card takes the whole screen (R64).
