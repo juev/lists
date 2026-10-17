@@ -8,7 +8,9 @@ options:
 packages:
   KeyboardShortcuts:
     url: https://github.com/sindresorhus/KeyboardShortcuts
-    from: 2.0.0
+    # Pinned exactly, with the revision in Package.resolved next to this file: a new
+    # version enters a signed build only through a change here.
+    exactVersion: 2.4.0
 settings:
   base:
     SWIFT_VERSION: "5.0"

@@ -29,6 +29,12 @@ fi
 
 "$root/scripts/build-apple.sh"
 (cd "$root/apple" && xcodegen generate --quiet)
+# The project is generated and not tracked, so the pins of the Swift packages are kept in
+# apple/Package.resolved and put where Xcode reads them; a build that would resolve other
+# versions stops instead.
+swiftpm="$root/apple/Lists.xcodeproj/project.xcworkspace/xcshareddata/swiftpm"
+mkdir -p "$swiftpm"
+cp "$root/apple/Package.resolved" "$swiftpm/Package.resolved"
 xcodebuild -project "$root/apple/Lists.xcodeproj" -scheme Lists -configuration "$config" \
-    -derivedDataPath "$root/apple/build" -quiet "$@" build
+    -derivedDataPath "$root/apple/build" -onlyUsePackageVersionsFromResolvedFile -quiet "$@" build
 echo "apple: $root/apple/build/Build/Products/$config/Lists.app"

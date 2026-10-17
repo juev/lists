@@ -3,7 +3,8 @@
 # The binary is linked statically against musl, so the image holds nothing
 # but it and a minimal init.
 
-FROM rust:1.94.1-alpine AS build
+# Pinned by digest as well: a tag can be pushed again. Dependabot raises both.
+FROM rust:1.94.1-alpine@sha256:77237dd363a0b127bb5ef532c2d64c0deb380b738e43a9c4bdac73398d6d0a08 AS build
 # tini forwards SIGTERM: lists-web installs no signal handlers and would
 # otherwise ignore `docker stop` as PID 1.
 RUN apk add --no-cache musl-dev tini-static

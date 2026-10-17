@@ -1,0 +1,12 @@
+# The actions are pinned by commit and the build image by digest; Dependabot
+# proposes the new pins together with the version in the comment next to them.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
