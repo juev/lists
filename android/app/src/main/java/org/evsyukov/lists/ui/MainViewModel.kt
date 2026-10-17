@@ -486,6 +486,26 @@ class MainViewModel : ViewModel() {
         }
     }
 
+    /** R155, R156: writes the export, everything or the list `listId`, to the file the person chose. */
+    fun exportTo(context: android.content.Context, uri: android.net.Uri, markdown: Boolean, listId: String?) {
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val file = java.io.File.createTempFile("export", null, context.cacheDir)
+                    try {
+                        if (markdown) Repo.store.exportMarkdown(file.absolutePath, listId) else Repo.store.exportJson(file.absolutePath, listId)
+                        context.contentResolver.openOutputStream(uri)?.use { out -> file.inputStream().use { it.copyTo(out) } }
+                            ?: error("cannot write the file")
+                    } finally {
+                        file.delete()
+                    }
+                }
+            }
+            val text = result.fold({ str(R.string.exported) }, { e -> describe(e) })
+            _state.update { it.copy(notice = Notice(text)) }
+        }
+    }
+
     fun sync() {
         viewModelScope.launch { Repo.sync() }
     }

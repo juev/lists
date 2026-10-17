@@ -298,6 +298,12 @@
     <string name="contains">Содержит</string>
     <string name="matching_now">Сейчас подходит задач: %1$s</string>
     <string name="import_file">Импорт…</string>
+    <string name="export_file">Экспорт…</string>
+    <string name="export_all_json">Всё в JSON</string>
+    <string name="export_all_markdown">Всё в Markdown</string>
+    <string name="export_list_json">Этот список в JSON</string>
+    <string name="export_list_markdown">Этот список в Markdown</string>
+    <string name="exported">Выгружено.</string>
     <string name="imported">Импорт из %1$s: списков — %2$s, задач — %3$s, вложений — %4$s.</string>
     <string name="notifications">Уведомления</string>
     <string name="show_notifications">Показывать уведомления</string>
