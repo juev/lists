@@ -19,6 +19,9 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
+        with:
+          # The release tags: check-version.sh compares the build number with theirs.
+          fetch-depth: 0
       - name: Install the Rust toolchain
         run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
@@ -32,6 +35,8 @@ jobs:
         run: make lint
       - name: Test
         run: make test
+      - name: Check that the build changed no tracked file
+        run: ./scripts/check-clean-tree.sh
 
   android:
     name: Android app
@@ -61,6 +66,8 @@ jobs:
       - uses: gradle/actions/setup-gradle@v6
       - name: Build the debug APK
         run: make android
+      - name: Check that the build changed no tracked file
+        run: ./scripts/check-clean-tree.sh
 
   macos:
     name: macOS app
@@ -79,6 +86,8 @@ jobs:
       # A build that compiles can still stop at launch, as 0.3.1 did (#239, #240).
       - name: Start the app
         run: ./scripts/check-launch.sh apple/build/Build/Products/Debug/Lists.app debug
+      - name: Check that the build changed no tracked file
+        run: ./scripts/check-clean-tree.sh
 
   docker:
     name: Docker image

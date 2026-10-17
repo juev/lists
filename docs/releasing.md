@@ -5,9 +5,9 @@ A release is a tag. Pushing `v<version>` starts the [Release workflow](../.githu
 ## Steps
 
 1. Set the new version in four places: `core/Cargo.toml`, `web/Cargo.toml`, `MARKETING_VERSION` in `apple/project.yml`, `versionName` in `android/app/build.gradle.kts`. Run `cargo build` in `core/` and `web/` so that both `Cargo.lock` files follow.
-2. Raise `versionCode` in `android/app/build.gradle.kts` and `CURRENT_PROJECT_VERSION` in `apple/project.yml` by one. Android refuses to install an APK whose `versionCode` is lower than the installed one.
+2. Raise `versionCode` in `android/app/build.gradle.kts` and `CURRENT_PROJECT_VERSION` in `apple/project.yml` by one; the two stay the same number. Android refuses to install an APK whose `versionCode` is lower than the installed one.
 3. Update the version in the Status section of the README, in the image tags of the install commands in `README.md` and `docs/self-hosting.md`, and in `LISTS_VERSION` of `.env.example`. A pre-release leaves these on the last release.
-4. `./scripts/check-version.sh` confirms that the four places and the documentation agree. The workflow runs it again with the tag, so a tag that names another version stops the release.
+4. `./scripts/check-version.sh` confirms that the four places, both `Cargo.lock` files and the documentation agree, that `versionCode` and `CURRENT_PROJECT_VERSION` are equal, and that the build number is above that of every earlier release tag. CI runs it on every push; the Release workflow runs it again with the tag, so a tag that names another version stops the release.
 5. Commit, push, wait for CI.
 6. Tag and push the tag:
 
@@ -22,7 +22,7 @@ To try the pipeline without publishing, start the Release workflow by hand (Acti
 
 ## What is checked before a release, and what is not
 
-- `make test` and `make lint`, in CI and again in the Release workflow.
+- `make test` and `make lint`, in CI and again in the Release workflow. Both run with `--locked`, so a lockfile that does not match `Cargo.toml` fails there and not first in the Docker build; `make lint` runs Clippy with all features, `cli` included. After the builds `scripts/check-clean-tree.sh` fails when a build changed a tracked file or left a new one that is not ignored.
 - **The macOS app starts.** CI runs `scripts/check-launch.sh … debug` on the Debug build: the helper of quick entry is switched on and the app is started with a probe that stops it when the event loop is run while the model is built. That is how 0.3.1 stopped at every launch (#239); the check fails on that code and passes after the fix. The Release workflow runs `scripts/check-launch.sh … release` on the app it has just packed, which must still be running fifteen seconds after its start; when it is not, nothing is published.
 - **Not checked by a machine:** what the apps show on a screen, the Android app on a phone, and a launch of the macOS Release build under the real conditions of a Mac in use: with the installed helper, with notifications allowed and planned, with the keychain asking. The probe covers one way a launch can go wrong, not all of them. Before a tag, install the build on the Mac it is meant for and start it several times.
 
