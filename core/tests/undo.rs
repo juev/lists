@@ -307,3 +307,32 @@ fn r131_the_revision_grows_with_each_action_and_stays_when_a_text_edit_joins_the
     d.undo().unwrap();
     assert_eq!(d.task(t.id).unwrap().title, "а");
 }
+
+#[test]
+fn r139_a_new_task_that_failed_half_way_is_taken_back_whole_and_saving_again_makes_no_twin() {
+    let d = device();
+    // As both apps save the card of a new task: one group, taken back at once when a write in it fails.
+    let save = |tag: &str| -> std::result::Result<TaskItem, AppError> {
+        let revision = d.undo_revision();
+        d.begin_group();
+        let result = (|| {
+            let t = add(&d, "а");
+            d.set_notes(t.id.clone(), "заметка".into())?;
+            d.add_tag(t.id.clone(), tag.into())?;
+            Ok(t)
+        })();
+        d.end_group();
+        if result.is_err() && d.undo_revision() != revision {
+            d.undo().unwrap();
+        }
+        result
+    };
+    assert!(save(&"т".repeat(99)).is_err(), "a tag of 198 bytes is refused");
+    assert!(view(&d, Scope::Inbox).is_empty());
+    assert_eq!(view(&d, Scope::Trash), ["а"]);
+
+    let t = save("дом").unwrap();
+    assert_eq!(view(&d, Scope::Inbox), ["а"]);
+    let back = d.task(t.id).unwrap();
+    assert_eq!((back.notes.as_str(), back.tags), ("заметка", vec!["дом".to_string()]));
+}

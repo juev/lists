@@ -178,14 +178,26 @@ fun copyToCache(context: Context, uri: Uri): File? = runCatching {
     target
 }.onFailure { logError("attachments", "a picked or shared file was not copied: ${logged(it)}") }.getOrNull()
 
-/** Attaches the files behind the URIs to a task; the temporary copies are removed afterwards. */
-fun attach(context: Context, store: Store, taskId: String, uris: List<Uri>) {
+/**
+ * Attaches the files behind the URIs to a task; the temporary copies are removed afterwards.
+ * Returns the names of the files that were not attached (R139): the core logs why (R102).
+ */
+fun attach(context: Context, store: Store, taskId: String, uris: List<Uri>): List<String> {
+    val failed = mutableListOf<String>()
     for (uri in uris) {
-        val file = copyToCache(context, uri) ?: continue
-        runCatching { store.addAttachment(taskId, file.absolutePath, file.name) }
+        val file = copyToCache(context, uri)
+        if (file == null) {
+            failed += uri.lastPathSegment ?: str(R.string.file)
+            continue
+        }
+        runCatching { store.addAttachment(taskId, file.absolutePath, file.name) }.onFailure { failed += file.name }
         file.parentFile?.deleteRecursively()
     }
+    return failed
 }
+
+/** R139: files that did not become attachments; the message names them. */
+class NotAttached(names: List<String>) : Exception(str(R.string.not_attached, names.joinToString(", ")))
 
 /** Writes the content of an attachment to the place the user picked (R86). */
 internal fun copyAttachment(context: Context, file: Attachment, target: Uri): Boolean = runCatching {
@@ -318,7 +330,9 @@ fun EditorSheet(editing: Editing, state: UiState, model: MainViewModel, onRemind
     var fetchFailed by remember(task.id) { mutableStateOf(setOf<String>()) }
     val fetchScope = rememberCoroutineScope()
     val pickFiles = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
-        if (uris.isNotEmpty()) model.change { store -> attach(context, store, task.id, uris) }
+        if (uris.isNotEmpty()) {
+            model.change { store -> attach(context, store, task.id, uris).takeIf { it.isNotEmpty() }?.let { throw NotAttached(it) } }
+        }
     }
     // R86: the attachment waiting for the place the system picker returns, and the row whose menu is open.
     var saving by remember(task.id) { mutableStateOf<Attachment?>(null) }

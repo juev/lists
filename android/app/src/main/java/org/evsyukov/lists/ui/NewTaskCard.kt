@@ -49,6 +49,7 @@ import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -69,11 +70,14 @@ import org.evsyukov.lists.R
 import org.evsyukov.lists.Repo
 import org.evsyukov.lists.dateLabel
 import org.evsyukov.lists.displayName
+import org.evsyukov.lists.logError
+import org.evsyukov.lists.logged
 import org.evsyukov.lists.priorities
 import org.evsyukov.lists.str
 import org.evsyukov.lists.summary
 import org.evsyukov.lists.title
 import org.evsyukov.lists.today
+import kotlinx.coroutines.launch
 import uniffi.lists_core.Freq
 import uniffi.lists_core.NewTask
 import uniffi.lists_core.Priority
@@ -114,12 +118,34 @@ data class TaskDraft(
 internal fun typedSubtasks(lines: List<String>, field: String): List<String> =
     (lines + field).map(String::trim).filter(String::isNotEmpty)
 
+/** What came of saving a draft (R139): the task, and the names of the files that were not attached to it. */
+class SavedDraft(val task: TaskItem, val unattached: List<String>)
+
+/**
+ * R139: creates the task of a draft as one step of undo. A write that fails half way takes back at once,
+ * as undo does, what was written before it, so that saving again makes no twin; the error goes on to
+ * the caller. A file that was not attached leaves the task as it is.
+ */
+fun Store.saveDraft(context: Context, draft: TaskDraft): SavedDraft {
+    val revision = undoRevision()
+    beginGroup()
+    val result = try {
+        runCatching { createFrom(context, draft) }
+    } finally {
+        endGroup()
+    }
+    if (result.isFailure && undoRevision() != revision) {
+        runCatching { undo() }.onFailure { logError("app", "a task that failed half way was not taken back: ${logged(it)}") }
+    }
+    return result.getOrThrow()
+}
+
 /**
  * Creates the task a draft describes, as a subtask when a parent is given.
  * What the fields say wins over what the title says; a due date the card only
  * preset yields to both.
  */
-fun Store.createFrom(context: Context, draft: TaskDraft): TaskItem {
+private fun Store.createFrom(context: Context, draft: TaskDraft): SavedDraft {
     val line = draft.title.trim()
     val parentId = draft.parentId
     // R130: a new task goes first; the list has no selected task to go under.
@@ -142,10 +168,11 @@ fun Store.createFrom(context: Context, draft: TaskDraft): TaskItem {
     val typedPriority = if (draft.priority == Priority.NONE && draft.parse) parseQuick(line).priority else Priority.NONE
     val priority = finalPriority(draft.priority, task.priority, typedPriority)
     if (priority != task.priority) setPriority(task.id, priority)
-    attach(context, this, task.id, draft.files)
     // R113: created after the task, in the typed order; quick entry is not read in their titles.
     if (draft.subtasks.isNotEmpty()) addSubtasks(task.id, draft.subtasks)
-    return task(task.id)
+    // Last: a file that does not come fails nothing else.
+    val unattached = attach(context, this, task.id, draft.files)
+    return SavedDraft(task(task.id), unattached)
 }
 
 /** The most lines the note of the compact card takes before it scrolls inside itself (R64). */
@@ -277,7 +304,8 @@ fun NewTaskCard(
     /** R129: offered under the lists, as a group of their own. */
     projects: List<TaskItem>,
     parse: Boolean,
-    onSubmit: (TaskDraft) -> Unit,
+    /** R139: true once the task is saved; false keeps everything typed for another try. */
+    onSubmit: suspend (TaskDraft) -> Boolean,
     modifier: Modifier = Modifier,
     title: String = "",
     notes: String = "",
@@ -337,15 +365,11 @@ fun NewTaskCard(
     val shownDue = shownDue(due, typed?.due, preset)
     val shownPriority = shownPriority(priority, typed?.priority ?: Priority.NONE, presetPriority)
 
-    fun submit() {
-        if (text.isBlank()) return
-        onSubmit(
-            TaskDraft(
-                text, note, start, due ?: preset, due == null && preset != null, dueRemoved, repeat, priority, chosenList, parse, attached,
-                typedSubtasks(entry.subtasks, entry.subtask), chosenProject,
-            ),
-        )
-        if (!keepOpen) return
+    // R139: Save waits for the task that is being saved.
+    var saving by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    fun empty() {
         text = ""
         note = ""
         start = null
@@ -359,6 +383,24 @@ fun NewTaskCard(
         entry.subtasksShown = false
         subtaskAsked = false
         focus.requestFocus()
+    }
+
+    fun submit() {
+        if (text.isBlank() || saving) return
+        val draft = TaskDraft(
+            text, note, start, due ?: preset, due == null && preset != null, dueRemoved, repeat, priority, chosenList, parse, attached,
+            typedSubtasks(entry.subtasks, entry.subtask), chosenProject,
+        )
+        saving = true
+        scope.launch {
+            // The save runs where closing the card does not cancel it; a card closed meanwhile is not emptied.
+            val saved = try {
+                onSubmit(draft)
+            } finally {
+                saving = false
+            }
+            if (saved && keepOpen) empty()
+        }
     }
 
     val listName = chosenProject?.let { id -> projects.firstOrNull { it.id == id }?.title }
@@ -380,7 +422,7 @@ fun NewTaskCard(
             )
             // Compact, the card is saved from the strip at its bottom.
             if (full) {
-                IconButton(onClick = { submit() }, enabled = text.isNotBlank()) {
+                IconButton(onClick = { submit() }, enabled = text.isNotBlank() && !saving) {
                     Icon(Icons.AutoMirrored.Outlined.Send, str(R.string.add))
                 }
             }
@@ -465,7 +507,7 @@ fun NewTaskCard(
                 }
                 Button(
                     onClick = { submit() },
-                    enabled = text.isNotBlank(),
+                    enabled = text.isNotBlank() && !saving,
                     shape = CircleShape,
                     colors = ButtonDefaults.buttonColors(containerColor = viewTint(ViewTint.Blue), contentColor = Color.White),
                     contentPadding = PaddingValues(horizontal = 18.dp),

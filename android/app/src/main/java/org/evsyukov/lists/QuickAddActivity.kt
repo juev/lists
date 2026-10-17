@@ -31,16 +31,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.lifecycleScope
 import org.evsyukov.lists.ui.CardHandle
 import org.evsyukov.lists.ui.NewTaskCard
 import org.evsyukov.lists.ui.NewTaskEntry
 import org.evsyukov.lists.ui.TaskDraft
-import org.evsyukov.lists.ui.createFrom
+import org.evsyukov.lists.ui.saveDraft
 import org.evsyukov.lists.ui.describe
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.async
 
 /** What another app handed over, reduced to what a task can hold. */
 private data class Shared(val title: String = "", val notes: String = "", val files: List<Uri> = emptyList())
@@ -146,19 +143,22 @@ class QuickAddActivity : ComponentActivity() {
         (if (Build.VERSION.SDK_INT >= 33) intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM, Uri::class.java)
         else intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM)).orEmpty()
 
-    private fun save(draft: TaskDraft) {
-        lifecycleScope.launch {
-            val result = withContext(Dispatchers.IO) {
-                runCatching {
-                    val task = Repo.store.createFrom(applicationContext, draft)
-                    EntryPrefs.noteUsedList(applicationContext, task.listId)
-                }
+    /** R139: a task that was not created keeps the window open with what was typed. */
+    private suspend fun save(draft: TaskDraft): Boolean {
+        // In the scope of the process: a window closed meanwhile does not cut the save short.
+        val result = Repo.scope.async {
+            runCatching {
+                Repo.store.saveDraft(applicationContext, draft).also { EntryPrefs.noteUsedList(applicationContext, it.task.listId) }
             }
-            Repo.changed()
-            val message = result.exceptionOrNull()?.let(::describe) ?: str(R.string.added)
-            Toast.makeText(applicationContext, message, Toast.LENGTH_SHORT).show()
-            if (result.isSuccess) finish()
-        }
+        }.await()
+        Repo.changed()
+        val message = result.fold(
+            { saved -> if (saved.unattached.isEmpty()) str(R.string.added) else str(R.string.created_not_attached, saved.unattached.joinToString(", ")) },
+            ::describe,
+        )
+        Toast.makeText(applicationContext, message, Toast.LENGTH_SHORT).show()
+        if (result.isSuccess) finish()
+        return result.isSuccess
     }
 }
 

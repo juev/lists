@@ -16,6 +16,7 @@ import org.evsyukov.lists.displayName
 import org.evsyukov.lists.dueDayPassed
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -316,14 +317,28 @@ class MainViewModel : ViewModel() {
         if (id == null) _state.update { it.copy(editing = null) } else viewModelScope.launch { reload() }
     }
 
-    /** Adds what the new-task card collected. The view gives the task its place and nothing else (R75). */
-    fun add(draft: TaskDraft) {
-        if (draft.title.isBlank()) return
-        change(str(R.string.created_notice)) { store ->
+    /**
+     * Adds what the new-task card collected. The view gives the task its place and nothing else (R75).
+     * R139: true once the task is created; the save goes on when the card that waits for it is closed.
+     */
+    suspend fun add(draft: TaskDraft): Boolean {
+        if (draft.title.isBlank()) return false
+        return viewModelScope.async {
             val context = ListsApp.instance
-            val task = store.createFrom(context, draft)
-            if (draft.parentId == null) EntryPrefs.noteUsedList(context, task.listId)
-        }
+            val result = withContext(Dispatchers.IO) { runCatching { Repo.store.saveDraft(context, draft) } }
+            result.onSuccess { if (draft.parentId == null) EntryPrefs.noteUsedList(context, it.task.listId) }
+            val notice = result.fold(
+                { saved ->
+                    val text = if (saved.unattached.isEmpty()) str(R.string.created_notice)
+                    else str(R.string.created_not_attached, saved.unattached.joinToString(", "))
+                    Notice(text, UNDO)
+                },
+                { Notice(describe(it)) },
+            )
+            _state.update { it.copy(notice = notice) }
+            Repo.changed()
+            result.isSuccess
+        }.await()
     }
 
     fun addSubtask(parent: String, title: String) {
