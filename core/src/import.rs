@@ -15,9 +15,9 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-use crate::db::{KIND_ATTACHMENT, KIND_LIST, KIND_TASK};
+use crate::db::{KIND_ATTACHMENT, KIND_FILTER, KIND_LIST, KIND_TASK};
 use crate::error::{AppError, Result};
-use crate::model::{Freq, Repeat, INBOX_ID};
+use crate::model::{FilterSpec, Freq, Priority, Repeat, SortMode, INBOX_ID};
 use crate::store::{self, hex, Store};
 use crate::LogLevel;
 use crate::{order, quickadd};
@@ -38,6 +38,8 @@ struct List {
     key: String,
     name: String,
     color: String,
+    /// Other settings of the list, as registers: only a file of ours has them (I11).
+    settings: Vec<(&'static str, Value)>,
 }
 
 #[derive(Default)]
@@ -54,6 +56,8 @@ struct Task {
     priority: i64,
     tags: Vec<String>,
     done: Option<String>,
+    /// Closed as "won't do" at the moment of `done` (S33).
+    wont: bool,
     project: bool,
     repeat: Option<Repeat>,
     files: Vec<(String, PathBuf)>,
@@ -64,6 +68,8 @@ struct Parsed {
     source: &'static str,
     lists: Vec<List>,
     tasks: Vec<Task>,
+    /// Saved filters: key, name and what they select, with the keys of the lists in `list_ids`.
+    filters: Vec<(String, String, FilterSpec)>,
     notes: Vec<String>,
 }
 
@@ -220,7 +226,12 @@ fn parse_2do(archive: &Path, work: &Path) -> Result<Parsed> {
             if inbox {
                 inbox_uid = uid;
             } else {
-                out.lists.push(List { key: uid, name, color });
+                out.lists.push(List {
+                    key: uid,
+                    name,
+                    color,
+                    ..List::default()
+                });
             }
         }
     }
@@ -416,6 +427,7 @@ fn parse_todoist(text: &str, name: &str) -> Result<Parsed> {
         key: name.to_string(),
         name: name.to_string(),
         color: String::new(),
+        ..List::default()
     });
     let today = store::local_time(Utc::now()).date();
     let mut stack: Vec<String> = Vec::new();
@@ -511,6 +523,7 @@ fn parse_trello(board: &Value) -> Result<Parsed> {
             key: text(list, "id"),
             name,
             color: String::new(),
+            ..List::default()
         });
     }
     let labels: HashMap<String, String> = array("labels")
@@ -642,6 +655,7 @@ fn parse_mstodo(root: &Value) -> Result<Parsed> {
                 key: key.clone(),
                 name: text(list, "displayName"),
                 color: String::new(),
+                ..List::default()
             });
         }
         for task in list.get("tasks").and_then(Value::as_array).cloned().unwrap_or_default() {
@@ -753,6 +767,107 @@ fn parse_mstodo(root: &Value) -> Result<Parsed> {
 
 // ---------------------------------------------------------------- writing
 
+// ---------------------------------------------------------------- Lists
+
+/// I11: a JSON export of Lists (docs/json-format.md). Attachment content is not in it.
+fn parse_lists(v: &Value) -> Result<Parsed> {
+    let version = v["version"].as_u64().unwrap_or(0);
+    if version == 0 || version > crate::export::VERSION {
+        return Err(invalid(format!(
+            "the export uses version {version} of the format, this version understands version {}; update the app",
+            crate::export::VERSION
+        )));
+    }
+    let text = |v: &Value| v.as_str().map(str::to_string);
+    let mut out = Parsed {
+        source: "Lists",
+        ..Parsed::default()
+    };
+    for l in v["lists"].as_array().into_iter().flatten() {
+        let Some(key) = text(&l["id"]) else { continue };
+        // The inbox is the inbox of the device that imports.
+        if key == INBOX_ID {
+            continue;
+        }
+        let mut settings: Vec<(&'static str, Value)> = Vec::new();
+        if let Some(icon) = text(&l["icon"]).filter(|i| !i.is_empty()) {
+            settings.push(("icon", json!(icon)));
+        }
+        if let Some(sort) = l["sort"].as_str() {
+            settings.push(("sort", json!(SortMode::parse(sort).as_str())));
+        }
+        for (field, name) in [
+            ("show_done", "showDone"),
+            ("default_due", "defaultDueToday"),
+            ("archived", "archived"),
+        ] {
+            if let Some(b) = l[name].as_bool() {
+                settings.push((field, json!(b)));
+            }
+        }
+        if let Some(p) = l["defaultPriority"].as_str() {
+            settings.push(("default_priority", json!(priority_of(p).as_i64())));
+        }
+        out.lists.push(List {
+            key,
+            name: text(&l["name"]).unwrap_or_default(),
+            color: text(&l["color"]).unwrap_or_default(),
+            settings,
+        });
+    }
+    let mut files = 0usize;
+    for t in v["tasks"].as_array().into_iter().flatten() {
+        let Some(key) = text(&t["id"]) else { continue };
+        files += t["attachments"].as_array().map_or(0, Vec::len);
+        let repeat = match &t["repeat"] {
+            Value::Null => None,
+            r => serde_json::from_value::<Repeat>(r.clone()).ok(),
+        };
+        let done = text(&t["done"]);
+        out.tasks.push(Task {
+            key,
+            list: text(&t["list"]).filter(|l| l != INBOX_ID),
+            parent: text(&t["parent"]),
+            title: text(&t["title"]).unwrap_or_default(),
+            notes: text(&t["notes"]).unwrap_or_default(),
+            start: text(&t["start"]),
+            due: text(&t["due"]),
+            remind: text(&t["remind"]),
+            priority: priority_of(t["priority"].as_str().unwrap_or_default()).as_i64(),
+            tags: t["tags"].as_array().into_iter().flatten().filter_map(text).collect(),
+            wont: done.is_some() && t["wontDo"].as_bool() == Some(true),
+            done,
+            project: t["project"].as_bool() == Some(true),
+            repeat,
+            files: vec![],
+        });
+    }
+    for f in v["filters"].as_array().into_iter().flatten() {
+        let (Some(key), Some(name)) = (text(&f["id"]), text(&f["name"])) else {
+            continue;
+        };
+        if let Ok(spec) = serde_json::from_value::<FilterSpec>(f["spec"].clone()) {
+            out.filters.push((key, name, spec));
+        }
+    }
+    if files > 0 {
+        out.notes.push(format!(
+            "A JSON export holds no attachment content: {files} attachment{} not imported.",
+            if files == 1 { " was" } else { "s were" }
+        ));
+    }
+    Ok(out)
+}
+
+fn priority_of(name: &str) -> Priority {
+    match name {
+        "low" => Priority::Low,
+        "medium" => Priority::Medium,
+        "high" => Priority::High,
+        _ => Priority::None,
+    }
+}
+
 fn derived_id(source: &str, kind: &str, key: &str) -> String {
     Uuid::new_v5(
         &Uuid::NAMESPACE_URL,
@@ -820,6 +935,9 @@ impl Store {
                 if !list.color.is_empty() {
                     w.set(KIND_LIST, id, "color", json!(list.color.to_uppercase()))?;
                 }
+                for (field, value) in &list.settings {
+                    w.set(KIND_LIST, id, field, value.clone())?;
+                }
                 if !exists {
                     let pos = order::between(last.as_deref(), None);
                     w.set(KIND_LIST, id, "pos", json!(pos))?;
@@ -856,6 +974,7 @@ impl Store {
                 set("remind", json!(task.remind))?;
                 set("priority", json!(task.priority.clamp(0, 3)))?;
                 set("done", json!(task.done))?;
+                set("wont", if task.wont { json!(task.done) } else { Value::Null })?;
                 set("project", json!(task.project && parent.is_none()))?;
                 set(
                     "repeat",
@@ -896,8 +1015,32 @@ impl Store {
                 }
                 report.tasks += 1;
             }
+            let mut last: Option<String> = w.tx.query_row("SELECT max(pos) FROM filters", [], |r| r.get(0))?;
+            for (key, name, spec) in &parsed.filters {
+                let id = derived_id(source, "filter", key);
+                let exists: bool = w.tx.query_row(
+                    "SELECT count(*) > 0 FROM fields WHERE kind = 'filter' AND id = ?1",
+                    [&id],
+                    |r| r.get(0),
+                )?;
+                let mut spec = spec.clone();
+                spec.list_ids = spec.list_ids.iter().filter_map(|l| list_id.get(l).cloned()).collect();
+                w.set(KIND_FILTER, &id, "name", json!(name.trim()))?;
+                w.set(KIND_FILTER, &id, "spec", serde_json::to_value(&spec)?)?;
+                if !exists {
+                    let pos = order::between(last.as_deref(), None);
+                    w.set(KIND_FILTER, &id, "pos", json!(pos))?;
+                    last = Some(pos);
+                }
+            }
             Ok(())
         })?;
+        if !parsed.filters.is_empty() {
+            let n = parsed.filters.len();
+            report
+                .notes
+                .push(format!("{n} saved filter{} imported.", if n == 1 { "" } else { "s" }));
+        }
         if long_tags > 0 {
             let (noun, verb) = if long_tags == 1 {
                 ("tag", "was")
@@ -947,7 +1090,9 @@ impl Store {
                 if trimmed.starts_with('{') || trimmed.starts_with('[') {
                     let value: Value =
                         serde_json::from_str(trimmed).map_err(|e| invalid(format!("not valid JSON: {e}")))?;
-                    if value.get("cards").is_some() && value.get("lists").is_some() {
+                    if value.get("format").and_then(Value::as_str) == Some(crate::export::FORMAT) {
+                        parse_lists(&value)?
+                    } else if value.get("cards").is_some() && value.get("lists").is_some() {
                         parse_trello(&value)?
                     } else {
                         parse_mstodo(&value)?

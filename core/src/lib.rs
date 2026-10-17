@@ -8,6 +8,7 @@ mod backup;
 mod caldav;
 mod db;
 mod error;
+mod export;
 mod hlc;
 mod import;
 mod log;
