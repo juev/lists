@@ -6,13 +6,15 @@ export JAVA_HOME ANDROID_HOME
 
 .PHONY: test lint fmt apple apple-run android android-install web clean
 
+# --locked: a lockfile that no longer matches Cargo.toml is an error here, as it
+# is in the Docker build, instead of being rewritten on the way.
 test:
-	cd core && cargo test
-	cd web && cargo test
+	cd core && cargo test --locked
+	cd web && cargo test --locked
 
 lint:
-	cd core && cargo fmt --check && cargo clippy --all-targets -- -D warnings
-	cd web && cargo fmt --check && cargo clippy --all-targets -- -D warnings
+	cd core && cargo fmt --check && cargo clippy --locked --all-targets --all-features -- -D warnings
+	cd web && cargo fmt --check && cargo clippy --locked --all-targets --all-features -- -D warnings
 
 fmt:
 	cd core && cargo fmt

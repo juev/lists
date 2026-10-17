@@ -23,6 +23,48 @@ for pair in "core/Cargo.toml=$core" "web/Cargo.toml=$web" "apple/project.yml=$ap
     fi
 done
 
+# The lockfiles carry the version of the crates too: a bump without a build
+# leaves them behind, and `cargo build --locked` in the Dockerfile stops on it.
+lock_version() { sed -n "/^name = \"$2\"\$/{n;s/^version = \"\(.*\)\"/\1/p;}" "$root/$1"; }
+for pair in "core/Cargo.lock (lists-core)=$(lock_version core/Cargo.lock lists-core)" \
+    "web/Cargo.lock (lists-core)=$(lock_version web/Cargo.lock lists-core)" \
+    "web/Cargo.lock (lists-web)=$(lock_version web/Cargo.lock lists-web)"; do
+    file="${pair%%=*}"
+    version="${pair#*=}"
+    if [ "$version" != "$core" ]; then
+        echo "version: $file has '$version', expected '$core'; run cargo build" >&2
+        status=1
+    fi
+done
+
+# The build number goes up with every release, on both platforms alike: Android
+# refuses to install an APK whose versionCode is lower than the installed one.
+android_code() { sed -n 's/^ *versionCode = \([0-9]*\)$/\1/p'; }
+apple_code() { sed -n 's/^ *CURRENT_PROJECT_VERSION: "\([0-9]*\)"$/\1/p'; }
+code="$(android_code < "$root/android/app/build.gradle.kts")"
+apple_build="$(apple_code < "$root/apple/project.yml")"
+if [ -z "$code" ] || [ "$code" != "$apple_build" ]; then
+    echo "version: versionCode is '$code', CURRENT_PROJECT_VERSION is '$apple_build'; they must be the same number" >&2
+    status=1
+fi
+tags="$(git -C "$root" tag --list 'v*')"
+if [ -z "$tags" ]; then
+    echo "version: no release tags in this clone, the build number is not compared with them" >&2
+fi
+for tag in $tags; do
+    released="$(git -C "$root" show "$tag:android/app/build.gradle.kts" | android_code)"
+    [ -n "$released" ] || continue
+    if [ "${tag#v}" = "$core" ]; then
+        if [ "$released" != "$code" ]; then
+            echo "version: $tag has versionCode $released, the sources $code" >&2
+            status=1
+        fi
+    elif [ -n "$code" ] && [ "$released" -ge "$code" ]; then
+        echo "version: $tag already has versionCode $released; raise it above that" >&2
+        status=1
+    fi
+done
+
 # The install instructions name the image of this version, so that a new
 # server syncs with the apps of the same release. A pre-release keeps them on
 # the last release.
