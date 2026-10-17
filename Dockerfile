@@ -15,7 +15,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,target=/src/web/target,sharing=locked \
     cargo build --release --locked --manifest-path web/Cargo.toml \
     && cp web/target/release/lists-web /lists-web \
-    && mkdir /data
+    && mkdir -p /data/tmp
 
 FROM scratch
 COPY --from=build /sbin/tini-static /tini
@@ -23,8 +23,12 @@ COPY --from=build /lists-web /lists-web
 COPY --from=build --chown=10001:10001 /data /data
 USER 10001:10001
 WORKDIR /data
+# scratch has no /tmp, and the root filesystem may be read-only: uploads and
+# imports are written to temporary files on the data volume instead (#334).
+# A volume made by an older image has no tmp/; the server creates it.
 ENV LISTS_WEB_LISTEN=0.0.0.0:8080 \
-    LISTS_WEB_DATA=/data
+    LISTS_WEB_DATA=/data \
+    TMPDIR=/data/tmp
 VOLUME /data
 EXPOSE 8080
 # R144: the image has no shell or curl, so the server asks itself.
