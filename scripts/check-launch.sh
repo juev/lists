@@ -16,7 +16,9 @@ set -euo pipefail
 
 app="${1:?usage: check-launch.sh <Lists.app> debug|release}"
 mode="${2:?usage: check-launch.sh <Lists.app> debug|release}"
-app="$(cd "$app" && pwd)"
+# The real path: an app started from a mounted image lives under /var/folders/…, the system
+# reports its process under /private/var/folders/…, and `running` compares the two strings.
+app="$(cd "$app" && pwd -P)"
 binary="$app/Contents/MacOS/Lists"
 [ -x "$binary" ] || { echo "launch: no app at $app" >&2; exit 2; }
 
