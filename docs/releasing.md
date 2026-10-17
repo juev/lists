@@ -23,8 +23,9 @@ To try the pipeline without publishing, start the Release workflow by hand (Acti
 ## What is checked before a release, and what is not
 
 - `make test` and `make lint`, in CI and again in the Release workflow. Both run with `--locked`, so a lockfile that does not match `Cargo.toml` fails there and not first in the Docker build; `make lint` runs Clippy with all features, `cli` included. After the builds `scripts/check-clean-tree.sh` fails when a build changed a tracked file or left a new one that is not ignored.
+- **The Android release APK starts** on an x86_64 emulator in CI, R8 included (see [Android signing key](#android-signing-key)).
 - **The macOS app starts.** CI runs `scripts/check-launch.sh … debug` on the Debug build: the helper of quick entry is switched on and the app is started with a probe that stops it when the event loop is run while the model is built. That is how 0.3.1 stopped at every launch (#239); the check fails on that code and passes after the fix. The Release workflow runs `scripts/check-launch.sh … release` on the app it has just packed, which must still be running fifteen seconds after its start; when it is not, nothing is published.
-- **Not checked by a machine:** what the apps show on a screen, the Android app on a phone, and a launch of the macOS Release build under the real conditions of a Mac in use: with the installed helper, with notifications allowed and planned, with the keychain asking. The probe covers one way a launch can go wrong, not all of them. Before a tag, install the build on the Mac it is meant for and start it several times.
+- **Not checked by a machine:** what the apps show on a screen, the arm64 APK and the Android app on a phone, and a launch of the macOS Release build under the real conditions of a Mac in use: with the installed helper, with notifications allowed and planned, with the keychain asking. The probe covers one way a launch can go wrong, not all of them. Before a tag, install the build on the Mac it is meant for and start it several times.
 
 ## Android signing key
 
@@ -41,7 +42,7 @@ Keep a copy of the keystore and the password outside the Mac. GitHub secrets can
 
 `./scripts/release-android.sh` builds the signed APK locally into `dist/`.
 
-The released APK is built for arm64-v8a only and goes through R8, which renames and removes code. Code reached by name or by reflection must be listed in `android/app/proguard-rules.pro`; a missing rule shows up as a crash at run time, not as a build error, so start the release APK on a device or an arm64 emulator before tagging.
+The released APK is built for arm64-v8a only and goes through R8, which renames and removes code. Code reached by name or by reflection must be listed in `android/app/proguard-rules.pro`; a missing rule shows up at run time, not as a build error. CI therefore builds the release APK with R8 on every push, for x86_64 (`LISTS_ANDROID_ABIS=x86_64`) and signed with the debug key (`LISTS_RELEASE_DEBUG_SIGNING=1`), and `scripts/check-launch-android.sh` starts it on an emulator: the app must not crash, must still run after fifteen seconds, and the Rust core must have created its database. Without the JNA rules the app does not crash but the core never opens, and without the Room rule WorkManager stops the app at start; the check fails on both. It does not cover code that runs only later: sync, notifications, the widget, the share target. The arm64 APK itself is not started by a machine, so start it on a device before tagging.
 
 ## macOS signing and notarization
 
