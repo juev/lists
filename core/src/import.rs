@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use chrono::{DateTime, Local, NaiveDate, NaiveDateTime, TimeZone, Utc};
+use chrono::{DateTime, NaiveDate, NaiveDateTime, TimeZone, Utc};
 use rusqlite::{Connection, OpenFlags};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -72,7 +72,7 @@ fn invalid(msg: impl Into<String>) -> AppError {
 }
 
 fn local_moment(utc: DateTime<Utc>) -> String {
-    utc.with_timezone(&Local).format("%Y-%m-%dT%H:%M").to_string()
+    store::local_time(utc).format("%Y-%m-%dT%H:%M").to_string()
 }
 
 fn rule(freq: Freq, interval: u32) -> Repeat {
@@ -417,7 +417,7 @@ fn parse_todoist(text: &str, name: &str) -> Result<Parsed> {
         name: name.to_string(),
         color: String::new(),
     });
-    let today = Local::now().date_naive();
+    let today = store::local_time(Utc::now()).date();
     let mut stack: Vec<String> = Vec::new();
     let mut undated = 0u32;
     for (n, row) in rows.iter().enumerate().skip(1) {

@@ -129,9 +129,44 @@ impl Writer<'_> {
     }
 }
 
+thread_local! {
+    /// The zone the calls of this thread read the time in (see `Store::in_zone`).
+    static ZONE: std::cell::Cell<Option<chrono::FixedOffset>> = const { std::cell::Cell::new(None) };
+}
+
+impl Store {
+    /// Runs `f` with today, the time of day and the moments it writes taken on a clock that many
+    /// minutes east of UTC rather than on this device's. The web server answers each browser in the
+    /// zone of the browser (R135). The stamps keep their clock: it has no time zone.
+    pub fn in_zone<T>(&self, minutes_east: i32, f: impl FnOnce() -> T) -> T {
+        let offset = minutes_east.checked_mul(60).and_then(chrono::FixedOffset::east_opt);
+        let before = ZONE.with(|zone| zone.replace(offset));
+        let out = f();
+        ZONE.with(|zone| zone.set(before));
+        out
+    }
+}
+
+fn zone() -> Option<chrono::FixedOffset> {
+    ZONE.with(|zone| zone.get())
+}
+
+/// A moment as the clock of the zone in force reads it: the one `in_zone` gives, or this device's.
+pub(crate) fn local_time(utc: chrono::DateTime<chrono::Utc>) -> NaiveDateTime {
+    match zone() {
+        Some(offset) => utc.with_timezone(&offset).naive_local(),
+        None => utc.with_timezone(&chrono::Local).naive_local(),
+    }
+}
+
 impl Inner {
     pub fn now(&self) -> NaiveDateTime {
-        self.now.unwrap_or_else(|| chrono::Local::now().naive_local())
+        match (self.now, zone()) {
+            // The clock of the tests is read as UTC once a zone is given.
+            (Some(fixed), Some(offset)) => fixed + offset,
+            (Some(fixed), None) => fixed,
+            (None, _) => local_time(chrono::Utc::now()),
+        }
     }
 
     /// The clock of the stamps: milliseconds, the same on every device whatever its time zone.
@@ -145,11 +180,13 @@ impl Inner {
     /// A moment of this device's local time on the clock of the stamps.
     fn ms_of(&self, local: NaiveDateTime) -> u64 {
         use chrono::TimeZone;
-        let utc = match self.now {
+        let utc = match (self.now, zone()) {
+            // A zone given by its offset has no hour that the clocks skip.
+            (_, Some(offset)) => (local - offset).and_utc().timestamp_millis(),
             // The clock of the tests has no time zone.
-            Some(_) => local.and_utc().timestamp_millis(),
+            (Some(_), None) => local.and_utc().timestamp_millis(),
             // An hour the clocks skip has no moment of its own: the day then starts where that hour ends.
-            None => [0, 1]
+            (None, None) => [0, 1]
                 .into_iter()
                 .find_map(|hours| {
                     let shifted = local + chrono::Duration::hours(hours);

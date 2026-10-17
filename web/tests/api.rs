@@ -1376,3 +1376,50 @@ fn r134_concurrent_guesses_do_not_pass_the_limit() {
     assert_eq!(codes.iter().filter(|c| **c == 401).count(), 5, "{codes:?}");
     assert_eq!(codes.iter().filter(|c| **c == 429).count(), 15, "{codes:?}");
 }
+
+#[test]
+fn r135_each_browser_gets_today_of_its_own_zone() {
+    let web = web(None);
+    // Fourteen hours east and twelve west are a day or two apart at any moment.
+    let (east, west) = ("840", "-720");
+    let quick_add = |zone: &str, text: &str| -> Value {
+        ureq::post(&format!("{}/api/call", web.base))
+            .set("X-Lists", "1")
+            .set("X-Lists-Zone", zone)
+            .send_json(json!({ "op": "quickAdd", "text": text, "scope": "inbox" }))
+            .unwrap()
+            .into_json()
+            .unwrap()
+    };
+    let today = |zone: &str| -> Vec<String> {
+        let tasks: Value = ureq::get(&format!("{}/api/tasks?scope=today", web.base))
+            .set("X-Lists-Zone", zone)
+            .call()
+            .unwrap()
+            .into_json()
+            .unwrap();
+        let mut titles: Vec<String> = tasks
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["title"].as_str().unwrap().to_string())
+            .collect();
+        titles.sort();
+        titles
+    };
+
+    let early = quick_add(east, "восток 9:00")["due"].as_str().unwrap().to_string();
+    let late = quick_add(west, "запад 9:00")["due"].as_str().unwrap().to_string();
+    assert!(early.ends_with("T09:00") && late.ends_with("T09:00"), "{early} {late}");
+    assert!(early > late, "the browser's date, not the server's: {early} {late}");
+
+    assert_eq!(today(east), ["восток", "запад"]);
+    assert_eq!(today(west), ["запад"]);
+    for zone in ["", "abc", "900"] {
+        let tasks = ureq::get(&format!("{}/api/tasks?scope=today", web.base))
+            .set("X-Lists-Zone", zone)
+            .call()
+            .unwrap();
+        assert_eq!(tasks.status(), 200, "a zone that is not one is the server's: {zone:?}");
+    }
+}

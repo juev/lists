@@ -218,8 +218,9 @@ function setLook(v) {
 const state = { fetching: {}, filterEdit: null, scope: "today", search: "", overview: null, tasks: [], open: new Set(), details: {}, drawer: false, typing: false, sel: null, more: false };
 const root = document.getElementById("root");
 
-async function api(path, options) {
-  const res = await fetch(path, options);
+// R135: the server takes today and the time of day from the zone of the browser, in minutes east of UTC.
+async function api(path, options = {}) {
+  const res = await fetch(path, { ...options, headers: { ...options.headers, "X-Lists-Zone": String(-new Date().getTimezoneOffset()) } });
   if (res.status === 401) { showLogin(); throw new Error("login"); }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) { toast(data.error || res.statusText); throw new Error(data.error); }
