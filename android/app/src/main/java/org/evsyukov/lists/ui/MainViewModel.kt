@@ -153,6 +153,12 @@ fun describe(error: Throwable): String = when (error) {
 /** What the settings of sync keep outside the database: the password of the storage and the sign-in for sending nudges. */
 data class SyncSecrets(val password: String?, val pushServer: String?, val pushToken: String?)
 
+/**
+ * #320: whether tasks read for the state `read` may be shown in the state `now`: the same view and the same
+ * search. Reads are not cancelled, so an older one can end after a newer one.
+ */
+internal fun readFor(now: UiState, read: UiState): Boolean = now.scope == read.scope && now.search == read.search
+
 class MainViewModel : ViewModel() {
     private val _state = MutableStateFlow(UiState())
     val state: StateFlow<UiState> = _state
@@ -200,10 +206,10 @@ class MainViewModel : ViewModel() {
                 )
             }
         }
-        // A view chosen while this was read stays: the reload started by that choice brings its tasks.
+        // A view chosen or a search typed while this was read stays: the reload started by that brings its tasks.
         next.onSuccess { fresh ->
             _state.update {
-                if (it.scope != current.scope) it
+                if (!readFor(it, current)) it
                 // R109: a task that a sync took out of the view drops out of the selection.
                 else fresh.copy(notice = it.notice, search = it.search, selection = it.selection?.kept(fresh.shownIds))
             }
