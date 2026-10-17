@@ -295,16 +295,29 @@ fun MarkdownField(
 ) {
     var field by remember(key) { mutableStateOf(TextFieldValue(value)) }
     var focused by remember(key) { mutableStateOf(false) }
+    // R140: the text the field held when the cursor went in; only what was typed since is written.
+    var shown by remember(key) { mutableStateOf(value) }
     var textLayout by remember(key) { mutableStateOf<TextLayoutResult?>(null) }
     val saved by rememberUpdatedState(value)
     val commit by rememberUpdatedState(onCommit)
     val uriHandler = LocalUriHandler.current
     val interaction = remember { MutableInteractionSource() }
     // An edit arriving from another device replaces the text unless the user is typing here.
-    LaunchedEffect(value) { if (!focused && field.text != value) field = TextFieldValue(value) }
+    LaunchedEffect(value) {
+        if (focused) return@LaunchedEffect
+        shown = value
+        if (field.text != value) field = TextFieldValue(value)
+    }
     fun save() {
-        val trimmed = field.text.trim()
-        if (trimmed != saved) commit(trimmed)
+        val typed = typedEdit(field.text, shown, saved)
+        if (typed != null) {
+            commit(typed)
+            shown = typed
+        } else if (field.text != saved && field.text.trim() == shown.trim()) {
+            // Nothing was typed: what arrived meanwhile is shown now.
+            field = TextFieldValue(saved)
+            shown = saved
+        }
     }
     DisposableEffect(key) { onDispose { if (focused) save() } }
     // R83: an app left in the background may be killed there, and the field never loses the keyboard then.
@@ -356,6 +369,7 @@ fun MarkdownField(
         modifier = modifier
             .onFocusChanged {
                 if (focused && !it.isFocused) save()
+                if (!focused && it.isFocused) shown = field.text
                 focused = it.isFocused
             },
         decorationBox = { inner ->
