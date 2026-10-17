@@ -426,6 +426,8 @@ pub struct SyncStatus {
     /// `YYYY-MM-DDTHH:MM` of the last successful run.
     pub last_ok: Option<String>,
     pub last_error: Option<String>,
+    /// S54: the storage is encrypted with a passphrase, as far as this device knows.
+    pub encrypted: bool,
 }
 
 /// How this device wants to be notified. Kept by the app, not synced:

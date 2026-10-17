@@ -157,6 +157,16 @@ The content of an attachment stays while its task is in the Trash, so a restored
 
 A phone that restricts background work puts these runs off. Settings → Sync → Background work shows whether Lists is restricted; tap it to let Lists run without battery restrictions. The app asks once by itself: when sync is turned on, or when it is opened with sync already on. Do the same for the ntfy app if you use it, and on phones that have an "autostart" setting allow it for both.
 
+### Encrypting the storage
+
+A WebDAV storage or a folder can be encrypted with a passphrase you make up, so that whoever runs the storage reads nothing and cannot slip in a change. CalDAV stays as it is, so that other calendar apps keep reading the tasks.
+
+- **Turn it on** on a Mac or a phone: Settings → Sync → Encrypt the storage…, the passphrase twice. The device syncs first, attachments included, then writes everything encrypted and removes the copies in the clear. This takes as long as downloading the attachments it does not have yet.
+- **Other devices** stop syncing and say that the storage is encrypted. Put the passphrase in Settings → Sync → Storage passphrase and save; the web server takes it from `LISTS_SYNC_PASSPHRASE`. The passphrase is kept where the storage password is kept.
+- **Change it** with Settings → Sync → Change passphrase… on a device that has the current one. Only the key file is written again. The other devices ask for the new passphrase the next time the app starts.
+
+A forgotten passphrase cannot be recovered, and the data in the storage is lost with it. The copies on the devices stay: connect one of them to a new, empty storage and encrypt that one. Encryption cannot be turned off; to go back, connect the devices to a new storage. The names of the log files (which device, which number), their sizes and times stay visible.
+
 ### Faster delivery
 
 Storage cannot tell a device that something changed, so an edit made elsewhere waits for the next run: up to a minute in an open app. To shorten the wait, a device that uploads a change can ask the others to sync, and they do so within seconds.

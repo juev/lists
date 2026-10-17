@@ -90,3 +90,12 @@ pub fn plant(device: Device, registers: &[(&str, &str, &str, serde_json::Value)]
     store.set_now_for_tests(NOW);
     Device { store, _dir: dir }
 }
+
+/// The same device after the app was quit and started again: what the process kept in memory is gone.
+pub fn reopen(device: Device) -> Device {
+    let Device { store, _dir: dir } = device;
+    drop(store);
+    let store = Store::open(dir.path().to_string_lossy().into_owned()).unwrap();
+    store.set_now_for_tests(NOW);
+    Device { store, _dir: dir }
+}

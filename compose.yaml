@@ -20,6 +20,7 @@ services:
       LISTS_SYNC_URL: ${LISTS_SYNC_URL:-}
       LISTS_SYNC_USER: ${LISTS_SYNC_USER:-}
       LISTS_SYNC_PASSWORD: ${LISTS_SYNC_PASSWORD:-}
+      LISTS_SYNC_PASSPHRASE: ${LISTS_SYNC_PASSPHRASE:-}
       LISTS_PUSH_SERVER: ${LISTS_PUSH_SERVER:-}
       # R136: attachment limits of this server, in megabytes; 0 disables one.
       LISTS_MAX_FILE_MB: ${LISTS_MAX_FILE_MB:-512}

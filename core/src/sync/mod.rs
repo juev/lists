@@ -9,15 +9,19 @@
 //! lists/v1/vault.json                format 3: the storage moved here from lists/v1/
 //! ```
 //!
+//! Format 4 is the same layout with the files sealed under a passphrase (S54, `seal`).
+//!
 //! A device only ever writes files carrying its own id, so two devices never
 //! write the same file and no locking is needed.
 
 pub mod remote;
+pub(crate) mod seal;
 pub mod webdav;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
 use std::path::Path;
+use std::sync::Arc;
 
 use chrono::NaiveDateTime;
 use rusqlite::{params, OptionalExtension};
@@ -36,6 +40,7 @@ use crate::model::{
 };
 use crate::store::{hex, new_device_id, Store};
 use remote::{DirRemote, Remote};
+use seal::{Keys, SealedRemote, Wrapped};
 use webdav::WebDavRemote;
 
 const ROOT: &str = "lists";
@@ -45,6 +50,12 @@ const LEGACY: &str = "lists/v1";
 const MOVED: u32 = 3;
 /// S46: the storage format this version writes; it reads format 1 as well.
 const FORMAT: u32 = 2;
+/// S54: a storage whose files are sealed under a passphrase.
+const SEALED: u32 = 4;
+/// S56: the vault id of the encrypted storage this device has synced with.
+const SEALED_VAULT: &str = "sealed_vault";
+/// S56: files left in the clear when the storage was encrypted, still to be removed.
+const CLEAR_FILES: &str = "clear_files";
 /// `push/<device>.json` keeps its own number: the storage format does not change it.
 const PUSH_FORMAT: u32 = 1;
 /// The first bytes of a gzip stream: how a reader tells a compressed snapshot (S46).
@@ -73,7 +84,48 @@ const KEPT_AT: &str = "replace_kept_at";
 struct Vault {
     format: u32,
     vault: String,
+    /// S54: format 4 only, the data key wrapped under the passphrase.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    salt: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    nonce: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    key: Option<String>,
 }
+
+impl Vault {
+    fn wrapped(&self) -> Option<Wrapped> {
+        Some(Wrapped {
+            salt: self.salt.clone()?,
+            nonce: self.nonce.clone()?,
+            key: self.key.clone()?,
+        })
+    }
+}
+
+/// What the last look at `vault.json` of a storage found (S54).
+#[derive(Clone)]
+pub(crate) enum Sealing {
+    Clear,
+    /// Encrypted, and this device cannot open it.
+    Locked,
+    Open(Arc<Keys>),
+}
+
+/// The data key of a storage, with what it was opened from, so that the
+/// key derivation runs again only when one of them changes.
+pub(crate) struct VaultKey {
+    vault: String,
+    wrapped: Wrapped,
+    passphrase: String,
+    data: [u8; 32],
+}
+
+const NO_PASSPHRASE: &str = "the storage is encrypted; enter its passphrase in the sync settings";
+const WRONG_PASSPHRASE: &str =
+    "the passphrase does not open the storage; enter the one it was encrypted or last changed with";
+const NOT_SEALED: &str = "the storage was encrypted and is not any more; if it was reset on purpose, \
+     turn sync off and connect it again";
 
 /// `push/<device>.json`: where the device takes nudges (S18).
 #[derive(Serialize, Deserialize)]
@@ -198,13 +250,28 @@ fn put_vault(remote: &dyn Remote, path: &str, format: u32, vault: &str) -> Resul
     let vault = Vault {
         format,
         vault: vault.to_string(),
+        salt: None,
+        nonce: None,
+        key: None,
     };
     remote.put(path, &serde_json::to_vec(&vault)?)
 }
 
+/// S54: `vault.json` of an encrypted storage.
+fn put_sealed_vault(remote: &dyn Remote, vault: &str, wrapped: Wrapped) -> Result<()> {
+    let vault = Vault {
+        format: SEALED,
+        vault: vault.to_string(),
+        salt: Some(wrapped.salt),
+        nonce: Some(wrapped.nonce),
+        key: Some(wrapped.key),
+    };
+    remote.put(&format!("{ROOT}/vault.json"), &serde_json::to_vec(&vault)?)
+}
+
 fn newer_format(format: u32) -> AppError {
     AppError::sync(format!(
-        "the storage uses format {format}, this version understands format {FORMAT}; update the app"
+        "the storage uses format {format}, this version understands formats up to {SEALED}; update the app"
     ))
 }
 
@@ -244,6 +311,25 @@ fn private_create(path: &Path) -> Result<std::fs::File> {
         options.mode(0o600);
     }
     Ok(options.open(path)?)
+}
+
+/// The storage as one run sees it (S55).
+enum View<'a> {
+    Clear(&'a dyn Remote),
+    Sealed(SealedRemote<'a>),
+}
+
+impl View<'_> {
+    fn remote(&self) -> &dyn Remote {
+        match self {
+            View::Clear(remote) => *remote,
+            View::Sealed(remote) => remote,
+        }
+    }
+
+    fn sealed(&self) -> bool {
+        matches!(self, View::Sealed(_))
+    }
 }
 
 /// What a download of attachment content came to.
@@ -364,10 +450,34 @@ impl Store {
         Ok(changed)
     }
 
+    /// Reads `vault.json` (S14, S46, S49) and, for an encrypted storage, opens
+    /// its data key (S54). What it found is kept for the runs that follow.
     fn check_vault(&self, remote: &dyn Remote) -> Result<()> {
+        let sealing = self.read_sealing(remote)?;
+        *self.sealed.lock().unwrap_or_else(|p| p.into_inner()) = Some((remote.id(), sealing));
+        Ok(())
+    }
+
+    /// What the last look at `vault.json` of this storage found in this process.
+    fn sealing_of(&self, remote: &dyn Remote) -> Option<Sealing> {
+        match &*self.sealed.lock().unwrap_or_else(|p| p.into_inner()) {
+            Some((id, sealing)) if *id == remote.id() => Some(sealing.clone()),
+            _ => None,
+        }
+    }
+
+    fn read_sealing(&self, remote: &dyn Remote) -> Result<Sealing> {
         let path = format!("{ROOT}/vault.json");
+        // S60: a storage this device knows as encrypted is not written in the clear.
+        let was_sealed = db::meta_get(&self.lock().conn, SEALED_VAULT)?;
         if let Some(vault) = read_vault(remote, &path)? {
             match vault.format {
+                SEALED => {
+                    // Locked until the key opens, so that the settings can say why sync stopped.
+                    *self.sealed.lock().unwrap_or_else(|p| p.into_inner()) = Some((remote.id(), Sealing::Locked));
+                    return self.open_vault(&vault);
+                }
+                older if older < SEALED && was_sealed.is_some() => return Err(AppError::sync(NOT_SEALED)),
                 FORMAT => {}
                 // S46: the storage moves on; its files of format 1 stay readable.
                 1 => put_vault(remote, &path, FORMAT, &vault.vault)?,
@@ -381,7 +491,10 @@ impl Store {
             {
                 self.move_legacy(remote, false)?;
             }
-            return Ok(());
+            return Ok(Sealing::Clear);
+        }
+        if was_sealed.is_some() {
+            return Err(AppError::sync(NOT_SEALED));
         }
         let legacy = format!("{LEGACY}/vault.json");
         let id = match read_vault(remote, &legacy)? {
@@ -394,7 +507,55 @@ impl Store {
         };
         // S49: the new place is named last but one, the old one is closed last, so a move cut short starts over.
         put_vault(remote, &path, FORMAT, &id)?;
-        put_vault(remote, &legacy, MOVED, &id)
+        put_vault(remote, &legacy, MOVED, &id)?;
+        Ok(Sealing::Clear)
+    }
+
+    /// S58: opens the data key of an encrypted storage with the passphrase of this device.
+    fn open_vault(&self, vault: &Vault) -> Result<Sealing> {
+        let wrapped = vault
+            .wrapped()
+            .ok_or_else(|| AppError::sync("vault.json in the storage is not readable"))?;
+        let data = self.data_key(&vault.vault, &wrapped)?;
+        let keys = Arc::new(Keys::new(&data));
+        // S56: the first time this device opens the storage it writes a snapshot of
+        // its state, and checks anew which content and which address are there.
+        let mut inner = self.lock();
+        let tx = inner.conn.transaction()?;
+        if db::meta_get(&tx, SEALED_VAULT)?.as_deref() != Some(vault.vault.as_str()) {
+            tx.execute("DELETE FROM blobs_uploaded", [])?;
+            db::meta_del(&tx, "push_published")?;
+            db::meta_set(&tx, "force_snapshot", "1")?;
+            db::meta_set(&tx, SEALED_VAULT, &vault.vault)?;
+        }
+        tx.commit()?;
+        Ok(Sealing::Open(keys))
+    }
+
+    /// The data key under the passphrase of this device. The key derivation is
+    /// slow on purpose, so a key opened once is kept while nothing changes.
+    fn data_key(&self, vault: &str, wrapped: &Wrapped) -> Result<[u8; 32]> {
+        let passphrase = self
+            .sync_passphrase
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone()
+            .ok_or_else(|| AppError::sync(NO_PASSPHRASE))?;
+        let mut cached = self.vault_key.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(key) = cached
+            .as_ref()
+            .filter(|k| k.vault == vault && k.wrapped == *wrapped && k.passphrase == passphrase)
+        {
+            return Ok(key.data);
+        }
+        let data = seal::unwrap(&passphrase, vault, wrapped)?.ok_or_else(|| AppError::sync(WRONG_PASSPHRASE))?;
+        *cached = Some(VaultKey {
+            vault: vault.to_string(),
+            wrapped: wrapped.clone(),
+            passphrase,
+            data,
+        });
+        Ok(data)
     }
 
     /// S49: moves the files of `lists/v1/` to the same names under `lists/`.
@@ -614,6 +775,32 @@ impl Store {
             .collect()
     }
 
+    /// The full state of this device as a snapshot numbered `seq`, compressed (S10, S46).
+    fn snapshot(&self, me: &str, seq: u64) -> Result<Vec<u8>> {
+        let inner = self.lock();
+        let changes: Vec<Change> = {
+            let mut stmt = inner
+                .conn
+                .prepare("SELECT kind, id, field, value, stamp FROM fields ORDER BY kind, id, field")?;
+            let rows = stmt.query_map([], change_from_row)?;
+            rows.collect::<rusqlite::Result<_>>()?
+        };
+        let mut covers: BTreeMap<String, u64> = {
+            let mut stmt = inner.conn.prepare("SELECT device, seq FROM peers")?;
+            let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? as u64)))?;
+            rows.collect::<rusqlite::Result<_>>()?
+        };
+        covers.insert(me.to_string(), seq);
+        let header = Header {
+            v: FORMAT,
+            device: me.to_string(),
+            seq,
+            count: changes.len(),
+            covers,
+        };
+        compress(&encode(&header, &changes)?)
+    }
+
     /// Replaces this device's log files with one snapshot of its full state.
     fn compact(
         &self,
@@ -622,31 +809,8 @@ impl Store {
         own_logs: &BTreeSet<u64>,
         own_marks: &BTreeSet<u64>,
     ) -> Result<()> {
-        let (body, seq) = {
-            let inner = self.lock();
-            let seq = own_seq(&inner.conn)?;
-            let changes: Vec<Change> = {
-                let mut stmt = inner
-                    .conn
-                    .prepare("SELECT kind, id, field, value, stamp FROM fields ORDER BY kind, id, field")?;
-                let rows = stmt.query_map([], change_from_row)?;
-                rows.collect::<rusqlite::Result<_>>()?
-            };
-            let mut covers: BTreeMap<String, u64> = {
-                let mut stmt = inner.conn.prepare("SELECT device, seq FROM peers")?;
-                let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? as u64)))?;
-                rows.collect::<rusqlite::Result<_>>()?
-            };
-            covers.insert(me.to_string(), seq);
-            let header = Header {
-                v: FORMAT,
-                device: me.to_string(),
-                seq,
-                count: changes.len(),
-                covers,
-            };
-            (compress(&encode(&header, &changes)?)?, seq)
-        };
+        let seq = own_seq(&self.lock().conn)?;
+        let body = self.snapshot(me, seq)?;
         let old_snaps = index(&remote.list(&format!("{ROOT}/snap"))?, DATA)
             .remove(me)
             .unwrap_or_default();
@@ -710,8 +874,9 @@ impl Store {
         Ok(sent)
     }
 
-    /// Whether the content arrived, and why not when it did not.
-    fn download_blob(&self, remote: &dyn Remote, sha256: &str) -> Result<Fetched> {
+    /// Whether the content arrived, and why not when it did not. An encrypted
+    /// storage has nothing in the old place to look at (`legacy`, S49).
+    fn download_blob(&self, remote: &dyn Remote, sha256: &str, legacy: bool) -> Result<Fetched> {
         let path = blob_remote_path(sha256);
         let local = self.blob_path(sha256);
         // A pass and a request (S35) may fetch the same content at once: each writes its own file.
@@ -726,7 +891,7 @@ impl Store {
             }
         };
         // S49: content a device of an earlier version uploaded to the old place after the move.
-        if !found {
+        if !found && legacy {
             match remote.rename(&legacy_blob_path(sha256), &path) {
                 Ok(true) => {
                     found = match remote.get_to(&path, &mut out, max) {
@@ -771,15 +936,24 @@ impl Store {
     /// S34: one pass over attachment content against the given storage. A file
     /// that fails is left waiting and the rest go on.
     pub fn sync_attachments_with(&self, remote: &dyn Remote) -> Result<AttachmentReport> {
-        let mut report = AttachmentReport::default();
         let _running = match self.blob_lock.try_lock() {
             Ok(guard) => guard,
             Err(std::sync::TryLockError::Poisoned(p)) => p.into_inner(),
             Err(std::sync::TryLockError::WouldBlock) => {
-                report.waiting = self.blobs_waiting()?;
-                return Ok(report);
+                return Ok(AttachmentReport {
+                    waiting: self.blobs_waiting()?,
+                    ..AttachmentReport::default()
+                });
             }
         };
+        let view = self.view(remote)?;
+        self.attachments_pass(&view)
+    }
+
+    /// S34 with the pass already held.
+    fn attachments_pass(&self, view: &View) -> Result<AttachmentReport> {
+        let remote = view.remote();
+        let mut report = AttachmentReport::default();
         let wanted = self.blobs_wanted()?;
         let mut troubles = self.blob_troubles()?;
         for (sha256, uploaded) in &wanted {
@@ -792,7 +966,7 @@ impl Store {
                     (Way::Up, sent.map(|_| ()).map_err(|e| Trouble::Failed(e.to_string())))
                 }
             } else {
-                let outcome = match self.download_blob(remote, sha256) {
+                let outcome = match self.download_blob(remote, sha256, !view.sealed()) {
                     Ok(Fetched::Stored) => {
                         report.downloaded += 1;
                         Ok(())
@@ -970,6 +1144,53 @@ impl Store {
         Ok(())
     }
 
+    /// S56 against the given storage; `encrypt_storage` takes the configured one.
+    pub fn encrypt_storage_with(&self, raw: &dyn Remote, passphrase: String) -> Result<()> {
+        if passphrase.is_empty() {
+            return Err(AppError::invalid("the passphrase is empty"));
+        }
+        let _running = self.sync_lock.lock().unwrap_or_else(|p| p.into_inner());
+        self.replacing(|| self.run_with(raw))?;
+        if !matches!(self.sealing_of(raw), Some(Sealing::Clear)) {
+            return Err(AppError::invalid("the storage is already encrypted"));
+        }
+        // What could not be read would be removed unread.
+        if db::meta_get(&self.lock().conn, WHOLE)?.is_none() {
+            return Err(AppError::sync(
+                "a file in the storage could not be read; the storage is left as it is",
+            ));
+        }
+        let _blobs = self.blob_lock.lock().unwrap_or_else(|p| p.into_inner());
+        // The content this device lacks is fetched now: the copies in the clear are about to go.
+        self.attachments_pass(&View::Clear(raw))?;
+        self.seal_storage(raw, passphrase)
+    }
+
+    /// S59 against the given storage; `change_storage_passphrase` takes the configured one.
+    pub fn change_storage_passphrase_with(&self, raw: &dyn Remote, passphrase: String) -> Result<()> {
+        if passphrase.is_empty() {
+            return Err(AppError::invalid("the passphrase is empty"));
+        }
+        let _running = self.sync_lock.lock().unwrap_or_else(|p| p.into_inner());
+        let vault = read_vault(raw, &format!("{ROOT}/vault.json"))?
+            .filter(|v| v.format == SEALED)
+            .ok_or_else(|| AppError::invalid("the storage is not encrypted"))?;
+        let wrapped = vault
+            .wrapped()
+            .ok_or_else(|| AppError::sync("vault.json in the storage is not readable"))?;
+        let data = self.data_key(&vault.vault, &wrapped)?;
+        let rewrapped = seal::wrap(&passphrase, &vault.vault, &data)?;
+        put_sealed_vault(raw, &vault.vault, rewrapped.clone())?;
+        *self.vault_key.lock().unwrap_or_else(|p| p.into_inner()) = Some(VaultKey {
+            vault: vault.vault,
+            wrapped: rewrapped,
+            passphrase: passphrase.clone(),
+            data,
+        });
+        *self.sync_passphrase.lock().unwrap_or_else(|p| p.into_inner()) = Some(passphrase);
+        Ok(())
+    }
+
     /// One run for the fields against the given storage. Attachment content is
     /// left to `sync_attachments_with` (S34).
     pub fn sync_with(&self, remote: &dyn Remote) -> Result<SyncReport> {
@@ -977,23 +1198,31 @@ impl Store {
         self.replacing(|| self.run_with(remote))
     }
 
-    fn run_with(&self, remote: &dyn Remote) -> Result<SyncReport> {
+    fn run_with(&self, raw: &dyn Remote) -> Result<SyncReport> {
         let me = self.device_id();
         let mut report = SyncReport::default();
 
         // S14, S17: the format and the snapshots are looked at once per storage
         // and process, and again when something does not add up.
-        let storage = remote.id();
+        let storage = raw.id();
         let first = self.storage_seen.lock().unwrap_or_else(|p| p.into_inner()).as_deref() != Some(storage.as_str());
         if first {
-            self.check_vault(remote)?;
+            self.check_vault(raw)?;
         }
+        let view = self.view(raw)?;
+        let remote = view.remote();
         let names = remote.list(&format!("{ROOT}/log"))?;
         let mut logs = index(&names, DATA);
         let own_marks = index(&names, MARK).remove(&me).unwrap_or_default();
         let (pulled, unreadable) = self.pull(remote, &me, &logs, &index(&names, MARK), first)?;
         if unreadable && !first {
-            self.check_vault(remote)?;
+            let sealed = view.sealed();
+            self.check_vault(raw)?;
+            // S58: the storage was encrypted since the last look: the run starts over with its key.
+            if self.view(raw)?.sealed() != sealed {
+                *self.storage_seen.lock().unwrap_or_else(|p| p.into_inner()) = None;
+                return self.run_with(raw);
+            }
         }
         if unreadable {
             db::meta_del(&self.lock().conn, WHOLE)?;
@@ -1042,7 +1271,144 @@ impl Store {
         if let Some(peers) = peers.filter(|_| report.pushed > 0) {
             self.poke(peers.iter().map(String::as_str));
         }
+        if view.sealed() {
+            self.remove_clear_files(raw)?;
+        }
         Ok(report)
+    }
+
+    /// The storage as sync reads and writes it: through the key when it is encrypted (S55).
+    /// Its `vault.json` is read here when no run of this process has read it yet.
+    fn view<'a>(&self, raw: &'a dyn Remote) -> Result<View<'a>> {
+        let sealing = match self.sealing_of(raw) {
+            Some(sealing) => sealing,
+            None => {
+                self.check_vault(raw)?;
+                self.sealing_of(raw).unwrap_or(Sealing::Clear)
+            }
+        };
+        match sealing {
+            Sealing::Clear => Ok(View::Clear(raw)),
+            Sealing::Open(keys) => Ok(View::Sealed(SealedRemote::new(raw, keys))),
+            Sealing::Locked => Err(AppError::sync(NO_PASSPHRASE)),
+        }
+    }
+
+    /// S56: removes what the storage held in the clear before it was encrypted.
+    /// A removal cut short goes on in the next run.
+    fn remove_clear_files(&self, raw: &dyn Remote) -> Result<()> {
+        let Some(list) = db::meta_get(&self.lock().conn, CLEAR_FILES)? else {
+            return Ok(());
+        };
+        let paths: Vec<String> = serde_json::from_str(&list).unwrap_or_default();
+        for path in &paths {
+            raw.delete(path)?;
+        }
+        self.note(LogLevel::Info, "sync", || {
+            format!("removed {} files left in the clear", paths.len())
+        });
+        db::meta_del(&self.lock().conn, CLEAR_FILES)
+    }
+
+    /// S56: writes the state of this device and the content it has, sealed
+    /// under a new data key, then `vault.json` of format 4, and only then
+    /// removes what lay in the clear. The caller holds both passes and has
+    /// just read everything the storage held.
+    fn seal_storage(&self, raw: &dyn Remote, passphrase: String) -> Result<()> {
+        let me = self.device_id();
+        let vault = read_vault(raw, &format!("{ROOT}/vault.json"))?
+            .ok_or_else(|| AppError::sync("vault.json is missing from the storage"))?;
+        let mut clear = Vec::new();
+        for dir in ["log", "snap"] {
+            for name in raw.list(&format!("{ROOT}/{dir}"))? {
+                clear.push(format!("{ROOT}/{dir}/{name}"));
+            }
+        }
+        for folder in raw.folders(&format!("{ROOT}/blobs"))? {
+            for name in raw.list(&format!("{ROOT}/blobs/{folder}"))? {
+                if is_sha256(&name) {
+                    clear.push(format!("{ROOT}/blobs/{folder}/{name}"));
+                }
+            }
+        }
+        let data = seal::random::<32>();
+        let wrapped = seal::wrap(&passphrase, &vault.vault, &data)?;
+        let keys = Arc::new(Keys::new(&data));
+        let sealed = SealedRemote::new(raw, keys.clone());
+
+        // The snapshot takes a number no device has read yet: every device
+        // reads it, a device without the key stops on it (S14), and the files
+        // of the others it holds may go.
+        let seq = own_seq(&self.lock().conn)? + 1;
+        let snap = format!("{ROOT}/snap/{}", file_name(&me, seq));
+        let mark = format!("{ROOT}/log/{}", mark_name(&me, seq));
+        let body = self.snapshot(&me, seq)?;
+        let mut written = vec![snap.clone(), mark.clone()];
+        let mut uploaded = Vec::new();
+        let sent = (|| -> Result<()> {
+            sealed.put(&snap, &body)?;
+            sealed.put(&mark, b"")?;
+            for (sha256, _) in self.blobs_wanted()? {
+                let local = self.blob_path(&sha256);
+                if local.exists() {
+                    let path = blob_remote_path(&sha256);
+                    sealed.put_file(&path, &local)?;
+                    written.push(sealed.physical(&path));
+                    uploaded.push(sha256);
+                }
+            }
+            // The addresses of the devices stay where they are, sealed.
+            for name in raw
+                .list(&format!("{ROOT}/push"))?
+                .iter()
+                .filter(|n| n.ends_with(".json"))
+            {
+                let path = format!("{ROOT}/push/{name}");
+                if let Some(record) = raw.get(&path)? {
+                    sealed.put(&path, &record)?;
+                }
+            }
+            clear.retain(|path| !written.contains(path));
+            db::meta_set(&self.lock().conn, CLEAR_FILES, &serde_json::to_string(&clear)?)?;
+            put_sealed_vault(raw, &vault.vault, wrapped.clone())
+        })();
+        if let Err(e) = sent {
+            // The storage stays as it was; what was written for it goes.
+            let _ = db::meta_del(&self.lock().conn, CLEAR_FILES);
+            for path in &written {
+                let _ = raw.delete(path);
+            }
+            return Err(e);
+        }
+        {
+            let mut inner = self.lock();
+            let tx = inner.conn.transaction()?;
+            db::meta_set(&tx, "own_seq", &seq.to_string())?;
+            db::meta_set(&tx, SNAP_BYTES, &body.len().to_string())?;
+            db::meta_set(&tx, LOG_BYTES, "0")?;
+            db::meta_set(&tx, SEALED_VAULT, &vault.vault)?;
+            tx.execute("DELETE FROM blobs_uploaded", [])?;
+            for sha256 in &uploaded {
+                tx.execute("INSERT OR IGNORE INTO blobs_uploaded (sha256) VALUES (?1)", [sha256])?;
+            }
+            tx.commit()?;
+        }
+        *self.vault_key.lock().unwrap_or_else(|p| p.into_inner()) = Some(VaultKey {
+            vault: vault.vault.clone(),
+            wrapped,
+            passphrase: passphrase.clone(),
+            data,
+        });
+        *self.sync_passphrase.lock().unwrap_or_else(|p| p.into_inner()) = Some(passphrase);
+        *self.sealed.lock().unwrap_or_else(|p| p.into_inner()) = Some((raw.id(), Sealing::Open(keys)));
+        self.note(LogLevel::Info, "sync", || "the storage is encrypted".to_string());
+        // The storage is encrypted now: a removal that fails is left to the next run.
+        if let Err(e) = self.remove_clear_files(raw) {
+            self.note(LogLevel::Error, "sync", || {
+                format!("files left in the clear not removed: {e}")
+            });
+        }
+        Ok(())
     }
 
     /// Count and greatest stamp of the registers: the same while nothing was written.
@@ -1226,6 +1592,7 @@ impl Store {
         inner.write(|w| w.tidy())?;
         *self.storage_seen.lock().unwrap_or_else(|p| p.into_inner()) = None;
         *self.folder_seen.lock().unwrap_or_else(|p| p.into_inner()) = None;
+        *self.sealed.lock().unwrap_or_else(|p| p.into_inner()) = None;
         Ok(())
     }
 
@@ -1248,7 +1615,7 @@ impl Store {
              DELETE FROM caldav_calendars; DELETE FROM caldav_items;
              DELETE FROM meta WHERE key IN ('sync_ok', 'sync_error', 'caldav_filters_sent', 'caldav_home', 'push_published',
                                             'own_seq', 'force_snapshot', 'replace_remote', 'replace_kept_at',
-                                            'log_bytes', 'snap_bytes', 'blobs_whole');",
+                                            'log_bytes', 'snap_bytes', 'blobs_whole', 'sealed_vault');",
         )?;
         if restore {
             // The file comes from outside: only registers this version would accept from a peer get in.
@@ -1318,11 +1685,13 @@ impl Store {
              DELETE FROM caldav_calendars; DELETE FROM caldav_items; DELETE FROM kept;
              DELETE FROM meta WHERE key IN ('sync_ok', 'sync_error', 'caldav_filters_sent', 'caldav_home', 'push_published',
                                             'replace_remote', 'replace_kept_at', 'log_bytes', 'snap_bytes',
-                                            'blobs_whole');
+                                            'blobs_whole', 'sealed_vault', 'clear_files');
              UPDATE fields SET dirty = 1;",
         )?;
         db::meta_set(&tx, "force_snapshot", "1")?;
         tx.commit()?;
+        drop(inner);
+        *self.sealed.lock().unwrap_or_else(|p| p.into_inner()) = None;
         Ok(())
     }
 }
@@ -1388,6 +1757,44 @@ impl Store {
     /// secret storage.
     pub fn set_sync_password(&self, password: Option<String>) {
         *self.sync_password.lock().unwrap_or_else(|p| p.into_inner()) = password;
+    }
+
+    /// S58: keeps the passphrase of an encrypted storage for this process only,
+    /// the way `set_sync_password` keeps the password. A different one makes
+    /// the next run read `vault.json` again and open it with this one.
+    pub fn set_sync_passphrase(&self, passphrase: Option<String>) {
+        let passphrase = passphrase.filter(|p| !p.is_empty());
+        let mut kept = self.sync_passphrase.lock().unwrap_or_else(|p| p.into_inner());
+        if *kept == passphrase {
+            return;
+        }
+        *kept = passphrase;
+        drop(kept);
+        *self.sealed.lock().unwrap_or_else(|p| p.into_inner()) = None;
+        *self.storage_seen.lock().unwrap_or_else(|p| p.into_inner()) = None;
+    }
+
+    /// S56: encrypts the WebDAV or folder storage with `passphrase`. The device
+    /// syncs first, then writes its state and the content of its attachments
+    /// sealed, then `vault.json` of format 4, and removes what lay in the clear.
+    /// Takes as long as a sync with every attachment: call it off the main thread.
+    /// On success the passphrase is kept as with `set_sync_passphrase`; the app
+    /// stores it where it stores the password.
+    pub fn encrypt_storage(&self, passphrase: String) -> Result<()> {
+        let Some(raw) = self.file_storage()? else {
+            return Err(AppError::invalid("only a WebDAV or folder storage can be encrypted"));
+        };
+        self.encrypt_storage_with(raw.as_ref(), passphrase)
+    }
+
+    /// S59: wraps the data key of the encrypted storage under a new passphrase
+    /// and rewrites only `vault.json`. The other devices ask for the new one
+    /// the next time they read `vault.json`.
+    pub fn change_storage_passphrase(&self, passphrase: String) -> Result<()> {
+        let Some(raw) = self.file_storage()? else {
+            return Err(AppError::invalid("only a WebDAV or folder storage can be encrypted"));
+        };
+        self.change_storage_passphrase_with(raw.as_ref(), passphrase)
     }
 
     /// Stores where to sync. Switching storage keeps local data; the next run
@@ -1558,10 +1965,11 @@ impl Store {
             return Err(AppError::sync("the attachment has no content to download"));
         }
         let fetched = (|| {
-            let Some(remote) = self.file_storage()? else {
+            let Some(raw) = self.file_storage()? else {
                 return Err(AppError::sync("the content of this attachment is not in the storage"));
             };
-            match self.download_blob(remote.as_ref(), &attachment.sha256)? {
+            let view = self.view(raw.as_ref())?;
+            match self.download_blob(view.remote(), &attachment.sha256, !view.sealed())? {
                 Fetched::Stored => Ok(()),
                 Fetched::Missing => Err(AppError::sync(
                     "the content of this attachment has not reached the storage yet",
@@ -1586,7 +1994,12 @@ impl Store {
         let configured = config != SyncConfig::Off;
         let files = matches!(config, SyncConfig::Folder { .. } | SyncConfig::WebDav { .. });
         let attachments_waiting = if files { self.blobs_waiting()? } else { 0 };
+        let seen_sealed = matches!(
+            &*self.sealed.lock().unwrap_or_else(|p| p.into_inner()),
+            Some((_, Sealing::Locked | Sealing::Open(_)))
+        );
         let inner = self.lock();
+        let encrypted = files && (seen_sealed || db::meta_get(&inner.conn, SEALED_VAULT)?.is_some());
         let pending: u32 = inner.conn.query_row(
             "SELECT (SELECT count(*) FROM fields WHERE dirty = 1) + (SELECT coalesce(sum(changes), 0) FROM outbox)",
             [],
@@ -1598,6 +2011,7 @@ impl Store {
             attachments_waiting,
             last_ok: db::meta_get(&inner.conn, "sync_ok")?,
             last_error: db::meta_get(&inner.conn, "sync_error")?,
+            encrypted,
         })
     }
 }

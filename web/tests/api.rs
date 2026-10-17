@@ -27,6 +27,7 @@ fn web_configured(password: Option<&str>, change: impl FnOnce(&mut Config)) -> W
         oidc: None,
         sync: SyncConfig::Off,
         sync_password: None,
+        sync_passphrase: None,
         push_server: None,
         push_token: None,
         trust_proxy: false,
@@ -1570,4 +1571,34 @@ fn r144_lists_web_healthcheck_exits_with_0_only_when_the_server_answers() {
     let down = healthcheck(&free.to_string());
     assert_eq!(down.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&down.stderr).contains("healthcheck"));
+}
+
+#[test]
+fn s58_the_server_opens_an_encrypted_storage_with_the_passphrase_it_is_given() {
+    let storage = tempfile::tempdir().unwrap();
+    let folder = SyncConfig::Folder {
+        path: storage.path().to_string_lossy().into_owned(),
+    };
+    let data = tempfile::tempdir().unwrap();
+    let other = Store::open(data.path().to_string_lossy().into_owned()).unwrap();
+    other.set_sync_config(folder.clone()).unwrap();
+    let task = other.quick_add("под замком".into(), None, false, None).unwrap();
+    other.encrypt_storage("фраза-пароль".into()).unwrap();
+
+    // Without the passphrase the server says why it does not sync.
+    let locked = web_syncing(None, folder.clone());
+    let refused = ureq::post(&format!("{}/api/call", locked.base))
+        .set("X-Lists", "1")
+        .send_json(json!({ "op": "sync" }));
+    assert_eq!(status(refused), 502);
+    let error = get(&locked, "", "/api/overview")["sync"]["lastError"].to_string();
+    assert!(error.contains("passphrase"), "{error}");
+
+    let web = web_configured(None, |c| {
+        c.sync = folder;
+        c.sync_passphrase = Some("фраза-пароль".into());
+    });
+    call(&web, "", json!({ "op": "sync" }));
+    let path = format!("/api/task?id={}", task.id);
+    assert_eq!(get(&web, "", &path)["task"]["title"], "под замком");
 }

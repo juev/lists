@@ -105,7 +105,7 @@ With CalDAV what the app knows about a task travels in a custom property next to
 
 Lists 0.5.0 moves a WebDAV or folder storage to format 2, with compressed snapshots; earlier versions stop syncing with such a storage and say so. Lists 0.5.1 and later move the storage from `lists/v1/` to `lists/`, and 0.5.0 stops syncing with a moved storage in the same way. Update every device and the web server together. CalDAV is not affected.
 
-The data in the storage is not encrypted by the app. The storage password is kept in the macOS keychain and, on Android, encrypted with a key from the Android Keystore; it is never written to the database.
+A WebDAV or folder storage can be encrypted with a passphrase from Settings → Sync on a Mac or a phone ([usage](docs/usage.md#encrypting-the-storage)); earlier versions stop syncing with an encrypted storage and say so, so update every device first. CalDAV is not encrypted. The storage password and the passphrase are kept in the macOS keychain and, on Android, encrypted with a key from the Android Keystore; they are never written to the database.
 
 ## Documentation
 
