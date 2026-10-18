@@ -370,11 +370,11 @@ object LookPrefs {
     /** The choice a saved value stands for; anything else is the default. */
     internal fun rowSpacingFrom(saved: String?): String = saved?.takeIf { it in rowSpacings } ?: "normal"
 
-    /** R122: the space above and below a row of a view, in dp; the mark keeps a row at least 48 dp high. */
+    /** R122: the space above and below a row of a view, in dp; the mark keeps a row at least 48 dp high, R159 sets the steps. */
     fun rowPadding(spacing: String): Int = when (spacing) {
-        "compact" -> 0
-        "relaxed" -> 6
-        else -> 2
+        "compact" -> 4
+        "relaxed" -> 12
+        else -> 8
     }
 
     /** Set once the spacing is chosen; the rows read it, so the list is laid out again at once. */

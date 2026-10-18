@@ -1,5 +1,6 @@
 package org.evsyukov.lists.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -10,18 +11,22 @@ import androidx.compose.material.icons.outlined.Flag
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Repeat
 import androidx.compose.material.icons.outlined.Sell
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.tooling.preview.Preview
 import org.evsyukov.lists.ui.theme.ListsTheme
 import org.evsyukov.lists.ui.theme.PriorityColors
 import org.evsyukov.lists.ui.theme.Space
 import org.evsyukov.lists.ui.theme.ViewTint
+import org.evsyukov.lists.ui.theme.groupContainer
 import org.evsyukov.lists.ui.theme.groupHeading
+import org.evsyukov.lists.ui.theme.screenGround
 import org.evsyukov.lists.ui.theme.viewTint
 import uniffi.lists_core.Counts
 import uniffi.lists_core.DueWindow
@@ -62,14 +67,11 @@ internal fun CatalogPage(dark: Boolean, title: String, content: @Composable () -
 internal fun MarksCatalog() {
     Row(horizontalArrangement = Arrangement.spacedBy(Space.xl), verticalAlignment = Alignment.CenterVertically) {
         for (state in MarkState.entries) Mark(state, state.name)
-        Mark(MarkState.Open, "round", round = true)
-        Mark(MarkState.Done, "round done", round = true)
+        Mark(MarkState.Open, "small", small = true)
+        Mark(MarkState.Done, "small done", small = true)
     }
     Row(verticalAlignment = Alignment.CenterVertically) {
-        for (priority in listOf(Priority.HIGH, Priority.MEDIUM, Priority.LOW, Priority.NONE)) {
-            PriorityBar(priority, tall = false)
-            PriorityBar(priority, tall = true)
-        }
+        for (priority in listOf(Priority.HIGH, Priority.MEDIUM, Priority.LOW, Priority.NONE)) PriorityBar(priority)
     }
 }
 
@@ -140,13 +142,21 @@ internal fun catalogTasks(today: LocalDate): List<TaskItem> {
     )
 }
 
-/** The rows of [catalogTasks] as a view shows them: with the list under the title where lists mix (R72). */
+/**
+ * The rows of [catalogTasks] as a view shows them: on the ground of the screen, in the container of their
+ * group under its heading, with the list under the title where lists mix (R72, R159).
+ */
 @Composable
 internal fun TaskRowsCatalog(today: LocalDate, scope: Scope) {
     val state = UiState(lists = catalogLists(), scope = scope)
-    Column {
-        for (task in catalogTasks(today)) {
-            TaskRow(task, state, onToggle = {}, onOpen = {}, menu = {}, showOrigin = scope == Scope.Today)
+    val tasks = catalogTasks(today)
+    Column(Modifier.background(screenGround()).padding(bottom = Space.xl)) {
+        GroupHeading(if (scope == Scope.Today) "Overdue" else "Tasks", alert = scope == Scope.Today)
+        for ((index, task) in tasks.withIndex()) {
+            Column(Modifier.padding(horizontal = Space.l).clip(groupItemShape(first = index == 0, last = index == tasks.lastIndex)).background(groupContainer())) {
+                if (index > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
+                TaskRow(task, state, onToggle = {}, onOpen = {}, menu = {}, showOrigin = scope == Scope.Today)
+            }
         }
     }
 }

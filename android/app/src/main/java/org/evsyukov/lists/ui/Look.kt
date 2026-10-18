@@ -42,16 +42,16 @@ import uniffi.lists_core.Priority
 /** R72: the colour of the bar a row shows for the priority of its task; none for a task without one. */
 fun priorityBarColor(priority: Priority): Color? = PriorityColors.of(priority)
 
-/** R72: the bar after the mark of a row. Its place is kept for a task without a priority; [tall] is a row of two lines. */
+/** R72: the bar after the mark of a row. Its place is kept for a task without a priority; R159 sets its size. */
 @Composable
-fun PriorityBar(priority: Priority, tall: Boolean) {
+fun PriorityBar(priority: Priority) {
     val color = priorityBarColor(priority)
     val name = priority.title()
     Box(
         Modifier
-            .padding(end = Space.chipInset)
+            .padding(end = Space.l)
             .width(Sizes.priorityBar)
-            .height(if (tall) Sizes.priorityBarTall else Sizes.priorityBarShort)
+            .height(Sizes.priorityBarHeight)
             .background(color ?: Color.Transparent, Corners.bar)
             .then(if (color != null) Modifier.semantics { contentDescription = name } else Modifier)
     )
@@ -60,27 +60,35 @@ fun PriorityBar(priority: Priority, tall: Boolean) {
 enum class MarkState { Open, Done, Wont, History }
 
 /**
- * The completion mark (R95): small, thin and muted, without the colour of the
- * list. A subtask in the card of its task has a round one (R96).
+ * The completion mark (R159): a circle with a thin muted ring, without the colour of the list. Done, it is
+ * filled with the primary colour and shows a tick; won't do, it is filled with the muted colour and shows a
+ * cross. A subtask in the card of its task has the [small] one (R96).
  */
 @Composable
-fun Mark(state: MarkState, description: String?, modifier: Modifier = Modifier, round: Boolean = false) {
-    val color = MaterialTheme.colorScheme.outline
+fun Mark(state: MarkState, description: String?, modifier: Modifier = Modifier, small: Boolean = false) {
+    val muted = MaterialTheme.colorScheme.outline
+    val size = if (small) Sizes.roundMarkSmall else Sizes.roundMark
     // R133: a record of a repeat whose completion can no longer be taken back shows the repeat icon instead.
     if (state == MarkState.History) {
-        Icon(Icons.Outlined.Repeat, description, modifier.size(Sizes.mark), tint = color)
+        Icon(Icons.Outlined.Repeat, description, modifier.size(size), tint = muted)
         return
+    }
+    val fill = when (state) {
+        MarkState.Done -> MaterialTheme.colorScheme.primary
+        MarkState.Wont -> muted
+        else -> null
     }
     Box(
         modifier
-            .size(Sizes.mark)
-            .border(Sizes.stroke, color, if (round) Corners.round else Corners.mark)
+            .size(size)
+            .then(if (fill != null) Modifier.background(fill, Corners.round) else Modifier.border(Sizes.stroke, muted, Corners.round))
             .semantics { if (description != null) contentDescription = description },
         contentAlignment = Alignment.Center,
     ) {
+        val glyph = MaterialTheme.colorScheme.surface
         when (state) {
-            MarkState.Done -> Icon(Icons.Outlined.Check, null, Modifier.size(Sizes.markGlyph), tint = color)
-            MarkState.Wont -> Icon(Icons.Outlined.Close, null, Modifier.size(Sizes.markGlyph), tint = color)
+            MarkState.Done -> Icon(Icons.Outlined.Check, null, Modifier.size(Sizes.markGlyph), tint = glyph)
+            MarkState.Wont -> Icon(Icons.Outlined.Close, null, Modifier.size(Sizes.markGlyph), tint = glyph)
             MarkState.Open, MarkState.History -> {}
         }
     }
@@ -93,24 +101,27 @@ fun ValueChip(
     icon: ImageVector? = null,
     /** What the field is, for a screen reader: the icon alone says it to the eye. */
     label: String? = null,
-    color: Color = MaterialTheme.colorScheme.onSurface,
+    color: Color? = null,
+    /** R159: the chip of the due date is tonal. */
+    tonal: Boolean = false,
     trailing: ImageVector? = null,
     trailingLabel: String? = null,
     /** Null for a value that is only shown, as a tag read from the title. */
     onClick: (() -> Unit)?,
 ) {
+    val ink = color ?: if (tonal) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurface
     Row(
         Modifier
             .clip(Corners.chip)
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
+            .background(if (tonal) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh)
             .clickable(enabled = onClick != null, role = Role.Button) { onClick?.invoke() }
             .heightIn(min = Sizes.chip)
             .padding(horizontal = Space.chipInset),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Space.chipGap),
     ) {
-        if (icon != null) Icon(icon, label, Modifier.size(Sizes.mark), tint = color)
-        Text(text, style = MaterialTheme.typography.label, color = color, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+        if (icon != null) Icon(icon, label, Modifier.size(Sizes.mark), tint = ink)
+        Text(text, style = MaterialTheme.typography.label, color = ink, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
         if (trailing != null) Icon(trailing, trailingLabel, Modifier.size(Sizes.metaIcon), tint = MaterialTheme.colorScheme.outline)
     }
 }

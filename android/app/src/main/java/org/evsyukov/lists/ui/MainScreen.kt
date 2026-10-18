@@ -38,6 +38,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
@@ -84,7 +85,7 @@ import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -103,6 +104,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
 import androidx.compose.material3.pulltorefresh.pullToRefresh
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
@@ -155,7 +157,6 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
@@ -192,10 +193,13 @@ import org.evsyukov.lists.ui.theme.Corners
 import org.evsyukov.lists.ui.theme.Sizes
 import org.evsyukov.lists.ui.theme.Space
 import org.evsyukov.lists.ui.theme.ViewTint
+import org.evsyukov.lists.ui.theme.groupContainer
 import org.evsyukov.lists.ui.theme.groupHeading
 import org.evsyukov.lists.ui.theme.label
 import org.evsyukov.lists.ui.theme.pill
 import org.evsyukov.lists.ui.theme.rowMeta
+import org.evsyukov.lists.ui.theme.rowTitle
+import org.evsyukov.lists.ui.theme.screenGround
 import org.evsyukov.lists.ui.theme.sectionHeading
 import org.evsyukov.lists.ui.theme.viewTint
 import org.evsyukov.lists.ui.theme.viewTitle
@@ -295,6 +299,7 @@ fun MainScreen(model: MainViewModel, onReminderSet: () -> Unit) {
                         actions = { TextButton(onClick = model::endSelection) { Text(str(R.string.done)) } },
                     )
                 } else TopAppBar(
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = screenGround(), scrolledContainerColor = screenGround()),
                     title = {
                         val query = state.search
                         // R95: the title of the view stands at the top of the content; the bar holds the search field only.
@@ -329,6 +334,8 @@ fun MainScreen(model: MainViewModel, onReminderSet: () -> Unit) {
                 )
             },
             snackbarHost = { SnackbarHost(snackbar) },
+            // R159: the rows stand in containers on a ground of another tone.
+            containerColor = screenGround(),
             bottomBar = {
                 when {
                     selection != null -> SelectionBar(
@@ -362,12 +369,16 @@ fun MainScreen(model: MainViewModel, onReminderSet: () -> Unit) {
             },
             floatingActionButton = {
                 if (!state.readOnly && !selecting) {
-                    FloatingActionButton(
+                    // R159: a wide button with the label.
+                    ExtendedFloatingActionButton(
+                        text = { Text(str(R.string.new_task)) },
+                        // The button hides its label from a screen reader: the icon names it.
+                        icon = { Icon(Icons.Outlined.Add, str(R.string.new_task)) },
                         onClick = { restoreOffer?.cancel(); restored = null; adding = true },
-                        shape = CircleShape,
+                        shape = Corners.fab,
                         containerColor = viewTint(ViewTint.Blue),
                         contentColor = Color.White,
-                    ) { Icon(Icons.Outlined.Add, str(R.string.new_task)) }
+                    )
                 }
             },
         ) { padding ->
@@ -415,13 +426,14 @@ fun MainScreen(model: MainViewModel, onReminderSet: () -> Unit) {
                         for (section in state.sections) {
                             section.title?.let { title ->
                                 item(key = "h:${section.key}") {
-                                    GroupHeading(title)
+                                    GroupHeading(title, alert = section.key == "overdue")
                                 }
                             }
                             val shown = reorder.order?.takeIf { reorderable }
                                 ?.mapNotNull { id -> section.tasks.firstOrNull { it.id == id } }
                                 ?.takeIf { it.size == section.tasks.size } ?: section.tasks
-                            items(shown, key = { rowKey(section.key, it.id) }) { task ->
+                            val last = shown.lastIndex
+                            itemsIndexed(shown, key = { _, task -> rowKey(section.key, task.id) }) { index, task ->
                                 val drag = if (reorderable) {
                                     RowDrag(
                                         onStart = { reorder.start(task.id, section.tasks.map { it.id }) },
@@ -431,13 +443,19 @@ fun MainScreen(model: MainViewModel, onReminderSet: () -> Unit) {
                                     )
                                 } else null
                                 val lifted = reorder.dragging == task.id
+                                // R159: the rows of a group stand in one rounded container, a thin line between them.
+                                val shape = groupItemShape(first = index == 0, last = index == last)
                                 // One item for the row and its lines: the drag over the circles reads the task from the item (R109).
                                 Column(
-                                    if (lifted) Modifier.zIndex(1f).graphicsLayer { translationY = reorder.offset; shadowElevation = 8f }
-                                    else Modifier.animateItem(),
+                                    (if (lifted) Modifier.zIndex(1f).graphicsLayer { translationY = reorder.offset; shadowElevation = 8f; this.shape = shape; clip = true }
+                                    else Modifier.animateItem())
+                                        .padding(horizontal = Space.l)
+                                        .clip(shape)
+                                        .background(groupContainer()),
                                 ) {
+                                    if (index > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
                                     if (selection != null) {
-                                        Surface {
+                                        Surface(color = groupContainer()) {
                                             TaskRow(
                                                 task, state, onToggle = {}, onOpen = {}, menu = {}, showOrigin = state.showsOrigin(),
                                                 selected = task.id in selection, onSelect = { model.toggleSelected(task.id) },
@@ -725,6 +743,7 @@ private fun NewTaskSheet(state: UiState, restored: NewTaskEntry?, onAdd: suspend
         onDismissRequest = { onDismiss(entry) },
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         sheetMaxWidth = Dp.Unspecified,
+        shape = Corners.sheet,
         dragHandle = {
             CardHandle(entry.expanded, { entry.expanded = it }, if (entry.expanded) Modifier.statusBarsPadding() else Modifier)
         },
@@ -851,7 +870,8 @@ private fun SwipeRow(task: TaskItem, state: UiState, onToggle: () -> Unit, onOpe
             }
         }
         Surface(
-            Modifier
+            color = groupContainer(),
+            modifier = Modifier
                 .offset { IntOffset(offset.roundToInt(), 0) }
                 .then(
                     if (locked) Modifier
@@ -937,7 +957,7 @@ fun TaskRow(
                     .background(if (selected) viewTint(ViewTint.Blue).copy(alpha = 0.12f) else Color.Transparent)
                     .toggleable(value = selected, role = Role.Checkbox, onValueChange = { onSelect() })
             )
-            .padding(start = Space.xs, end = Space.xl, top = padding, bottom = padding),
+            .padding(start = Space.xs, end = Space.l, top = padding, bottom = padding),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         // The mark of a record of a repeat takes its completion back while it can (R128, R133); after that it is a repeat icon.
@@ -947,24 +967,28 @@ fun TaskRow(
             Mark(
                 task.markState(),
                 if (selected != null) null else if (history) str(R.string.repeat) else if (done) str(R.string.reopen) else str(R.string.complete),
-                round = subtask,
+                small = subtask,
             )
         }
         if (task.isProject) {
             Icon(Icons.Outlined.Folder, str(R.string.project), Modifier.padding(end = Space.s).size(Sizes.rowIcon), tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         val origin = if (showOrigin) rowOrigin(task, state.lists, str(R.string.inbox)) else null
-        // R72: the priority is a thin bar after the mark; its place is kept, so every title starts at one line.
+        // R72: the priority is a bar after the mark; its place is kept, so every title starts at one line.
         // A subtask in a card has no priority (R10).
-        if (!subtask) PriorityBar(task.priority, tall = origin != null)
-        // The title gives way to the marks and the date: it is what gets the ellipsis (R73).
+        if (!subtask) PriorityBar(task.priority)
+        val scope = state.effectiveScope
+        val dayInHeading = scope == Scope.Upcoming || (scope == Scope.Today && task.effectiveDue?.let(::dayOf) == today())
+        val date = rowDate(task.effectiveDue, open = !done, dayInHeading = dayInHeading)
+        // The title gives way to the marks: it is what gets the ellipsis (R73).
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     task.title,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    textDecoration = if (done && !subtask) TextDecoration.LineThrough else null,
+                    style = if (subtask) MaterialTheme.typography.bodyLarge else MaterialTheme.typography.rowTitle,
+                    // R159: a done task is muted, without a strike.
                     color = when {
                         !done -> MaterialTheme.colorScheme.onSurface
                         subtask -> MaterialTheme.colorScheme.outline
@@ -974,37 +998,9 @@ fun TaskRow(
                 )
                 Marks(task)
             }
-            // R72: under the title, the list of the task in its colour and the project of a task of a project.
-            // Only a task of a project is a row with a parent: a subtask is never a row of a view (R12).
-            if (origin != null) {
-                Text(
-                    buildAnnotatedString {
-                        origin.list?.let { name ->
-                            withStyle(SpanStyle(color = origin.color?.let(::parseColor) ?: MaterialTheme.colorScheme.primary)) { append(name) }
-                        }
-                        origin.project?.let { append(if (origin.list == null) it else " – $it") }
-                    },
-                    style = MaterialTheme.typography.rowMeta,
-                    color = MaterialTheme.colorScheme.outline,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
-        val scope = state.effectiveScope
-        val dayInHeading = scope == Scope.Upcoming || (scope == Scope.Today && task.effectiveDue?.let(::dayOf) == today())
-        rowDate(task.effectiveDue, open = !done, dayInHeading = dayInHeading)?.let { (text, late) ->
-            // R125: a due date taken from the project is muted, with the project's mark before it.
-            val inherited = task.due == null
-            val color = when {
-                late -> MaterialTheme.colorScheme.error
-                inherited -> MaterialTheme.colorScheme.outline
-                else -> MaterialTheme.colorScheme.onSurfaceVariant
-            }
-            Row(Modifier.padding(start = Space.m), verticalAlignment = Alignment.CenterVertically) {
-                if (inherited) Icon(Icons.Outlined.Folder, str(R.string.project), Modifier.padding(end = Space.xxs).size(Sizes.metaIcon), tint = color)
-                Text(text, style = MaterialTheme.typography.rowMeta, color = color, maxLines = 1)
-            }
+            // R159: under the title, the list of the task in its colour and the project of a task of a project (R72),
+            // then the due date as a chip. Only a task of a project is a row with a parent: a subtask is never a row of a view (R12).
+            if (origin != null || date != null) RowMeta(origin, date, inherited = task.due == null)
         }
         if (selected != null) SelectCircle(selected)
         Box {
@@ -1012,6 +1008,49 @@ fun TaskRow(
                 menu { menuOpen = false }
             }
         }
+    }
+}
+
+/** R159: the second line of a row: where the task lives and the chip of its due date. */
+@Composable
+private fun RowMeta(origin: RowOrigin?, date: Pair<String, Boolean>?, inherited: Boolean) {
+    Row(Modifier.padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+        if (origin != null) {
+            Text(
+                buildAnnotatedString {
+                    origin.list?.let { name ->
+                        withStyle(SpanStyle(color = origin.color?.let(::parseColor) ?: MaterialTheme.colorScheme.primary)) { append(name) }
+                    }
+                    origin.project?.let { append(if (origin.list == null) it else " – $it") }
+                },
+                Modifier.weight(1f, fill = false).padding(end = Space.s),
+                style = MaterialTheme.typography.rowMeta,
+                color = MaterialTheme.colorScheme.outline,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        date?.let { (text, late) -> DateChip(text, late, inherited) }
+    }
+}
+
+/**
+ * R159: the due date of a row as a pill; a late one is red (R72). R125: a due date taken from the project is
+ * muted, with the project's mark before it.
+ */
+@Composable
+private fun DateChip(text: String, late: Boolean, inherited: Boolean) {
+    val (ground, ink) = when {
+        late -> MaterialTheme.colorScheme.errorContainer to MaterialTheme.colorScheme.error
+        inherited -> MaterialTheme.colorScheme.surfaceContainerHigh to MaterialTheme.colorScheme.outline
+        else -> MaterialTheme.colorScheme.surfaceContainerHigh to MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Row(
+        Modifier.clip(Corners.round).background(ground).padding(horizontal = Space.m, vertical = 1.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (inherited) Icon(Icons.Outlined.Folder, str(R.string.project), Modifier.padding(end = Space.xxs).size(Sizes.metaIcon), tint = ink)
+        Text(text, style = MaterialTheme.typography.rowMeta, color = ink, maxLines = 1)
     }
 }
 
@@ -1233,7 +1272,7 @@ internal fun Drawer(
     onProjectDone: (TaskItem) -> Unit,
     onSettings: () -> Unit,
 ) {
-    ModalDrawerSheet {
+    ModalDrawerSheet(drawerShape = Corners.drawer) {
         Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = Space.l, vertical = Space.m)) {
             val inbox = state.list("inbox")
             if (state.showsInbox) {
@@ -1417,7 +1456,7 @@ private fun DrawerItem(
         Modifier
             .fillMaxWidth()
             .height(drawerRowHeight())
-            .clip(CircleShape)
+            .clip(Corners.drawerRow)
             .background(if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
             .then(
                 if (drag == null) {
@@ -1449,10 +1488,16 @@ private fun DrawerItem(
                 },
             )
             .semantics { this.selected = selected }
-            .padding(start = Space.xl, end = Space.xxxl),
+            .padding(start = Space.l, end = Space.xl),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (leading != null) leading() else Icon(icon, null, tint = tint ?: MaterialTheme.colorScheme.onSurfaceVariant)
+        // R159: the icon stands on a tile of its colour; an icon without one has a clear tile, so the labels stay in line.
+        Box(
+            Modifier.size(Sizes.drawerTile).background(tint?.copy(alpha = 0.13f) ?: Color.Transparent, Corners.tile),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (leading != null) leading() else Icon(icon, null, Modifier.size(Sizes.lightIcon), tint = tint ?: MaterialTheme.colorScheme.onSurfaceVariant)
+        }
         Text(
             label,
             Modifier.weight(1f).padding(horizontal = Space.l),
@@ -1508,11 +1553,14 @@ private fun ViewTitle(state: UiState) {
         is Scope.Tag -> Icons.Outlined.Tag to plain
         is Scope.Search -> Icons.Outlined.Search to plain
     }
-    Row(Modifier.fillMaxWidth().padding(start = Space.xl, end = Space.xl, bottom = Space.m), verticalAlignment = Alignment.CenterVertically) {
-        Icon(icon, null, Modifier.size(Sizes.viewIcon), tint = tint)
+    Row(Modifier.fillMaxWidth().padding(start = Space.xxl, end = Space.xxl, top = Space.l, bottom = Space.l), verticalAlignment = Alignment.CenterVertically) {
+        // R159: the icon stands on a tile of its colour.
+        Box(Modifier.size(Sizes.viewTile).background(tint.copy(alpha = 0.15f), Corners.viewTile), contentAlignment = Alignment.Center) {
+            Icon(icon, null, Modifier.size(Sizes.viewIcon), tint = tint)
+        }
         Text(
             state.title,
-            Modifier.padding(start = Space.chipInset).semantics { heading() },
+            Modifier.padding(start = Space.l).semantics { heading() },
             style = MaterialTheme.typography.viewTitle,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
@@ -1520,11 +1568,25 @@ private fun ViewTitle(state: UiState) {
     }
 }
 
-/** R95: the heading of a group, in the colour of text with a thin line under it. */
+/** R159: the heading of a group, a tonal pill; Overdue is red. */
 @Composable
-private fun GroupHeading(title: String) {
-    Column(Modifier.fillMaxWidth().padding(start = Space.xl, end = Space.xl, top = Space.xxl, bottom = Space.xs)) {
-        Text(title, Modifier.semantics { heading() }, style = MaterialTheme.typography.groupHeading)
-        HorizontalDivider(Modifier.padding(top = Space.s), color = MaterialTheme.colorScheme.outlineVariant)
+internal fun GroupHeading(title: String, alert: Boolean = false) {
+    val (ground, ink) = if (alert) MaterialTheme.colorScheme.errorContainer to MaterialTheme.colorScheme.error
+    else MaterialTheme.colorScheme.secondaryContainer to MaterialTheme.colorScheme.onSecondaryContainer
+    Box(Modifier.fillMaxWidth().padding(start = Space.xxl, end = Space.xxl, top = Space.xxl, bottom = Space.m)) {
+        Text(
+            title,
+            Modifier.semantics { heading() }.clip(Corners.round).background(ground).padding(horizontal = Space.l, vertical = Space.xs),
+            style = MaterialTheme.typography.groupHeading,
+            color = ink,
+        )
     }
 }
+
+/** R159: the shape of a row in the container of its group: the first and the last round its ends. */
+internal fun groupItemShape(first: Boolean, last: Boolean) = RoundedCornerShape(
+    topStart = if (first) Corners.group else 0.dp,
+    topEnd = if (first) Corners.group else 0.dp,
+    bottomStart = if (last) Corners.group else 0.dp,
+    bottomEnd = if (last) Corners.group else 0.dp,
+)

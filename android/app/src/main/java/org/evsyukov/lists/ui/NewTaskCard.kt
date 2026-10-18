@@ -83,6 +83,7 @@ import org.evsyukov.lists.ui.theme.PriorityColors
 import org.evsyukov.lists.ui.theme.Sizes
 import org.evsyukov.lists.ui.theme.Space
 import org.evsyukov.lists.ui.theme.ViewTint
+import org.evsyukov.lists.ui.theme.entryTitle
 import org.evsyukov.lists.ui.theme.viewTint
 import uniffi.lists_core.Freq
 import uniffi.lists_core.NewTask
@@ -421,6 +422,7 @@ fun NewTaskCard(
                 onValueChange = { text = it },
                 placeholder = { Text(str(R.string.new_task)) },
                 singleLine = true,
+                textStyle = MaterialTheme.typography.entryTitle,
                 colors = transparentField(),
                 keyboardOptions = SentenceKeyboard.copy(imeAction = ImeAction.Done),
                 keyboardActions = KeyboardActions(onDone = { submit() }),
@@ -469,7 +471,7 @@ fun NewTaskCard(
                     Modifier.fillMaxWidth().padding(start = AFTER_MARK + Space.xl, end = Space.m),
                     chips = {
                         start?.let { ValueChip(dateLabel(it), Icons.Outlined.PlayArrow, str(R.string.start)) { dialog = "start" } }
-                        shownDue?.let { ValueChip(dateLabel(it), Icons.Outlined.Event, str(R.string.due)) { dialog = "due" } }
+                        shownDue?.let { ValueChip(dateLabel(it), Icons.Outlined.Event, str(R.string.due), tonal = true) { dialog = "due" } }
                         repeat?.let { ValueChip(it.summary(), Icons.Outlined.Repeat, str(R.string.repeat)) { dialog = "repeat" } }
                         if (shownPriority != Priority.NONE) {
                             ValueChip(shownPriority.title(), Icons.Outlined.Flag, str(R.string.priority), color = PriorityColors.chip) { dialog = "priority" }
@@ -539,7 +541,7 @@ fun NewTaskCard(
 private val COMPACT_SUBTASKS_HEIGHT = 144.dp
 
 /** Where the text of the compact card starts: after the mark, in line with the title. */
-private val AFTER_MARK = 34.dp
+private val AFTER_MARK = Space.xl + Sizes.roundMark
 
 /**
  * R113: the subtasks typed for a task that does not exist yet. Each is a line with a title that can be
@@ -555,7 +557,7 @@ private fun DraftSubtasks(entry: NewTaskEntry, full: Boolean, focus: FocusReques
         Column(if (full) Modifier else Modifier.heightIn(max = COMPACT_SUBTASKS_HEIGHT).verticalScroll(scroll)) {
             entry.subtasks.forEachIndexed { index, title ->
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(Sizes.touch), contentAlignment = Alignment.Center) { Mark(MarkState.Open, null, round = true) }
+                    Box(Modifier.size(Sizes.touch), contentAlignment = Alignment.Center) { Mark(MarkState.Open, null, small = true) }
                     TextField(
                         value = title,
                         onValueChange = { typed -> entry.subtasks = entry.subtasks.toMutableList().also { it[index] = typed } },
