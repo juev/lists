@@ -115,6 +115,7 @@ A WebDAV or folder storage can be encrypted with a passphrase from Settings → 
 | [docs/self-hosting.md](docs/self-hosting.md) | running the web server: Docker, settings, sign-in, reverse proxy |
 | [docs/releasing.md](docs/releasing.md) | cutting a release, signing keys and repository secrets |
 | [docs/architecture.md](docs/architecture.md) | design decisions and their reasons (in Russian) |
+| [docs/android-design.md](docs/android-design.md) | Android theme, measures, colours and screenshot tests |
 | [docs/specs](docs/specs/) | requirements, data model, sync rules, CalDAV mapping, import (in Russian) |
 
 ## Building from source
