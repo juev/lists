@@ -26,7 +26,19 @@ enum class ViewTint(val light: Long, val dark: Long) {
 /** The shade of [tint] for the look on screen: dark when the surface is dark. */
 @Composable
 fun viewTint(tint: ViewTint): Color =
-    Color(if (MaterialTheme.colorScheme.surface.luminance() < 0.5f) tint.dark else tint.light)
+    Color(if (isDarkLook()) tint.dark else tint.light)
+
+/** True when the look on screen is dark. */
+@Composable
+fun isDarkLook(): Boolean = MaterialTheme.colorScheme.surface.luminance() < 0.5f
+
+/** R159: the ground of a screen of rows, a tone apart from the containers that stand on it. */
+@Composable
+fun screenGround(): Color = if (isDarkLook()) MaterialTheme.colorScheme.surfaceContainerLowest else MaterialTheme.colorScheme.surfaceContainer
+
+/** R159: the container of the rows of a group and of the sections of the settings. */
+@Composable
+fun groupContainer(): Color = if (isDarkLook()) MaterialTheme.colorScheme.surfaceContainer else MaterialTheme.colorScheme.surfaceContainerLowest
 
 /** The colours of the priorities (R72): of the bar of a row and of the chip in a card. */
 object PriorityColors {

@@ -18,6 +18,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
@@ -44,15 +45,21 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.AttachFile
+import androidx.compose.material.icons.outlined.Backup
 import androidx.compose.material.icons.outlined.Checklist
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Event
+import androidx.compose.material.icons.outlined.FileDownload
+import androidx.compose.material.icons.outlined.FileUpload
 import androidx.compose.material.icons.outlined.Flag
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Repeat
+import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material.icons.outlined.Tag
+import androidx.compose.material.icons.outlined.TaskAlt
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Checkbox
@@ -93,6 +100,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
@@ -145,7 +153,13 @@ import org.evsyukov.lists.str
 import org.evsyukov.lists.summary
 import org.evsyukov.lists.title
 import org.evsyukov.lists.today
+import org.evsyukov.lists.ui.theme.Corners
 import org.evsyukov.lists.ui.theme.PriorityColors
+import org.evsyukov.lists.ui.theme.Sizes
+import org.evsyukov.lists.ui.theme.Space
+import org.evsyukov.lists.ui.theme.cardTitle
+import org.evsyukov.lists.ui.theme.groupContainer
+import org.evsyukov.lists.ui.theme.screenGround
 import org.evsyukov.lists.weekdayNames
 import uniffi.lists_core.Attachment
 import uniffi.lists_core.ConnectionCheck
@@ -385,6 +399,7 @@ fun EditorSheet(editing: Editing, state: UiState, model: MainViewModel, onRemind
     ModalBottomSheet(
         onDismissRequest = { model.open(null) },
         sheetState = sheet,
+        shape = Corners.sheet,
         dragHandle = { CardHandle(tall, { tall = it }, if (tall) Modifier.statusBarsPadding() else Modifier) },
     ) {
         Column((if (tall) Modifier.fillMaxHeight() else Modifier).verticalScroll(rememberScrollState()).navigationBarsPadding().padding(bottom = 16.dp)) {
@@ -407,7 +422,7 @@ fun EditorSheet(editing: Editing, state: UiState, model: MainViewModel, onRemind
                     enabled = !locked,
                     singleLine = true,
                     wraps = true,
-                    textStyle = MaterialTheme.typography.bodyLarge,
+                    textStyle = MaterialTheme.typography.cardTitle,
                     modifier = Modifier.weight(1f),
                 ) { value -> if (value.isNotBlank()) model.act { it.setTitle(task.id, value) } }
                 Box {
@@ -447,7 +462,7 @@ fun EditorSheet(editing: Editing, state: UiState, model: MainViewModel, onRemind
                         task.start?.let { ValueChip(dateLabel(it), Icons.Outlined.PlayArrow, str(R.string.start)) { dialog = "start" } }
                         task.due?.let {
                             val overdue = isOverdue(it) && task.done == null
-                            ValueChip(dateLabel(it), Icons.Outlined.Event, str(R.string.due), color = if (overdue) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface) { dialog = "due" }
+                            ValueChip(dateLabel(it), Icons.Outlined.Event, str(R.string.due), color = if (overdue) MaterialTheme.colorScheme.error else null, tonal = !overdue) { dialog = "due" }
                         }
                         task.repeat?.let { ValueChip(it.summary(), Icons.Outlined.Repeat, str(R.string.repeat)) { dialog = "repeat" } }
                         task.remind?.let { ValueChip(dateLabel(it), Icons.Outlined.Notifications, str(R.string.reminder)) { dialog = "remind" } }
@@ -979,6 +994,8 @@ internal fun FormDialog(
     fullScreen: Boolean = false,
     /** Stands before the title of a dialog that takes the whole window. */
     navigation: (@Composable () -> Unit)? = null,
+    /** The colour of the window when it takes the whole of it: the settings stand on the ground of R159. */
+    ground: Color? = null,
     content: @Composable () -> Unit,
 ) {
     if (!fullScreen && LocalConfiguration.current.screenHeightDp >= LOW_WINDOW_DP) {
@@ -993,7 +1010,7 @@ internal fun FormDialog(
         return
     }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Surface(Modifier.fillMaxSize()) {
+        Surface(Modifier.fillMaxSize(), color = ground ?: MaterialTheme.colorScheme.surface) {
             Column(Modifier.windowInsetsPadding(WindowInsets.safeDrawing)) {
                 Row(Modifier.fillMaxWidth().padding(start = if (navigation != null) 8.dp else 24.dp, end = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                     navigation?.invoke()
@@ -1285,6 +1302,7 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
         // "Back" in a section leads to the list of sections, in the list it closes the settings.
         onDismiss = { if (section != null) section = null else onDismiss() },
         fullScreen = true,
+        ground = screenGround(),
         navigation = if (section == null) null else {
             { IconButton(onClick = { section = null }) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, str(R.string.back)) } }
         },
@@ -1294,12 +1312,16 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
                 Column(Modifier.verticalScroll(rememberScrollState())) {
                     when (section) {
                         null -> {
-                            for ((id, title) in sections) {
-                                SettingRow(title, "") { if (id == "backups") choosing = "backups" else section = id }
+                            // R159: the sections stand in rounded containers, each with its icon on a tonal tile.
+                            SectionGroup {
+                                for ((id, title) in sections) {
+                                    SectionRow(sectionIcon(id), title) { if (id == "backups") choosing = "backups" else section = id }
+                                }
                             }
-                            HorizontalDivider(Modifier.padding(vertical = 8.dp))
-                            SettingRow(str(R.string.import_file), "") { pickImport.launch(arrayOf("*/*")) }
-                            SettingRow(str(R.string.export_file), "") { choosing = "export" }
+                            SectionGroup {
+                                SectionRow(Icons.Outlined.FileDownload, str(R.string.import_file)) { pickImport.launch(arrayOf("*/*")) }
+                                SectionRow(Icons.Outlined.FileUpload, str(R.string.export_file)) { choosing = "export" }
+                            }
                         }
                         "general" -> {
                             SettingRow(str(R.string.appearance), lookLabels[LookPrefs.choices.indexOf(LookPrefs.appearance(context))]) { choosing = "appearance" }
@@ -1708,6 +1730,35 @@ private fun keepDoneLabel(keep: KeepDone): String = when (keep) {
         keep.seconds % 60u == 0u -> str(R.string.leave_after_minutes, (keep.seconds / 60u).toInt())
         else -> str(R.string.leave_after_seconds, keep.seconds.toInt())
     }
+}
+
+/** R159: a rounded container of rows of the list of sections of the settings. */
+@Composable
+private fun SectionGroup(content: @Composable ColumnScope.() -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(vertical = Space.s).clip(Corners.groupShape).background(groupContainer()).padding(vertical = Space.xs), content = content)
+}
+
+/** R159: a section of the settings: its icon on a tonal tile and its name. */
+@Composable
+private fun SectionRow(icon: ImageVector, title: String, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onClick).heightIn(min = Sizes.touch).padding(horizontal = Space.xl, vertical = Space.m),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(Sizes.settingsTile).background(MaterialTheme.colorScheme.secondaryContainer, Corners.tile), contentAlignment = Alignment.Center) {
+            Icon(icon, null, Modifier.size(Sizes.lightIcon), tint = MaterialTheme.colorScheme.onSecondaryContainer)
+        }
+        Text(title, Modifier.padding(start = Space.xl), style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
+    }
+}
+
+/** R159: the icon of a section of the settings (R101). */
+private fun sectionIcon(id: String): ImageVector = when (id) {
+    "general" -> Icons.Outlined.Tune
+    "tasks" -> Icons.Outlined.TaskAlt
+    "notifications" -> Icons.Outlined.Notifications
+    "sync" -> Icons.Outlined.Sync
+    else -> Icons.Outlined.Backup
 }
 
 @Composable

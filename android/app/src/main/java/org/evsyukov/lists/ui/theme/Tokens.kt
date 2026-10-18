@@ -44,19 +44,22 @@ object Space {
 
 /** Sizes of the elements that recur on every screen. */
 object Sizes {
-    /** The completion mark of a row (R95) and the icon of a chip. */
+    /** The icon of a chip and of a mark after the title of a row. */
     val mark = 16.dp
 
+    /** The round completion mark of a row and of a card (R159); a subtask has the small one. */
+    val roundMark = 20.dp
+    val roundMarkSmall = 18.dp
+
     /** The tick or cross inside the mark. */
-    val markGlyph = 12.dp
+    val markGlyph = 14.dp
 
     /** The width of the stroke of a mark and of the circle of a project. */
     val stroke = 1.5.dp
 
-    /** The bar of a priority (R72): its width, and its height in a row of one line and of two. */
-    val priorityBar = 3.dp
-    val priorityBarShort = 20.dp
-    val priorityBarTall = 34.dp
+    /** The bar of a priority (R159): its width and its height. */
+    val priorityBar = 4.dp
+    val priorityBarHeight = 36.dp
 
     /** An icon before the title of a row: a project. */
     val rowIcon = 18.dp
@@ -70,8 +73,8 @@ object Sizes {
     /** The least side of a small tap target: the circle of a light icon, the list button of a card. */
     val lightTarget = 40.dp
 
-    /** The least height of a chip and of the row of fields. */
-    val chip = 32.dp
+    /** The least height of a chip and of the row of fields (R159). */
+    val chip = 36.dp
 
     /** The least height of a row that is tapped as a whole. */
     val touch = 48.dp
@@ -79,8 +82,15 @@ object Sizes {
     /** The circle of a project in the panel (R126). */
     val projectMark = 24.dp
 
-    /** The icon before the large title of a view (R95). */
+    /** The icon before the large title of a view (R95) and the tile it stands on (R159). */
     val viewIcon = 28.dp
+    val viewTile = 52.dp
+
+    /** The tile of the icon of a row of the panel of lists (R159). */
+    val drawerTile = 36.dp
+
+    /** The tile of the icon of a section of the settings (R159). */
+    val settingsTile = 40.dp
 
     /** The circle at the right edge of a row in the selection mode (R109). */
     val selectCircle = 22.dp
@@ -89,17 +99,31 @@ object Sizes {
 /** The corners of the shapes of the UI. */
 object Corners {
     /** The bar of a priority. */
-    val bar = RoundedCornerShape(2.dp)
+    val bar = RoundedCornerShape(4.dp)
 
-    /** The square mark of a task (R95). */
-    val mark = RoundedCornerShape(5.dp)
+    /** A chip of a field and a field of text (R159). */
+    val chip = RoundedCornerShape(12.dp)
 
-    /** A chip of a field and a field of text. */
-    val chip = RoundedCornerShape(8.dp)
+    /** The tile of the icon of a row of the panel and of a section of the settings (R159). */
+    val tile = RoundedCornerShape(12.dp)
 
-    /** A card of a task, the sheet of a new task. */
-    val card = RoundedCornerShape(20.dp)
+    /** The tile of the icon of a view title (R159). */
+    val viewTile = RoundedCornerShape(18.dp)
 
-    /** A pill, a row of the panel of lists, a round mark and a button. */
+    /** A row of the panel of lists and the add button (R159). */
+    val drawerRow = RoundedCornerShape(16.dp)
+    val fab = RoundedCornerShape(16.dp)
+
+    /** The container of the rows of a group and of the sections of the settings (R159). */
+    val group = 24.dp
+    val groupShape = RoundedCornerShape(group)
+
+    /** The top of a sheet: the card of a task, the card of a new task (R159). */
+    val sheet = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
+
+    /** The open edge of the panel of lists (R159). */
+    val drawer = RoundedCornerShape(topEnd = 28.dp, bottomEnd = 28.dp)
+
+    /** A pill, the chip of a date in a row, a round mark and a button. */
     val round = CircleShape
 }

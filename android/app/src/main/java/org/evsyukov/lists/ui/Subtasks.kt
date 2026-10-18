@@ -86,7 +86,7 @@ fun SubtaskLine(task: TaskItem, renaming: Boolean, model: MainViewModel, onRenam
         verticalAlignment = Alignment.CenterVertically,
     ) {
         IconButton(onClick = { model.toggleDone(task) }, enabled = !fixed) {
-            Mark(task.markState(), if (done) str(R.string.reopen) else str(R.string.complete), round = true)
+            Mark(task.markState(), if (done) str(R.string.reopen) else str(R.string.complete), small = true)
         }
         if (renaming) {
             SubtaskTitleField(task.title, Modifier.weight(1f), onCommit = { title -> model.act { it.setTitle(task.id, title) } }) { onRename(false) }
@@ -169,7 +169,7 @@ private fun SubtaskTitleField(title: String, modifier: Modifier, onCommit: (Stri
 fun FoundSubtask(task: TaskItem) {
     val done = task.done != null
     Row(Modifier.fillMaxWidth().padding(start = 52.dp, end = 16.dp, top = 4.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-        Mark(task.markState(), str(if (done) R.string.completed else R.string.subtask), round = true)
+        Mark(task.markState(), str(if (done) R.string.completed else R.string.subtask), small = true)
         Text(
             task.title,
             Modifier.padding(start = 10.dp),

@@ -20,9 +20,9 @@ class RowSpacingTest {
     }
 
     @Test
-    fun r122_rows_are_48_52_and_60_dp_high() {
-        // The mark is a button with a touch target of 48 dp; the spacing lies above and below it.
+    fun r122_rows_are_56_64_and_72_dp_high() {
+        // The mark is a button with a touch target of 48 dp; the spacing lies above and below it (R159).
         val heights = LookPrefs.rowSpacings.map { 48 + 2 * LookPrefs.rowPadding(it) }
-        assertEquals(listOf(48, 52, 60), heights)
+        assertEquals(listOf(56, 64, 72), heights)
     }
 }
