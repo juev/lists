@@ -4,7 +4,7 @@ JAVA_HOME ?= /opt/homebrew/opt/openjdk@21
 ANDROID_HOME ?= $(HOME)/Library/Android/sdk
 export JAVA_HOME ANDROID_HOME
 
-.PHONY: test lint deny fmt apple apple-run apple-lint android android-lint android-install web clean
+.PHONY: test lint deny fmt apple apple-run apple-lint android android-lint android-screenshots android-install web clean
 
 # --locked: a lockfile that no longer matches Cargo.toml is an error here, as it
 # is in the Docker build, instead of being rewritten on the way.
@@ -44,7 +44,12 @@ apple-lint:
 
 android:
 	./scripts/build-android.sh
-	cd android && ./gradlew --quiet testDebugUnitTest assembleDebug
+	cd android && ./gradlew --quiet testDebugUnitTest -Proborazzi.test.verify=true assembleDebug
+
+# Records the screenshots of android/app/src/test/screenshots anew, after a change of the UI meant to show (#369).
+android-screenshots:
+	./scripts/build-android.sh
+	cd android && ./gradlew --quiet recordRoborazziDebug
 
 # ktlint with the settings in .editorconfig; the generated bindings are left out.
 android-lint:
