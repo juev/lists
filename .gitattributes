@@ -1,0 +1,2 @@
+# Test data are real exports: keep their bytes, line endings included.
+core/tests/data/** -text
