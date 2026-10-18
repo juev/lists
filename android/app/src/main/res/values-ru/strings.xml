@@ -223,7 +223,12 @@
     <string name="more">Ещё</string>
     <string name="one_word">одно слово</string>
     <string name="remove_time">Убрать время</string>
-    <string name="repeats_field">Число повторов (пусто — без конца)</string>
+    <string name="repeats_field">Число повторов</string>
+    <string name="repeat_ends">Окончание</string>
+    <string name="repeat_end_never">Никогда</string>
+    <string name="repeat_end_count">После числа повторов</string>
+    <string name="repeat_end_date">До даты</string>
+    <string name="repeat_end_day">Последний повтор</string>
     <string name="archived_switch">В архиве</string>
     <string name="via_webdav">Через WebDAV</string>
     <string name="local_only">Данные хранятся только на этом устройстве.</string>
