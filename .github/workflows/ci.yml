@@ -161,6 +161,28 @@ jobs:
       - name: Check that the build changed no tracked file
         run: ./scripts/check-clean-tree.sh
 
+  # #375: the app is universal; here its Intel half is built and started on an Intel Mac.
+  macos-intel:
+    name: macOS app on Intel
+    runs-on: macos-15-intel
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install xcodegen
+        run: brew install xcodegen
+      - name: Install the Rust toolchain
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: core
+      - name: Build the app
+        run: make apple
+      - name: Check that the app is built for this Mac
+        run: |
+          uname -m
+          lipo apple/build/Build/Products/Debug/Lists.app/Contents/MacOS/Lists -verify_arch x86_64
+      - name: Start the app
+        run: ./scripts/check-launch.sh apple/build/Build/Products/Debug/Lists.app debug
+
   docker:
     name: Docker image
     runs-on: ubuntu-24.04
