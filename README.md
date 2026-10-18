@@ -27,9 +27,9 @@ The pictures show the same demo data on every platform; `cargo run --example dem
 |---|---|---|
 | <img src="docs/screenshots/android-today.png" width="240" alt="The Today view on Android"> | <img src="docs/screenshots/android-list.png" width="240" alt="A list on Android"> | <img src="docs/screenshots/android-task.png" width="240" alt="The card of a task on Android"> |
 
-| Quick entry | Lists and views | A new filter | Settings |
+| Quick entry | Lists and views | A filter | Settings |
 |---|---|---|---|
-| <img src="docs/screenshots/android-quick-entry.png" width="180" alt="Quick entry on Android: the date and the priority are read from the text"> | <img src="docs/screenshots/android-drawer.png" width="180" alt="The panel with the views, lists, projects and filters on Android"> | <img src="docs/screenshots/android-filter.png" width="180" alt="The dialog of a new filter on Android"> | <img src="docs/screenshots/android-settings.png" width="180" alt="The settings on Android"> |
+| <img src="docs/screenshots/android-quick-entry.png" width="180" alt="Quick entry on Android: the date and the priority are read from the text"> | <img src="docs/screenshots/android-drawer.png" width="180" alt="The panel with the views, lists, projects and filters on Android"> | <img src="docs/screenshots/android-filter.png" width="180" alt="A saved filter of the next seven days on Android"> | <img src="docs/screenshots/android-settings.png" width="180" alt="The settings on Android"> |
 
 ### Web
 
