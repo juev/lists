@@ -26,7 +26,7 @@ object Space {
     /** Between the icon and the text inside a chip. */
     val chipGap = 5.dp
 
-    /** The side padding inside a chip; the gap after the bar of a priority. */
+    /** The side padding inside a chip; the gap after the bar of a priority and after the icon of a view title. */
     val chipInset = 10.dp
 
     /** Between an icon and its label in a row; the horizontal padding of the panel. */

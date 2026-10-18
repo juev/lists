@@ -541,7 +541,11 @@ fun EditorSheet(editing: Editing, state: UiState, model: MainViewModel, onRemind
                 if (index > 0) line()
                 // The tasks of a project are full tasks with a card; a subtask is a line (R10).
                 if (task.isProject) {
-                    TaskRow(sub, state, onToggle = { model.toggleDone(sub) }, onOpen = { model.open(sub.id) }, model = model, showOrigin = false, subtask = true)
+                    TaskRow(
+                        sub, state, onToggle = { model.toggleDone(sub) }, onOpen = { model.open(sub.id) },
+                        menu = { close -> TaskMenu(sub, state, model, { model.open(sub.id) }, selectable = false, close = close) },
+                        showOrigin = false, subtask = true,
+                    )
                 } else key(sub.id) {
                     SubtaskLine(sub, renaming == sub.id, model) { on ->
                         // The line that gives the edit up may already have lost it to another line.

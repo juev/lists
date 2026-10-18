@@ -184,8 +184,17 @@ import org.evsyukov.lists.rowDate
 import org.evsyukov.lists.str
 import org.evsyukov.lists.title
 import org.evsyukov.lists.today
+import org.evsyukov.lists.ui.theme.Corners
+import org.evsyukov.lists.ui.theme.Sizes
+import org.evsyukov.lists.ui.theme.Space
 import org.evsyukov.lists.ui.theme.ViewTint
+import org.evsyukov.lists.ui.theme.groupHeading
+import org.evsyukov.lists.ui.theme.label
+import org.evsyukov.lists.ui.theme.pill
+import org.evsyukov.lists.ui.theme.rowMeta
+import org.evsyukov.lists.ui.theme.sectionHeading
 import org.evsyukov.lists.ui.theme.viewTint
+import org.evsyukov.lists.ui.theme.viewTitle
 import uniffi.lists_core.Priority
 import uniffi.lists_core.QuickParse
 import uniffi.lists_core.SavedFilter
@@ -426,7 +435,7 @@ fun MainScreen(model: MainViewModel, onReminderSet: () -> Unit) {
                                     if (selection != null) {
                                         Surface {
                                             TaskRow(
-                                                task, state, onToggle = {}, onOpen = {}, model = model, showOrigin = state.showsOrigin(),
+                                                task, state, onToggle = {}, onOpen = {}, menu = {}, showOrigin = state.showsOrigin(),
                                                 selected = task.id in selection, onSelect = { model.toggleSelected(task.id) },
                                             )
                                         }
@@ -741,7 +750,7 @@ fun QuickChips(text: String, modifier: Modifier = Modifier) {
         parsed.listName?.let { add("@$it") }
     }
     if (parts.isEmpty()) return
-    Row(modifier, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+    Row(modifier, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
         for (part in parts) Pill(part)
     }
 }
@@ -750,10 +759,10 @@ fun QuickChips(text: String, modifier: Modifier = Modifier) {
 fun Pill(text: String, color: Color = MaterialTheme.colorScheme.primary) {
     Text(
         text,
-        style = MaterialTheme.typography.labelMedium,
+        style = MaterialTheme.typography.pill,
         color = color,
         maxLines = 1,
-        modifier = Modifier.clip(CircleShape).background(color.copy(alpha = 0.12f)).padding(horizontal = 8.dp, vertical = 2.dp),
+        modifier = Modifier.clip(Corners.round).background(color.copy(alpha = 0.12f)).padding(horizontal = Space.m, vertical = 2.dp),
     )
 }
 
@@ -855,7 +864,13 @@ private fun SwipeRow(task: TaskItem, state: UiState, onToggle: () -> Unit, onOpe
                         },
                     )
                 ),
-        ) { TaskRow(task, state, onToggle, onOpen, model, showOrigin = state.showsOrigin(), selectable = true, drag = drag) }
+        ) {
+            TaskRow(
+                task, state, onToggle, onOpen,
+                menu = { close -> TaskMenu(task, state, model, onOpen, selectable = true, close = close) },
+                showOrigin = state.showsOrigin(), drag = drag,
+            )
+        }
     }
 }
 
@@ -871,19 +886,18 @@ fun TaskRow(
     state: UiState,
     onToggle: () -> Unit,
     onOpen: () -> Unit,
-    model: MainViewModel,
+    // The items of the long-press menu; they close it with the function they are given.
+    menu: @Composable (close: () -> Unit) -> Unit,
     showOrigin: Boolean,
     // A subtask in the card of its task (R96): a round mark, and grey without a strike when it is done.
     subtask: Boolean = false,
-    // R109: the menu of the row offers "Select"; only a row of a view does.
-    selectable: Boolean = false,
     // R109: set in the selection mode, where the whole row only selects.
     selected: Boolean? = null,
     onSelect: () -> Unit = {},
     // R157: in a view sorted by hand the long press drags the row; let go in place, it opens the menu.
     drag: RowDrag? = null,
 ) {
-    var menu by remember { mutableStateOf(false) }
+    var menuOpen by remember { mutableStateOf(false) }
     val haptic = LocalHapticFeedback.current
     val menuLabel = str(R.string.more)
     // The gesture outlives a recomposition: it reaches the drag of the row as it is now.
@@ -899,7 +913,7 @@ fun TaskRow(
                     Modifier
                         .combinedClickable(onClick = onOpen)
                         // A screen reader has no drag: its long press still opens the menu.
-                        .semantics { onLongClick(menuLabel) { menu = true; true } }
+                        .semantics { onLongClick(menuLabel) { menuOpen = true; true } }
                         .pointerInput(task.id) {
                             detectDragGesturesAfterLongPress(
                                 onDragStart = {
@@ -910,16 +924,16 @@ fun TaskRow(
                                     change.consume()
                                     currentDrag?.onDrag?.invoke(amount.y)
                                 },
-                                onDragEnd = { if (currentDrag?.onEnd?.invoke(viewConfiguration.touchSlop) == Dropped.Still) menu = true },
+                                onDragEnd = { if (currentDrag?.onEnd?.invoke(viewConfiguration.touchSlop) == Dropped.Still) menuOpen = true },
                                 onDragCancel = { currentDrag?.onCancel?.invoke() },
                             )
                         }
-                } else if (selected == null) Modifier.combinedClickable(onClick = onOpen, onLongClick = { menu = true })
+                } else if (selected == null) Modifier.combinedClickable(onClick = onOpen, onLongClick = { menuOpen = true })
                 else Modifier
                     .background(if (selected) viewTint(ViewTint.Blue).copy(alpha = 0.12f) else Color.Transparent)
                     .toggleable(value = selected, role = Role.Checkbox, onValueChange = { onSelect() })
             )
-            .padding(start = 4.dp, end = 16.dp, top = padding, bottom = padding),
+            .padding(start = Space.xs, end = Space.xl, top = padding, bottom = padding),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         // The mark of a record of a repeat takes its completion back while it can (R128, R133); after that it is a repeat icon.
@@ -933,7 +947,7 @@ fun TaskRow(
             )
         }
         if (task.isProject) {
-            Icon(Icons.Outlined.Folder, str(R.string.project), Modifier.padding(end = 6.dp).size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            Icon(Icons.Outlined.Folder, str(R.string.project), Modifier.padding(end = Space.s).size(Sizes.rowIcon), tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         val origin = if (showOrigin) rowOrigin(task, state.lists, str(R.string.inbox)) else null
         // R72: the priority is a thin bar after the mark; its place is kept, so every title starts at one line.
@@ -966,7 +980,7 @@ fun TaskRow(
                         }
                         origin.project?.let { append(if (origin.list == null) it else " – $it") }
                     },
-                    style = MaterialTheme.typography.bodySmall,
+                    style = MaterialTheme.typography.rowMeta,
                     color = MaterialTheme.colorScheme.outline,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -983,15 +997,15 @@ fun TaskRow(
                 inherited -> MaterialTheme.colorScheme.outline
                 else -> MaterialTheme.colorScheme.onSurfaceVariant
             }
-            Row(Modifier.padding(start = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (inherited) Icon(Icons.Outlined.Folder, str(R.string.project), Modifier.padding(end = 3.dp).size(14.dp), tint = color)
-                Text(text, style = MaterialTheme.typography.bodySmall, color = color, maxLines = 1)
+            Row(Modifier.padding(start = Space.m), verticalAlignment = Alignment.CenterVertically) {
+                if (inherited) Icon(Icons.Outlined.Folder, str(R.string.project), Modifier.padding(end = Space.xxs).size(Sizes.metaIcon), tint = color)
+                Text(text, style = MaterialTheme.typography.rowMeta, color = color, maxLines = 1)
             }
         }
         if (selected != null) SelectCircle(selected)
         Box {
-            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                TaskMenu(task, state, model, onOpen, selectable) { menu = false }
+            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                menu { menuOpen = false }
             }
         }
     }
@@ -1003,12 +1017,12 @@ private fun SelectCircle(selected: Boolean) {
     val blue = viewTint(ViewTint.Blue)
     Box(
         Modifier
-            .padding(start = 12.dp)
-            .size(22.dp)
-            .then(if (selected) Modifier.background(blue, CircleShape) else Modifier.border(1.5.dp, MaterialTheme.colorScheme.outline, CircleShape)),
+            .padding(start = Space.l)
+            .size(Sizes.selectCircle)
+            .then(if (selected) Modifier.background(blue, Corners.round) else Modifier.border(Sizes.stroke, MaterialTheme.colorScheme.outline, Corners.round)),
         contentAlignment = Alignment.Center,
     ) {
-        if (selected) Icon(Icons.Outlined.Check, null, Modifier.size(14.dp), tint = Color.White)
+        if (selected) Icon(Icons.Outlined.Check, null, Modifier.size(Sizes.metaIcon), tint = Color.White)
     }
 }
 
@@ -1117,12 +1131,12 @@ private fun Marks(task: TaskItem) {
         if (task.attachments > 0u) add(Icons.Outlined.AttachFile to str(R.string.attachments))
         if (task.subtasksTotal > 0u) add(Icons.Outlined.Checklist to str(R.string.subtasks))
     }
-    for ((icon, name) in marks) Icon(icon, name, Modifier.padding(start = 6.dp).size(16.dp), tint = muted)
+    for ((icon, name) in marks) Icon(icon, name, Modifier.padding(start = Space.s).size(Sizes.mark), tint = muted)
 }
 
 /** The whole context menu: six actions, the rest lives in the editor. */
 @Composable
-private fun TaskMenu(task: TaskItem, state: UiState, model: MainViewModel, onOpen: () -> Unit, selectable: Boolean, close: () -> Unit) {
+internal fun TaskMenu(task: TaskItem, state: UiState, model: MainViewModel, onOpen: () -> Unit, selectable: Boolean, close: () -> Unit) {
     var sub by remember { mutableStateOf<String?>(null) }
     fun run(action: () -> Unit) {
         close()
@@ -1202,7 +1216,7 @@ private fun TaskMenu(task: TaskItem, state: UiState, model: MainViewModel, onOpe
 }
 
 @Composable
-private fun Drawer(
+internal fun Drawer(
     state: UiState,
     onSelect: (Scope) -> Unit,
     onEditList: (TaskList) -> Unit,
@@ -1216,7 +1230,7 @@ private fun Drawer(
     onSettings: () -> Unit,
 ) {
     ModalDrawerSheet {
-        Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 8.dp)) {
+        Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = Space.l, vertical = Space.m)) {
             val inbox = state.list("inbox")
             if (state.showsInbox) {
                 DrawerItem(str(R.string.inbox), Icons.Filled.Inbox, state.counts.inbox, state.scope == Scope.Inbox, tint = viewTint(ViewTint.Blue), onLong = inbox?.let { { onEditList(it) } }) { onSelect(Scope.Inbox) }
@@ -1235,7 +1249,7 @@ private fun Drawer(
             val shownLists = state.lists.filter { it.id != "inbox" && !it.archived }
             var draggedList by remember { mutableStateOf<String?>(null) }
             var listOffset by remember { mutableFloatStateOf(0f) }
-            val rowHeight = with(LocalDensity.current) { DRAWER_ROW.toPx() }
+            val rowHeight = with(LocalDensity.current) { Sizes.drawerRow.toPx() }
             val from = shownLists.indexOfFirst { it.id == draggedList }
             val to = if (from < 0) -1 else landing(from, listOffset, rowHeight, shownLists.size)
             for ((index, list) in shownLists.withIndex()) {
@@ -1319,7 +1333,7 @@ private fun Drawer(
                     DrawerItem(list.name, Icons.Outlined.Inventory2, 0u, false, onLong = { onEditList(list) }) { onEditList(list) }
                 }
             }
-            HorizontalDivider(Modifier.padding(vertical = 8.dp))
+            HorizontalDivider(Modifier.padding(vertical = Space.m))
             DrawerItem(str(R.string.settings), Icons.Outlined.Settings, 0u, false, onClick = onSettings)
         }
     }
@@ -1327,11 +1341,8 @@ private fun Drawer(
 
 @Composable
 private fun DrawerHeading(text: String) {
-    Text(text, Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Text(text, Modifier.padding(start = Space.xl, top = Space.xl, bottom = Space.xs), style = MaterialTheme.typography.sectionHeading, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }
-
-/** The height of a row of the panel of lists. */
-private val DRAWER_ROW = 56.dp
 
 /** R30: the counter of a project in the drawer, "done/total", shown for an empty project as well (R127). */
 internal fun projectCounter(done: UInt, total: UInt): String = "$done/$total"
@@ -1364,7 +1375,7 @@ private fun DrawerItem(
     Row(
         Modifier
             .fillMaxWidth()
-            .height(DRAWER_ROW)
+            .height(Sizes.drawerRow)
             .clip(CircleShape)
             .background(if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
             .then(
@@ -1397,21 +1408,21 @@ private fun DrawerItem(
                 },
             )
             .semantics { this.selected = selected }
-            .padding(start = 16.dp, end = 24.dp),
+            .padding(start = Space.xl, end = Space.xxxl),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (leading != null) leading() else Icon(icon, null, tint = tint ?: MaterialTheme.colorScheme.onSurfaceVariant)
         Text(
             label,
-            Modifier.weight(1f).padding(horizontal = 12.dp),
-            style = MaterialTheme.typography.labelLarge,
+            Modifier.weight(1f).padding(horizontal = Space.l),
+            style = MaterialTheme.typography.label,
             color = if (selected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
         val shown = counter ?: if (count > 0u) "$count" else null
         if (shown != null) {
-            Text(shown, style = MaterialTheme.typography.labelLarge, color = if (alert) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(shown, style = MaterialTheme.typography.label, color = if (alert) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -1422,17 +1433,17 @@ private fun ProjectMark(done: UInt, total: UInt, tint: Color, onComplete: () -> 
     val description = str(R.string.complete_project)
     Canvas(
         Modifier
-            .size(24.dp)
-            .clip(CircleShape)
+            .size(Sizes.projectMark)
+            .clip(Corners.round)
             .clickable(role = Role.Checkbox, onClick = onComplete)
             .semantics { contentDescription = description }
-            .padding(3.dp),
+            .padding(Space.xxs),
     ) {
-        val stroke = 1.5.dp.toPx()
+        val stroke = Sizes.stroke.toPx()
         drawCircle(tint, radius = size.minDimension / 2 - stroke / 2, style = Stroke(stroke))
         val fraction = if (total == 0u) 0f else done.toFloat() / total.toFloat()
         if (fraction > 0f) {
-            val inset = 3.dp.toPx()
+            val inset = Space.xxs.toPx()
             drawArc(tint, -90f, 360f * fraction.coerceAtMost(1f), useCenter = true, topLeft = Offset(inset, inset), size = Size(size.width - 2 * inset, size.height - 2 * inset))
         }
     }
@@ -1456,13 +1467,12 @@ private fun ViewTitle(state: UiState) {
         is Scope.Tag -> Icons.Outlined.Tag to plain
         is Scope.Search -> Icons.Outlined.Search to plain
     }
-    Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-        Icon(icon, null, Modifier.size(28.dp), tint = tint)
+    Row(Modifier.fillMaxWidth().padding(start = Space.xl, end = Space.xl, bottom = Space.m), verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon, null, Modifier.size(Sizes.viewIcon), tint = tint)
         Text(
             state.title,
-            Modifier.padding(start = 10.dp).semantics { heading() },
-            style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.Bold,
+            Modifier.padding(start = Space.chipInset).semantics { heading() },
+            style = MaterialTheme.typography.viewTitle,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
         )
@@ -1472,8 +1482,8 @@ private fun ViewTitle(state: UiState) {
 /** R95: the heading of a group, in the colour of text with a thin line under it. */
 @Composable
 private fun GroupHeading(title: String) {
-    Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 4.dp)) {
-        Text(title, Modifier.semantics { heading() }, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-        HorizontalDivider(Modifier.padding(top = 6.dp), color = MaterialTheme.colorScheme.outlineVariant)
+    Column(Modifier.fillMaxWidth().padding(start = Space.xl, end = Space.xl, top = Space.xxl, bottom = Space.xs)) {
+        Text(title, Modifier.semantics { heading() }, style = MaterialTheme.typography.groupHeading)
+        HorizontalDivider(Modifier.padding(top = Space.s), color = MaterialTheme.colorScheme.outlineVariant)
     }
 }
