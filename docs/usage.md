@@ -357,6 +357,7 @@ Neither holds the content of the attachments or the trash. A backup (above) is t
 | Lists | an export as JSON (below) |
 | 2Do | backup, `.2dodb` |
 | Todoist | CSV template |
+| TickTick | backup, CSV (Settings → Account → Generate backup) |
 | Trello | board exported as JSON |
 | Microsoft To Do | lists as JSON |
 

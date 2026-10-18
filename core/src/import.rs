@@ -495,6 +495,246 @@ fn parse_todoist(text: &str, name: &str) -> Result<Parsed> {
     Ok(out)
 }
 
+// ---------------------------------------------------------------- TickTick
+
+/// Whether a CSV row is the header of a TickTick backup.
+fn ticktick_header(row: &[String]) -> bool {
+    ["Folder Name", "List Name", "Title"]
+        .iter()
+        .all(|name| row.iter().any(|h| h.trim() == *name))
+}
+
+fn ticktick_instant(text: &str) -> Option<DateTime<Utc>> {
+    DateTime::parse_from_str(text.trim(), "%Y-%m-%dT%H:%M:%S%z")
+        .ok()
+        .map(|d| d.with_timezone(&Utc))
+}
+
+/// The day of a task without a time: TickTick writes midnight in the zone of
+/// the task as UTC. With no zone database here, an instant from 11:00 UTC on
+/// is the midnight of the next day (right for zones from -10:00 to +13:00).
+fn ticktick_day(utc: DateTime<Utc>) -> NaiveDate {
+    let date = utc.date_naive();
+    if chrono::Timelike::hour(&utc) >= 11 {
+        date.succ_opt().unwrap_or(date)
+    } else {
+        date
+    }
+}
+
+/// An ISO 8601 duration as a reminder offset: `PT0S`, `-PT30M`, `P0DT9H30M0S`.
+fn ticktick_offset(text: &str) -> Option<chrono::Duration> {
+    let text = text.trim();
+    let (sign, rest) = match text.strip_prefix('-') {
+        Some(rest) => (-1, rest),
+        None => (1, text.strip_prefix('+').unwrap_or(text)),
+    };
+    let rest = rest.strip_prefix('P')?;
+    let (mut seconds, mut number, mut in_time, mut parts) = (0i64, String::new(), false, 0);
+    for c in rest.chars() {
+        match c {
+            '0'..='9' => number.push(c),
+            'T' if number.is_empty() => in_time = true,
+            _ => {
+                let n: i64 = std::mem::take(&mut number).parse().ok()?;
+                seconds += n * match (c, in_time) {
+                    ('W', false) => 7 * 86_400,
+                    ('D', false) => 86_400,
+                    ('H', true) => 3_600,
+                    ('M', true) => 60,
+                    ('S', true) => 1,
+                    _ => return None,
+                };
+                parts += 1;
+            }
+        }
+    }
+    (number.is_empty() && parts > 0).then(|| chrono::Duration::seconds(sign * seconds))
+}
+
+/// Start, due and reminder of a TickTick task, as the app writes them.
+fn ticktick_dates(
+    start: &str,
+    due: &str,
+    all_day: bool,
+    reminder: &str,
+) -> (Option<String>, Option<String>, Option<String>) {
+    let (start, due) = (ticktick_instant(start), ticktick_instant(due));
+    let write = |utc: DateTime<Utc>| {
+        if all_day {
+            ticktick_day(utc).format("%Y-%m-%d").to_string()
+        } else {
+            local_moment(utc)
+        }
+    };
+    // RFC 5545: an offset counts from the start; a day without a time starts at midnight.
+    let remind = start.or(due).and_then(|anchor| {
+        let offset = ticktick_offset(reminder.lines().next()?)?;
+        let moment = if all_day {
+            ticktick_day(anchor).and_hms_opt(0, 0, 0)? + offset
+        } else {
+            store::local_time(anchor + offset)
+        };
+        Some(moment.format("%Y-%m-%dT%H:%M").to_string())
+    });
+    let due_text = due.or(start).map(write);
+    let start_text = start.filter(|s| due.is_some_and(|d| d != *s)).map(write);
+    (start_text, due_text, remind)
+}
+
+/// A TickTick backup: a few lines about the file, then one CSV row per task.
+fn parse_ticktick(rows: &[Vec<String>]) -> Result<Parsed> {
+    let at = rows
+        .iter()
+        .position(|r| ticktick_header(r))
+        .ok_or_else(|| invalid("not a TickTick backup: no Folder Name, List Name and Title columns"))?;
+    let header: Vec<&str> = rows[at].iter().map(|h| h.trim()).collect();
+    let col = |name: &str| header.iter().position(|h| *h == name);
+    // Line breaks inside a field are a lone CR in the backups seen.
+    let get = |row: &Vec<String>, name: &str| {
+        col(name)
+            .and_then(|i| row.get(i))
+            .map(|v| v.replace("\r\n", "\n").replace('\r', "\n"))
+            .unwrap_or_default()
+    };
+    let mut out = Parsed {
+        source: "TickTick",
+        ..Parsed::default()
+    };
+    let (mut more_reminders, mut text_repeats, mut notes, mut boards) = (0u32, 0u32, 0u32, Vec::<String>::new());
+    let mut ordered: Vec<(i128, usize, Task)> = Vec::new();
+    for (n, row) in rows.iter().enumerate().skip(at + 1) {
+        let id = get(row, "taskId");
+        if row.len() < header.len() / 2 || id.is_empty() {
+            continue;
+        }
+        let (folder, name) = (get(row, "Folder Name"), get(row, "List Name"));
+        let list = if folder.trim().is_empty() && name == "Inbox" {
+            None
+        } else {
+            let key = format!("{folder}\u{0}{name}");
+            if !out.lists.iter().any(|l| l.key == key) {
+                out.lists.push(List {
+                    key: key.clone(),
+                    name: if folder.trim().is_empty() {
+                        name.clone()
+                    } else {
+                        format!("{}: {}", folder.trim(), name.trim())
+                    },
+                    ..List::default()
+                });
+            }
+            if get(row, "View Mode") == "kanban" && !boards.contains(&key) {
+                boards.push(key.clone());
+            }
+            Some(key)
+        };
+        let reminder = get(row, "Reminder");
+        if reminder.lines().filter(|l| !l.trim().is_empty()).count() > 1 {
+            more_reminders += reminder.lines().filter(|l| !l.trim().is_empty()).count() as u32 - 1;
+        }
+        let (start, due, remind) = ticktick_dates(
+            &get(row, "Start Date"),
+            &get(row, "Due Date"),
+            get(row, "Is All Day") == "true",
+            &reminder,
+        );
+        let finished = ticktick_instant(&get(row, "Completed Time"))
+            .map(local_moment)
+            .unwrap_or_else(|| local_moment(Utc::now()));
+        let status = get(row, "Status");
+        let kind = get(row, "Kind");
+        if kind == "NOTE" {
+            notes += 1;
+        }
+        // Checklist items are lines of the content: ▫ open, ▪ checked; other lines are the note.
+        let content = get(row, "Content");
+        let mut items = Vec::new();
+        let mut text = Vec::new();
+        for line in content.lines() {
+            match (kind.as_str(), line.chars().next()) {
+                ("CHECKLIST", Some(mark @ ('▫' | '▪'))) => {
+                    items.push((line[mark.len_utf8()..].trim().to_string(), mark == '▪'))
+                }
+                _ => text.push(line),
+            }
+        }
+        let mut task = Task {
+            key: id.clone(),
+            list: list.clone(),
+            parent: Some(get(row, "parentId")).filter(|p| !p.is_empty()),
+            title: get(row, "Title"),
+            notes: text.join("\n").trim().to_string(),
+            start,
+            due,
+            remind,
+            priority: match get(row, "Priority").trim() {
+                "5" => 3,
+                "3" => 2,
+                "1" => 1,
+                _ => 0,
+            },
+            tags: get(row, "Tags").split(',').map(str::to_string).collect(),
+            done: matches!(status.trim(), "2" | "-1").then(|| finished.clone()),
+            wont: status.trim() == "-1",
+            ..Task::default()
+        };
+        let rule = get(row, "Repeat");
+        let rule = rule.trim().trim_start_matches("RRULE:");
+        if !rule.is_empty() {
+            task.repeat = crate::caldav::map::from_rrule(rule);
+            if task.repeat.is_none() {
+                text_repeats += 1;
+                task.notes = format!("{}\nTickTick repeat: {rule}", task.notes).trim().to_string();
+            }
+        }
+        let order = get(row, "Order").trim().parse::<i128>().unwrap_or(0);
+        ordered.push((order, n, task));
+        for (i, (title, checked)) in items.into_iter().enumerate() {
+            let task = Task {
+                key: format!("{id}#{}", i + 1),
+                list: list.clone(),
+                parent: Some(id.clone()),
+                title,
+                done: checked.then(|| finished.clone()),
+                ..Task::default()
+            };
+            ordered.push((i as i128, n, task));
+        }
+    }
+    // TickTick shows a list by ascending `Order`; ties keep the order of the file.
+    ordered.sort_by_key(|(order, n, _)| (*order, *n));
+    out.tasks = ordered.into_iter().map(|(_, _, t)| t).collect();
+    let plural = |n: u32, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
+    if more_reminders > 0 {
+        out.notes.push(format!(
+            "{} beyond the first of a task not imported.",
+            plural(more_reminders, "reminder was", "reminders were")
+        ));
+    }
+    if text_repeats > 0 {
+        out.notes.push(format!(
+            "{} not expressible here; the rule text was added to the notes of the task.",
+            plural(text_repeats, "repeat rule was", "repeat rules were")
+        ));
+    }
+    if notes > 0 {
+        out.notes.push(format!(
+            "{} imported as tasks.",
+            plural(notes, "note was", "notes were")
+        ));
+    }
+    if !boards.is_empty() {
+        out.notes.push(format!(
+            "{} kanban: the columns were not imported.",
+            plural(boards.len() as u32, "list was", "lists were")
+        ));
+    }
+    out.notes
+        .push("A TickTick backup has no list colours, attachments or comments.".into());
+    Ok(out)
+}
+
 // ---------------------------------------------------------------- Trello
 
 fn iso_instant(value: &Value) -> Option<String> {
@@ -1081,7 +1321,8 @@ impl Store {
 impl Store {
     /// Imports a file exported from another task manager. The format is
     /// recognised from the content: a 2Do backup (`.2dodb`), a Todoist CSV
-    /// template, a Trello board JSON, or Microsoft To Do lists as JSON.
+    /// template, a TickTick CSV backup, a Trello board JSON, Microsoft To Do
+    /// lists as JSON, or a JSON export of this app.
     pub fn import_file(&self, path: String) -> Result<ImportReport> {
         let result = (|| {
             let path = Path::new(&path);
@@ -1113,7 +1354,12 @@ impl Store {
                         .file_stem()
                         .map(|s| s.to_string_lossy().into_owned())
                         .unwrap_or_else(|| "Todoist".into());
-                    parse_todoist(&text, &name)?
+                    let rows = csv(&text);
+                    if rows.iter().take(16).any(|r| ticktick_header(r)) {
+                        parse_ticktick(&rows)?
+                    } else {
+                        parse_todoist(&text, &name)?
+                    }
                 }
             };
             self.write_import(parsed)
@@ -1217,5 +1463,64 @@ mod tests {
         for (kind, value) in [(128, 1), (255, 1), (256, 0), (260, 7), (267, 1), (512, 1)] {
             assert!(twodo_repeat(kind, value, 1, none, monday).is_none(), "{kind}/{value}");
         }
+    }
+
+    /// Values exactly as they stand in real TickTick backups (docs/specs/import.md).
+    #[test]
+    fn ticktick_dates_and_reminders() {
+        let day = |text: &str| ticktick_day(ticktick_instant(text).unwrap()).to_string();
+        // Midnight of a day without a time, written by tasks in these zones.
+        assert_eq!(day("2024-08-05T16:00:00+0000"), "2024-08-06", "Australia/Perth");
+        assert_eq!(day("2026-05-31T18:30:00+0000"), "2026-06-01", "Asia/Kolkata");
+        assert_eq!(day("2024-06-01T22:00:00+0000"), "2024-06-02", "Europe/Warsaw");
+        assert_eq!(day("2024-04-15T05:00:00+0000"), "2024-04-15", "America/Chicago");
+        assert_eq!(day("2024-04-15T10:00:00+0000"), "2024-04-15", "Pacific/Honolulu");
+        assert_eq!(day("2024-04-14T11:00:00+0000"), "2024-04-15", "Pacific/Tongatapu");
+
+        let minutes = |text: &str| ticktick_offset(text).map(|d| d.num_minutes());
+        assert_eq!(minutes("PT0S"), Some(0));
+        assert_eq!(minutes("-PT0S"), Some(0));
+        assert_eq!(minutes("-PT30M"), Some(-30));
+        assert_eq!(minutes("-P0DT2H0M0S"), Some(-120));
+        assert_eq!(minutes("P0DT9H30M0S"), Some(570));
+        assert_eq!(minutes("P1W"), Some(7 * 24 * 60));
+        for broken in ["", "P", "PT5", "30M", "PT1Y", "P1H"] {
+            assert_eq!(minutes(broken), None, "{broken:?}");
+        }
+
+        // A day without a time: the reminder counts from its midnight.
+        let (start, due, remind) = ticktick_dates(
+            "2024-08-05T16:00:00+0000",
+            "2024-08-05T16:00:00+0000",
+            true,
+            "-P0DT2H0M0S",
+        );
+        assert_eq!(
+            (start, due.as_deref(), remind.as_deref()),
+            (None, Some("2024-08-06"), Some("2024-08-05T22:00"))
+        );
+        let (_, _, remind) = ticktick_dates(
+            "2024-06-18T22:00:00+0000",
+            "2024-06-18T22:00:00+0000",
+            true,
+            "P0DT9H30M0S\nP0DT9H0M0S",
+        );
+        assert_eq!(
+            remind.as_deref(),
+            Some("2024-06-19T09:30"),
+            "the first of two reminders"
+        );
+        // A task with a duration keeps both ends; the reminder counts from the start.
+        // A task with a duration keeps both ends, in the zone of the device; the reminder counts from the start.
+        let local = |text: &str| Some(local_moment(ticktick_instant(text).unwrap()));
+        assert_eq!(
+            ticktick_dates("2026-06-07T04:30:00+0000", "2026-06-07T06:30:00+0000", false, "-PT30M"),
+            (
+                local("2026-06-07T04:30:00+0000"),
+                local("2026-06-07T06:30:00+0000"),
+                local("2026-06-07T04:00:00+0000")
+            )
+        );
+        assert_eq!(ticktick_dates("", "", false, "PT0S"), (None, None, None));
     }
 }
