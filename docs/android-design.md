@@ -22,15 +22,20 @@ How the Android screens take their measures and colours, and how a change to the
 | `Space.xl` | 16 dp | the margin of a screen and of a row |
 | `Space.xxl` | 20 dp | above the heading of a group |
 | `Space.xxxl` | 24 dp | the end padding of a row of the panel |
-| `Sizes.mark` | 16 dp | the completion mark (R95), the icon of a chip |
-| `Sizes.priorityBar` | 3 × 20 or 34 dp | the bar of a priority (R72), one line or two |
-| `Sizes.chip` | 32 dp | the least height of a chip and of the row of fields |
+| `Sizes.mark` | 16 dp | the icon of a chip and of a mark after the title |
+| `Sizes.roundMark`, `roundMarkSmall` | 20, 18 dp | the round completion mark (R159); the small one of a subtask |
+| `Sizes.priorityBar` | 4 × 36 dp | the bar of a priority (R72, R159) |
+| `Sizes.chip` | 36 dp | the least height of a chip and of the row of fields |
+| `Sizes.viewTile`, `drawerTile`, `settingsTile` | 52, 36, 40 dp | the tile under the icon of a view title, a row of the panel, a section of the settings (R159) |
 | `Sizes.lightTarget` | 40 dp | the circle a light icon is tapped in (R64) |
 | `Sizes.touch` | 48 dp | the least height of a row tapped as a whole |
-| `Corners.bar`, `mark`, `chip`, `card` | 2, 5, 8, 20 dp | the bar of a priority, the square mark, a chip, a card |
-| `Corners.round` | circle | a pill, a row of the panel, a round mark, a button |
+| `Corners.bar`, `chip`, `tile`, `viewTile` | 4, 12, 12, 18 dp | the bar of a priority, a chip, the tile of an icon, the tile of a view title |
+| `Corners.drawerRow`, `fab` | 16 dp | a row of the panel, the add button |
+| `Corners.group` | 24 dp | the container of the rows of a group and of the sections of the settings |
+| `Corners.sheet`, `drawer` | 28 dp | the top of a sheet, the open edge of the panel |
+| `Corners.round` | circle | a pill, the date chip of a row, the mark, a button |
 
-The rows of the panel of lists follow the row spacing of R122 (48, 52 or 56 dp, R158), as the rows of a list do. A value that only one element has, such as the 88 dp kept free under the last row for the add button, stays next to that element with a comment that says why.
+The rows of a list are 56, 64 or 72 dp high after the row spacing of R122; the rows of the panel of lists follow the same choice (48, 52 or 56 dp, R158). A value that only one element has, such as the 88 dp kept free under the last row for the add button, stays next to that element with a comment that says why.
 
 ## Colours
 
@@ -40,10 +45,12 @@ The colour scheme of the theme gives every colour that only marks a surface, a t
 - `ViewTint` and `viewTint()` — the icons of the built-in views (R79), the same as on macOS, a lighter shade in the dark look.
 - A late date is `colorScheme.error`; a date taken from the project (R125) is `outline`.
 - The colour of a list is the one chosen for it (R2); a list without one takes `primary`.
+- `screenGround()` and `groupContainer()` — the ground of a screen of rows and the containers that stand on it (R159): `surfaceContainer` under `surfaceContainerLowest` in the light look, `surfaceContainerLowest` under `surfaceContainer` in the dark one.
+- A done mark is filled with `primary`, a won't-do mark with `outline`; the heading of a group is a `secondaryContainer` pill, Overdue an `errorContainer` one, as is the chip of a late date.
 
 ## Text
 
-`Type.kt` names the roles of text over the Material type scale: `rowTitle`, `rowMeta`, `label`, `pill`, `viewTitle`, `groupHeading`, `sectionHeading`. A screen asks for a role, not for a size.
+`Type.kt` names the roles of text over the Material type scale: `rowTitle`, `rowMeta`, `label`, `pill`, `viewTitle`, `groupHeading`, `sectionHeading`, `cardTitle`, `entryTitle`. A screen asks for a role, not for a size.
 
 ## Screenshots
 
