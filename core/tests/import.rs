@@ -382,6 +382,108 @@ fn i12_ticktick_checked_items_unknown_repeats_and_the_older_header() {
     assert!(items[0].done.is_some() && items[1].done.is_none());
 }
 
+/// I13 on rows of a real Things 3.24.1 database, with their text replaced.
+#[test]
+fn i13_things_database_brings_areas_projects_dates_checklists_and_repeats() {
+    let d = device();
+    let dir = tempfile::tempdir().unwrap();
+    // The way Things keeps it: a folder with `main.sqlite` in it.
+    let folder = dir.path().join("Things Database.thingsdatabase");
+    std::fs::create_dir(&folder).unwrap();
+    let source = format!("{}/tests/data/things.sqlite", env!("CARGO_MANIFEST_DIR"));
+    std::fs::copy(&source, folder.join("main.sqlite")).unwrap();
+    let before = std::fs::read(folder.join("main.sqlite")).unwrap();
+    let path = folder.to_string_lossy().into_owned();
+    let report = d.in_zone(0, || d.import_file(path.clone())).unwrap();
+    assert_eq!((report.source.as_str(), report.lists, report.tasks), ("Things", 3, 26));
+    assert_eq!(
+        report.notes,
+        [
+            "2 tasks were in Someday: they got the tag \"someday\".",
+            "1 heading was not imported; their tasks stay in the project.",
+            "1 task was in the Trash and not imported.",
+            "1 repeating task was paused and not imported.",
+        ]
+    );
+    assert_eq!(
+        std::fs::read(folder.join("main.sqlite")).unwrap(),
+        before,
+        "the database is only read"
+    );
+
+    let lists = d.lists().unwrap();
+    let area = |name: &str| lists.iter().find(|l| l.name == name).unwrap().id.clone();
+    let all = every_task(&d);
+    let task = |title: &str| {
+        all.iter()
+            .find(|t| t.title == title)
+            .unwrap_or_else(|| panic!("{title}"))
+    };
+
+    // The open task of the active repeating task carries the rule; the done ones it made stay done.
+    let repeating = task("Task 26");
+    assert_eq!(repeating.list_id, "inbox");
+    assert_eq!(repeating.start.as_deref(), Some("2026-09-25"));
+    let rule = repeating.repeat.clone().unwrap();
+    assert_eq!((rule.freq, rule.interval, rule.monthday), (Freq::Monthly, 1, Some(25)));
+    assert_eq!(task("Task 25").done.as_deref(), Some("2026-09-11T13:14"));
+    assert!(task("Task 25").repeat.is_none());
+
+    // A project of an area keeps its tasks, those under a heading included.
+    let project = task("Project 13");
+    assert!(project.is_project);
+    assert_eq!(project.list_id, area("Area 1"));
+    assert_eq!(
+        titles(&d.subtasks(project.id.clone()).unwrap()),
+        ["Task 12", "Task 11", "Task 10"]
+    );
+    let under_heading = task("Task 4");
+    assert_eq!(under_heading.parent_id.as_deref(), Some(task("Project 3").id.as_str()));
+    assert!(under_heading.wont, "cancelled in Things");
+
+    // Dates: when as the start, the deadline as the due date, the reminder on the start day.
+    let dated = task("Task 6");
+    assert_eq!(
+        (dated.start.as_deref(), dated.due.as_deref()),
+        (Some("2022-11-13"), Some("2022-11-15"))
+    );
+    assert_eq!(task("Task 14").remind.as_deref(), Some("2025-09-04T10:30"));
+    assert_eq!(task("Task 14").list_id, area("Area 2"));
+    assert_eq!(task("Task 17").tags, ["someday"]);
+    assert_eq!(task("Task 17").notes, "Note 17\nsecond line");
+    assert_eq!(task("Task 27").tags, ["tag-1"]);
+
+    // A checklist in the order of Things, with what was checked.
+    let items = d.subtasks(task("Task 15").id.clone()).unwrap();
+    assert_eq!(titles(&items), ["Item 1", "Item 2", "Item 3"]);
+    assert_eq!(
+        items.iter().map(|i| i.done.is_some()).collect::<Vec<_>>(),
+        [false, true, true]
+    );
+    // Neither the trashed task, the heading nor the paused template came over.
+    for gone in ["Task 22", "Heading 5", "Task 1"] {
+        assert!(all.iter().all(|t| t.title != gone), "{gone}");
+    }
+
+    let again = d.in_zone(0, || d.import_file(path)).unwrap();
+    assert_eq!(again.tasks, 26);
+    assert_eq!(every_task(&d).len(), all.len(), "a second import adds nothing");
+}
+
+#[test]
+fn i13_an_sqlite_file_of_another_app_is_refused() {
+    let d = device();
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("other.sqlite");
+    rusqlite::Connection::open(&file)
+        .unwrap()
+        .execute_batch("CREATE TABLE notes (id INTEGER)")
+        .unwrap();
+    let error = d.import_file(file.to_string_lossy().into_owned()).unwrap_err();
+    assert!(error.to_string().contains("not one of Things 3"), "{error}");
+    assert!(d.tasks(Scope::All).unwrap().is_empty());
+}
+
 #[test]
 fn trello_board_json() {
     let d = device();

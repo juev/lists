@@ -90,7 +90,7 @@ Open `http://127.0.0.1:8080` on the same machine and sign in with the password. 
 
 1. Add a task: ⌘N on macOS, the "+" button on Android, the New task field in the web interface. Type it and press Enter. One line is enough: `report friday 10:00 !! #work @Projects` sets the due date, a medium priority, a tag and the list. A tag is one word of up to 196 bytes (196 Latin letters or 98 Cyrillic ones); a longer tag is refused with an error.
 2. Open Settings → Sync on each device and point them all at the same WebDAV folder or CalDAV server. Until then the data stays on the device, and the app is fully usable.
-3. Coming from another task manager? Import a 2Do backup, a Todoist CSV, a TickTick backup, a Trello board or Microsoft To Do lists: File → Import… on macOS, Settings on Android, the sidebar in the web interface. Leaving goes the other way: everything exports to JSON in a [documented format](docs/json-format.md), or to Markdown for reading.
+3. Coming from another task manager? Import a 2Do backup, a Todoist CSV, a TickTick backup, a Things database, a Trello board or Microsoft To Do lists: File → Import… on macOS, Settings on Android, the sidebar in the web interface. Leaving goes the other way: everything exports to JSON in a [documented format](docs/json-format.md), or to Markdown for reading.
 
 The [user guide](docs/usage.md) describes lists, tasks and attachments, subtasks and projects, repeats, quick entry, filters, sync, notifications, calendar events, keyboard shortcuts, backups, export and import.
 

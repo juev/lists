@@ -1307,7 +1307,7 @@ final class AppModel {
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
-        panel.message = L("A Lists export (.json), a 2Do backup (.2dodb), a Todoist CSV, a TickTick backup (.csv), a Trello board JSON or Microsoft To Do lists as JSON")
+        panel.message = L("A Lists export (.json), a 2Do backup (.2dodb), a Todoist CSV, a TickTick backup (.csv), a Things database (main.sqlite), a Trello board JSON or Microsoft To Do lists as JSON")
         guard panel.runModal() == .OK, let url = panel.url, let store else { return }
         // R140: reading a large export and writing its tasks runs off the main thread.
         _Concurrency.Task { [weak self] in
