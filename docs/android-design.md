@@ -27,11 +27,10 @@ How the Android screens take their measures and colours, and how a change to the
 | `Sizes.chip` | 32 dp | the least height of a chip and of the row of fields |
 | `Sizes.lightTarget` | 40 dp | the circle a light icon is tapped in (R64) |
 | `Sizes.touch` | 48 dp | the least height of a row tapped as a whole |
-| `Sizes.drawerRow` | 56 dp | a row of the panel of lists |
 | `Corners.bar`, `mark`, `chip`, `card` | 2, 5, 8, 20 dp | the bar of a priority, the square mark, a chip, a card |
 | `Corners.round` | circle | a pill, a row of the panel, a round mark, a button |
 
-A value that only one element has, such as the 88 dp kept free under the last row for the add button, stays next to that element with a comment that says why.
+The rows of the panel of lists follow the row spacing of R122 (48, 52 or 56 dp, R158), as the rows of a list do. A value that only one element has, such as the 88 dp kept free under the last row for the add button, stays next to that element with a comment that says why.
 
 ## Colours
 

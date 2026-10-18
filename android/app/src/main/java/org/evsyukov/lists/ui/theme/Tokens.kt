@@ -76,9 +76,6 @@ object Sizes {
     /** The least height of a row that is tapped as a whole. */
     val touch = 48.dp
 
-    /** A row of the panel of lists. */
-    val drawerRow = 56.dp
-
     /** The circle of a project in the panel (R126). */
     val projectMark = 24.dp
 

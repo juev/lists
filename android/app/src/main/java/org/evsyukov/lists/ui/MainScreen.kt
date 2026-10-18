@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -46,6 +47,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.DriveFileMove
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.outlined.List
 import androidx.compose.material.icons.automirrored.outlined.Notes
 import androidx.compose.material.icons.filled.CalendarMonth
@@ -68,6 +70,7 @@ import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.FilterList
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Inventory2
+import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.MoreHoriz
 import androidx.compose.material.icons.outlined.MoreVert
@@ -146,6 +149,7 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -1244,12 +1248,18 @@ internal fun Drawer(
                 DrawerItem(str(R.string.trash), Icons.Filled.Delete, state.counts.trash, state.scope == Scope.Trash, tint = viewTint(ViewTint.Gray)) { onSelect(Scope.Trash) }
             }
 
-            DrawerHeading(str(R.string.lists))
+            // R158: a section folds with a tap on its heading; folded, it keeps only the row of the open view.
+            val context = LocalContext.current
+            val folded = LookPrefs.folded(context)
+            val fold = { section: String -> { LookPrefs.setFolded(context, section, section !in folded) } }
+            DrawerHeading(str(R.string.lists), folded = "lists" in folded, onToggle = fold("lists"))
             // R157: a list is dragged to its place; its rows are of one height, so the place is counted in rows.
-            val shownLists = state.lists.filter { it.id != "inbox" && !it.archived }
+            // A folded section is not put in order.
+            val listsFolded = "lists" in folded
+            val shownLists = shownRows(state.lists.filter { it.id != "inbox" && !it.archived }, listsFolded) { state.scope == Scope.List(it.id) }
             var draggedList by remember { mutableStateOf<String?>(null) }
             var listOffset by remember { mutableFloatStateOf(0f) }
-            val rowHeight = with(LocalDensity.current) { Sizes.drawerRow.toPx() }
+            val rowHeight = with(LocalDensity.current) { drawerRowHeight().toPx() }
             val from = shownLists.indexOfFirst { it.id == draggedList }
             val to = if (from < 0) -1 else landing(from, listOffset, rowHeight, shownLists.size)
             for ((index, list) in shownLists.withIndex()) {
@@ -1280,14 +1290,14 @@ internal fun Drawer(
                     if (lifted) Modifier.zIndex(1f).graphicsLayer { translationY = listOffset; shadowElevation = 8f }
                     else Modifier.graphicsLayer { translationY = shiftOf(index, from, to) * rowHeight },
                 ) {
-                    DrawerItem(list.name, Icons.AutoMirrored.Outlined.List, list.openCount, state.scope == scope, tint = list.tint(), onLong = { onEditList(list) }, drag = drag) { onSelect(scope) }
+                    DrawerItem(list.name, Icons.AutoMirrored.Outlined.List, list.openCount, state.scope == scope, tint = list.tint(), onLong = { onEditList(list) }, drag = drag.takeUnless { listsFolded }) { onSelect(scope) }
                 }
             }
-            DrawerItem(str(R.string.new_list), Icons.Outlined.Add, 0u, false, onClick = onNewList)
+            if (!listsFolded) DrawerItem(str(R.string.new_list), Icons.Outlined.Add, 0u, false, onClick = onNewList)
 
             // R127: shown without projects as well, since a project is made here.
-            DrawerHeading(str(R.string.projects))
-            for (project in state.projects) {
+            DrawerHeading(str(R.string.projects), folded = "projects" in folded, onToggle = fold("projects"))
+            for (project in shownRows(state.projects, "projects" in folded) { state.scope == Scope.Project(it.id) }) {
                 val scope = Scope.Project(project.id)
                 var menu by remember(project.id) { mutableStateOf(false) }
                 Box {
@@ -1311,17 +1321,17 @@ internal fun Drawer(
                     }
                 }
             }
-            DrawerItem(str(R.string.new_project), Icons.Outlined.Add, 0u, false, onClick = onNewProject)
-            DrawerHeading(str(R.string.filters))
-            for (filter in state.filters) {
+            if ("projects" !in folded) DrawerItem(str(R.string.new_project), Icons.Outlined.Add, 0u, false, onClick = onNewProject)
+            DrawerHeading(str(R.string.filters), folded = "filters" in folded, onToggle = fold("filters"))
+            for (filter in shownRows(state.filters, "filters" in folded) { state.scope == Scope.Filter(it.id) }) {
                 val scope = Scope.Filter(filter.id)
                 DrawerItem(filter.name, Icons.Outlined.FilterList, filter.openCount, state.scope == scope, onLong = { onEditFilter(filter) }) { onSelect(scope) }
             }
-            DrawerItem(str(R.string.new_filter), Icons.Outlined.Add, 0u, false, onClick = onNewFilter)
+            if ("filters" !in folded) DrawerItem(str(R.string.new_filter), Icons.Outlined.Add, 0u, false, onClick = onNewFilter)
 
             if (state.tags.isNotEmpty()) {
-                DrawerHeading(str(R.string.tags))
-                for (tag in state.tags) {
+                DrawerHeading(str(R.string.tags), folded = "tags" in folded, onToggle = fold("tags"))
+                for (tag in shownRows(state.tags, "tags" in folded) { state.scope == Scope.Tag(it.name) }) {
                     val scope = Scope.Tag(tag.name)
                     DrawerItem(tag.name, Icons.Outlined.Tag, tag.openCount, state.scope == scope) { onSelect(scope) }
                 }
@@ -1339,10 +1349,41 @@ internal fun Drawer(
     }
 }
 
+/** The heading of a section of the panel; with [onToggle] it folds and unfolds the section (R158). */
 @Composable
-private fun DrawerHeading(text: String) {
-    Text(text, Modifier.padding(start = Space.xl, top = Space.xl, bottom = Space.xs), style = MaterialTheme.typography.sectionHeading, color = MaterialTheme.colorScheme.onSurfaceVariant)
+private fun DrawerHeading(text: String, folded: Boolean = false, onToggle: (() -> Unit)? = null) {
+    if (onToggle == null) {
+        Text(text, Modifier.padding(start = Space.xl, top = Space.xl, bottom = Space.xs), style = MaterialTheme.typography.sectionHeading, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        return
+    }
+    val state = str(if (folded) R.string.collapsed else R.string.expanded)
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(top = Space.m)
+            .clip(Corners.round)
+            .clickable(role = Role.Button, onClick = onToggle)
+            .semantics { stateDescription = state }
+            .heightIn(min = Sizes.touch)
+            .padding(start = Space.xl, end = Space.xxxl),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(text, Modifier.weight(1f), style = MaterialTheme.typography.sectionHeading, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Icon(
+            if (folded) Icons.AutoMirrored.Outlined.KeyboardArrowRight else Icons.Outlined.KeyboardArrowDown,
+            null,
+            Modifier.size(Sizes.lightIcon),
+            tint = MaterialTheme.colorScheme.outline,
+        )
+    }
 }
+
+/** R158: the height of a row of the panel, after the spacing of R122. */
+@Composable
+private fun drawerRowHeight() = LookPrefs.drawerRowHeight(LookPrefs.rowSpacing(LocalContext.current)).dp
+
+/** R158: the rows a section shows: all of them, or, folded, only the row of the open view. */
+internal fun <T> shownRows(rows: List<T>, folded: Boolean, isOpen: (T) -> Boolean): List<T> = if (folded) rows.filter(isOpen) else rows
 
 /** R30: the counter of a project in the drawer, "done/total", shown for an empty project as well (R127). */
 internal fun projectCounter(done: UInt, total: UInt): String = "$done/$total"
@@ -1375,7 +1416,7 @@ private fun DrawerItem(
     Row(
         Modifier
             .fillMaxWidth()
-            .height(Sizes.drawerRow)
+            .height(drawerRowHeight())
             .clip(CircleShape)
             .background(if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
             .then(
