@@ -497,7 +497,7 @@ fn s59_a_changed_passphrase_works_where_it_was_changed_and_is_asked_for_elsewher
 }
 
 #[test]
-fn s60_a_storage_that_is_not_encrypted_any_more_is_not_written_in_the_clear() {
+fn s62_a_storage_that_is_not_encrypted_any_more_is_not_written_in_the_clear() {
     let storage = tempfile::tempdir().unwrap();
     let a = device();
     a.set_sync_config(SyncConfig::Folder {
