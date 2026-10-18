@@ -55,6 +55,7 @@ The specifications in `docs/specs/` are the contract: `product.md`, `sync.md`, `
 - A new requirement or scenario gets its own identifier in the existing numbering; tests refer to it.
 - When the change affects what a user sees or how the system is built, update `docs/usage.md`, `docs/architecture.md` and `README.md` as well.
 - If the code and the specification disagree, find out which one is wrong before changing either. Do not edit the specification only to match what the code happens to do.
+- The specifications and the rest of the documentation are written in English. Text that the program reads in Russian (quick-entry words, Russian data in fixtures) is quoted as it is.
 
 ## Changes come from investigation, not from guesses
 
