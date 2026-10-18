@@ -27,16 +27,16 @@ The counts are read off the mock-up at its normal text size; the app with the sy
 
 ## Decision
 
-Direction A, as the app already follows it. The current screens are direction A in every point but two: the panel of lists, whose 56 dp rows and fixed sections take a whole screen once there are a few lists, projects and filters, and the density, which R122 already lets the user choose. So the refresh is one change, split into its own issue:
+**Direction B**, chosen by the author of the project on 2026-10-18 (#387). It replaces the first record of this decision, which picked direction A on the reading of the table above; the author preferred the look of B over its cost in rows per screen.
 
-- **The sections of the panel of lists fold** (#380; Lists, Projects, Filters, Tags): a tap on the heading of a section folds and unfolds it, the state is kept on the device, and the rows of the panel follow the spacing of R122.
+- B applies to Android only. macOS keeps the row of R72; R72 states the Android exception and R159 describes the look.
+- The row spacing of R122 stays, on the base of B: rows of 56, 64 and 72 dp, "Normal" being the 64 dp of the mock-up. The rows of the panel keep 48, 52 and 56 dp (R158).
+- Taken from B as drawn: rows of a group in a rounded container, two lines wherever something stands under the title with the due date as a chip, a medium-weight title, the round mark filled when done, a 4 × 36 dp bar of a priority, tonal headings of groups, a larger title on a tile, the add button with the label "New task", a 28 dp top corner of sheets, 36 dp chips with a 12 dp corner, rows of the panel with a 16 dp corner and their icons on tiles, the sections of the settings in a container.
+- What the assessment counted against B still holds: about a third fewer tasks on a screen, and the labelled button covers more of the last row (the list keeps 88 dp free under it).
+- Kept from A: the folding sections of the panel of lists (#380, R158), which do not depend on the direction.
 
-Left out, with the reason:
+Left out of both directions:
 
-- **One line in mixed views (A).** The name of the list beside the title takes its room first, so with large text or a long title the title is cut sooner; R72's second line keeps the whole title width. One-line titles (#99) stay as they are.
-- **Rows in containers, two lines everywhere, the labelled button (B).** About a third fewer tasks on a screen for the same content, and the labelled button replaces the constant round one of #161. The containers and tonal labels add a coloured surface to every row and heading without making a title easier to read.
-- **The round mark that fills when done (B).** #161 chose a small muted square mark; a filled one is louder than the title.
-- **A larger title on a tonal tile and a larger corner on sheets (B).** A change of style without a gain in reading or reach.
 - **Motion.** Neither direction needs new animation, so nothing new depends on the system setting that removes animations.
 - **Bottom navigation.** Not proposed by either direction: the panel stays, as #99 and #161 decided.
 
