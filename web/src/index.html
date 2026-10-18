@@ -141,6 +141,10 @@ const RU = {
   "Reminder": "Напоминание", "Priority": "Приоритет", "No priority": "Без приоритета", "Low": "Низкий", "Medium": "Средний", "High": "Высокий",
   "Repeat": "Повтор", "Does not repeat": "Не повторяется", "Every day": "Каждый день", "On weekdays": "По будням", "Every week": "Каждую неделю",
   "Every two weeks": "Каждые две недели", "Every month": "Каждый месяц", "Every quarter": "Каждый квартал", "Every year": "Каждый год", "Custom": "Свой вариант",
+  "Custom…": "Свой вариант…", "Every": "Каждые", "days": "дней", "weeks": "недель", "months": "месяцев", "years": "лет", "Days of the week": "Дни недели",
+  "On a weekday instead of a date": "По дню недели, а не по числу", "Count from the completion date": "Отсчитывать от даты выполнения",
+  "Ends": "Окончание", "Never": "Никогда", "After a number of repeats": "После числа повторов", "On a date": "До даты",
+  "first": "первый", "second": "второй", "third": "третий", "fourth": "четвёртый", "fifth": "пятый", "last": "последний",
   "Tag": "Тег", "Subtask": "Подзадача", "Attach file": "Прикрепить файл", "Move to": "Переместить в", "Duplicate": "Дублировать", "Delete": "Удалить",
   "Restore": "Восстановить", "Empty Trash": "Очистить корзину", "Delete everything in the trash for good?": "Удалить всё из корзины навсегда?",
   "Clear…": "Очистить…", "Older than a month": "Старше месяца", "Older than a year": "Старше года", "Everything": "Всё",
@@ -231,7 +235,7 @@ function setLook(v) {
   c.toggle("light", v === "light"); c.toggle("dark", v === "dark");
 }
 // `sel` is the set of selected tasks while the selection mode is open (R118), and null otherwise.
-const state = { fetching: {}, filterEdit: null, notifyEdit: false, push: null, tokensEdit: false, tokens: null, newToken: null, exportEdit: false, scope: "today", search: "", overview: null, tasks: [], open: new Set(), details: {}, drawer: false, typing: false, sel: null, more: false };
+const state = { fetching: {}, repeatEdit: null, filterEdit: null, notifyEdit: false, push: null, tokensEdit: false, tokens: null, newToken: null, exportEdit: false, scope: "today", search: "", overview: null, tasks: [], open: new Set(), details: {}, drawer: false, typing: false, sel: null, more: false };
 const root = document.getElementById("root");
 
 // R135: the server takes today and the time of day from the zone of the browser, in minutes east of UTC.
@@ -279,6 +283,17 @@ const PRESETS = [
 const sameRule = (a, b) => a.freq === b.freq && a.interval === b.interval && JSON.stringify(a.weekdays || []) === JSON.stringify(b.weekdays || [])
   && !a.nth && !a.from_done && a.count == null && !a.until;
 const presetIndex = r => (r ? PRESETS.findIndex(([, p]) => sameRule(r, p)) : -1);
+// R15: the rule the custom form describes. Weekdays count from Monday 1; only the chosen ending is kept.
+function customRule(f) {
+  const interval = Math.min(999, Math.max(1, Math.round(Number(f.interval)) || 1));
+  const rule = { freq: f.freq, interval, weekdays: f.freq === "weekly" ? [...f.weekdays].sort((a, b) => a - b) : [], monthday: null,
+    nth: null, nth_weekday: null, from_done: !!f.fromDone, count: null, until: null };
+  if (f.freq === "monthly" && f.byWeekday) { rule.nth = Number(f.nth); rule.nth_weekday = Number(f.nthWeekday); }
+  const count = Math.round(Number(f.count));
+  if (f.end === "count" && count > 0) rule.count = Math.min(count, 999);
+  if (f.end === "date" && /^\d{4}-\d{2}-\d{2}$/.test(f.until || "")) rule.until = f.until;
+  return rule;
+}
 
 function scopeTitle() {
   if (state.search) return t("Search");
@@ -546,10 +561,16 @@ function editor(d) {
   const prio = $("select", { "aria-label": t("Priority"), onchange: e => act("setPriority", { id, value: Number(e.target.value) }) },
     ["No priority", "Low", "Medium", "High"].map((name, i) => $("option", { value: i, selected: x.priority === i }, t(name))));
   const pi = presetIndex(x.repeat);
-  const repeat = $("select", { "aria-label": t("Repeat"), onchange: e => { const v = e.target.value; if (v !== "custom") act("setRepeat", { id, value: v === "" ? null : PRESETS[Number(v)][1] }); } },
+  // R15: "Custom…" opens the form under the fields; a custom rule in place is named "Custom".
+  const repeat = $("select", { "aria-label": t("Repeat"), onchange: e => {
+    const v = e.target.value;
+    if (v === "custom") { state.repeatEdit = id; render(); }
+    else if (v !== "current") act("setRepeat", { id, value: v === "" ? null : PRESETS[Number(v)][1] });
+  } },
     $("option", { value: "", selected: !x.repeat }, t("Does not repeat")),
     PRESETS.map(([name], i) => $("option", { value: i, selected: pi === i }, t(name))),
-    x.repeat && pi < 0 ? $("option", { value: "custom", selected: true }, t("Custom")) : null);
+    x.repeat && pi < 0 ? $("option", { value: "current", selected: true }, t("Custom")) : null,
+    $("option", { value: "custom" }, t("Custom…")));
   const tag = $("input", { type: "text", placeholder: "#" + t("Tag").toLowerCase(), style: "width:90px", onkeydown: e => { if (e.key === "Enter" && e.target.value.trim()) act("addTag", { id, value: e.target.value.trim() }); } });
   const move = $("select", { "aria-label": t("Move to"), onchange: e => {
     const v = e.target.value;
@@ -570,6 +591,7 @@ function editor(d) {
         $("span", { class: "chip" }, prio), $("span", { class: "chip" }, repeat),
         x.tags.map(g => $("button", { class: "chip", title: t("Delete"), onclick: () => act("removeTag", { id, value: g }) }, `#${g} ×`)),
         $("span", { class: "chip" }, tag)),
+      state.repeatEdit === id ? repeatForm(x) : null,
       d.attachments.map(a => {
         const href = `/api/file?task=${encodeURIComponent(id)}&id=${encodeURIComponent(a.id)}`;
         // The server names what may be shown in place (R56); the rest is a plain download.
@@ -589,6 +611,51 @@ function editor(d) {
         $("button", { class: "link danger", onclick: () => { state.open.delete(id); act("delete", { id }, t("Deleted")); } }, t("Delete")))),
     // The tasks of a project are full tasks with an editor of their own; anything else under a task is a line (R10).
     $("div", { class: "sub" }, d.subtasks.map(s => x.project && !x.parent ? taskNode(s, false) : subLine(s)), $("div", { class: "row" }, $("span", { class: "check", style: "border-style:dashed" }), sub)));
+}
+
+// R15: a custom rule, as on macOS: every N units, weekdays of a week, a date or a weekday of a month, the count from completion and the end.
+function repeatForm(x) {
+  const r = x.repeat || {}, id = x.id;
+  const row = (label, ...kids) => $("div", { class: "chips" }, $("span", { style: "min-width:150px;color:var(--muted)" }, label), kids);
+  const interval = $("input", { type: "number", min: 1, max: 999, value: r.interval || 1, style: "width:60px", "aria-label": t("Every") });
+  const freq = $("select", { "aria-label": t("Repeat") }, [["daily", "days"], ["weekly", "weeks"], ["monthly", "months"], ["yearly", "years"]]
+    .map(([v, n]) => $("option", { value: v, selected: (r.freq || "weekly") === v }, t(n))));
+  // Names of the days from the browser: 1 January 2024 was a Monday.
+  const dayName = d => new Date(2024, 0, d).toLocaleDateString(locale, { weekday: "short" });
+  const days = [1, 2, 3, 4, 5, 6, 7].map(d => $("input", { type: "checkbox", value: d, checked: (r.weekdays || []).includes(d) }));
+  const weekRow = row(t("Days of the week"), days.map((box, i) => $("label", { class: "chip" }, box, dayName(i + 1))));
+  const byWeekday = $("input", { type: "checkbox", checked: r.nth != null });
+  const nth = $("select", { "aria-label": t("On a weekday instead of a date") }, [[1, "first"], [2, "second"], [3, "third"], [4, "fourth"], [5, "fifth"], [-1, "last"]]
+    .map(([v, n]) => $("option", { value: v, selected: (r.nth ?? 1) === v }, t(n))));
+  const nthDay = $("select", { "aria-label": t("Days of the week") }, [1, 2, 3, 4, 5, 6, 7].map(d => $("option", { value: d, selected: (r.nth_weekday || 1) === d }, dayName(d))));
+  const monthRow = row("", $("label", { class: "chip" }, byWeekday, t("On a weekday instead of a date")), $("span", { class: "chip" }, nth), $("span", { class: "chip" }, nthDay));
+  const fromDone = $("input", { type: "checkbox", checked: !!r.from_done });
+  const end = $("select", { "aria-label": t("Ends") }, [["never", "Never"], ["count", "After a number of repeats"], ["date", "On a date"]]
+    .map(([v, n]) => $("option", { value: v, selected: (r.until ? "date" : r.count != null ? "count" : "never") === v }, t(n))));
+  const count = $("input", { type: "number", min: 1, max: 999, value: r.count || 5, style: "width:60px", "aria-label": t("After a number of repeats") });
+  // A month from today until a date is picked, as on macOS.
+  const until = $("input", { type: "date", value: r.until || iso(new Date(Date.now() + 30 * 86400000)), "aria-label": t("On a date") });
+  const show = () => {
+    weekRow.style.display = freq.value === "weekly" ? "" : "none";
+    monthRow.style.display = freq.value === "monthly" ? "" : "none";
+    nth.disabled = nthDay.disabled = !byWeekday.checked;
+    count.style.display = end.value === "count" ? "" : "none";
+    until.style.display = end.value === "date" ? "" : "none";
+  };
+  for (const el of [freq, byWeekday, end]) el.addEventListener("change", show);
+  show();
+  const close = () => { state.repeatEdit = null; render(); };
+  const save = () => {
+    const rule = customRule({ interval: interval.value, freq: freq.value, weekdays: days.filter(b => b.checked).map(b => Number(b.value)),
+      byWeekday: byWeekday.checked, nth: nth.value, nthWeekday: nthDay.value, fromDone: fromDone.checked, end: end.value, count: count.value, until: until.value });
+    state.repeatEdit = null;
+    act("setRepeat", { id, value: rule });
+  };
+  return $("div", { class: "edit repeat-form", style: "padding:8px 0;border-top:1px solid var(--line)" },
+    row(t("Every"), $("span", { class: "chip" }, interval, freq)), weekRow, monthRow,
+    row("", $("label", { class: "chip" }, fromDone, t("Count from the completion date"))),
+    row(t("Ends"), $("span", { class: "chip" }, end), $("span", { class: "chip", style: "border:0" }, count, until)),
+    $("div", { class: "chips" }, $("button", { class: "link", onclick: save }, t("Save")), $("button", { class: "link", onclick: close }, t("Cancel"))));
 }
 
 function nav(scope, label, count, opts = {}) {
