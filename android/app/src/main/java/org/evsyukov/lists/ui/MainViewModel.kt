@@ -268,6 +268,12 @@ class MainViewModel : ViewModel() {
         return out
     }
 
+    /** R157: a row dragged to another place of a view sorted by hand; it goes right after [after], or first. */
+    fun moveTask(id: String, after: String?) = act { it.moveTask(id, null, null, after) }
+
+    /** R157: a list dragged to another place in the panel of lists; it goes right after [after], or first. */
+    fun moveList(id: String, after: String?) = act { it.moveList(id, after) }
+
     /** Runs a change off the main thread, then lets every screen know. */
     fun act(notice: Notice? = null, change: suspend (Store) -> Unit) {
         viewModelScope.launch {
