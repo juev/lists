@@ -537,7 +537,7 @@ fn ticktick_offset(text: &str) -> Option<chrono::Duration> {
             'T' if number.is_empty() => in_time = true,
             _ => {
                 let n: i64 = std::mem::take(&mut number).parse().ok()?;
-                seconds += n * match (c, in_time) {
+                let unit = match (c, in_time) {
                     ('W', false) => 7 * 86_400,
                     ('D', false) => 86_400,
                     ('H', true) => 3_600,
@@ -545,11 +545,15 @@ fn ticktick_offset(text: &str) -> Option<chrono::Duration> {
                     ('S', true) => 1,
                     _ => return None,
                 };
+                seconds = seconds.checked_add(n.checked_mul(unit)?)?;
                 parts += 1;
             }
         }
     }
-    (number.is_empty() && parts > 0).then(|| chrono::Duration::seconds(sign * seconds))
+    if !number.is_empty() || parts == 0 {
+        return None;
+    }
+    chrono::Duration::try_seconds(sign * seconds)
 }
 
 /// Start, due and reminder of a TickTick task, as the app writes them.
@@ -571,9 +575,9 @@ fn ticktick_dates(
     let remind = start.or(due).and_then(|anchor| {
         let offset = ticktick_offset(reminder.lines().next()?)?;
         let moment = if all_day {
-            ticktick_day(anchor).and_hms_opt(0, 0, 0)? + offset
+            ticktick_day(anchor).and_hms_opt(0, 0, 0)?.checked_add_signed(offset)?
         } else {
-            store::local_time(anchor + offset)
+            store::local_time(anchor.checked_add_signed(offset)?)
         };
         Some(moment.format("%Y-%m-%dT%H:%M").to_string())
     });
@@ -1510,7 +1514,6 @@ mod tests {
             Some("2024-06-19T09:30"),
             "the first of two reminders"
         );
-        // A task with a duration keeps both ends; the reminder counts from the start.
         // A task with a duration keeps both ends, in the zone of the device; the reminder counts from the start.
         let local = |text: &str| Some(local_moment(ticktick_instant(text).unwrap()));
         assert_eq!(
@@ -1522,5 +1525,10 @@ mod tests {
             )
         );
         assert_eq!(ticktick_dates("", "", false, "PT0S"), (None, None, None));
+        // An offset beyond any calendar is no reminder, not a crash.
+        for huge in ["P9999999999999D", "P99999999999999999999D", "P106751991167300D"] {
+            let (_, due, remind) = ticktick_dates("2024-08-05T16:00:00+0000", "2024-08-05T16:00:00+0000", false, huge);
+            assert!(due.is_some() && remind.is_none(), "{huge}");
+        }
     }
 }
