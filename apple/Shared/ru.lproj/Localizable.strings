@@ -317,7 +317,7 @@
 "Normal" = "Обычно";
 "Relaxed" = "Свободно";
 "Import…" = "Импорт…";
-"A Lists export (.json), a 2Do backup (.2dodb), a Todoist CSV, a Trello board JSON or Microsoft To Do lists as JSON" = "Выгрузка Lists (.json), резервная копия 2Do (.2dodb), CSV из Todoist, JSON доски Trello или списки Microsoft To Do в JSON";
+"A Lists export (.json), a 2Do backup (.2dodb), a Todoist CSV, a TickTick backup (.csv), a Trello board JSON or Microsoft To Do lists as JSON" = "Выгрузка Lists (.json), резервная копия 2Do (.2dodb), CSV из Todoist, резервная копия TickTick (.csv), JSON доски Trello или списки Microsoft To Do в JSON";
 "Export" = "Экспорт";
 "Everything as JSON…" = "Всё в JSON…";
 "Everything as Markdown…" = "Всё в Markdown…";

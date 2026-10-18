@@ -245,6 +245,143 @@ fn i9_a_subtask_keeps_its_title_and_one_level() {
     assert!(d.tasks(Scope::Upcoming).unwrap().is_empty());
 }
 
+/// Every task the device has, open or closed, top level or not.
+fn every_task(d: &Store) -> Vec<TaskItem> {
+    let mut out = Vec::new();
+    for scope in [Scope::All, Scope::Completed, Scope::WontDo] {
+        for task in d.tasks(scope).unwrap() {
+            if !out.iter().any(|t: &TaskItem| t.id == task.id) {
+                out.extend(d.subtasks(task.id.clone()).unwrap());
+                out.push(task);
+            }
+        }
+    }
+    out
+}
+
+/// I12 on rows of real TickTick backups, with their text replaced.
+#[test]
+fn i12_ticktick_backup_brings_lists_dates_reminders_checklists_and_subtasks() {
+    let d = device();
+    let file = format!("{}/tests/data/ticktick-backup.csv", env!("CARGO_MANIFEST_DIR"));
+    let report = d.in_zone(0, || d.import_file(file.clone())).unwrap();
+    assert_eq!(
+        (report.source.as_str(), report.lists, report.tasks),
+        ("TickTick", 7, 22)
+    );
+    assert_eq!(
+        report.notes,
+        [
+            "1 reminder was beyond the first of a task not imported.",
+            "1 note was imported as tasks.",
+            "3 lists were kanban: the columns were not imported.",
+            "A TickTick backup has no list colours, attachments or comments.",
+        ]
+    );
+
+    let mut names: Vec<String> = d.lists().unwrap().into_iter().map(|l| l.name).collect();
+    names.sort();
+    for name in ["Folder 1: List 1", "Folder 2: List 2", "Folder 4: List 7", "List 6"] {
+        assert!(names.contains(&name.to_string()), "{name} in {names:?}");
+    }
+    let all = every_task(&d);
+    let task = |title: &str| {
+        all.iter()
+            .find(|t| t.title == title)
+            .unwrap_or_else(|| panic!("{title}"))
+    };
+
+    // Inbox without a folder is the inbox; a range keeps both ends and the reminder counts from the start.
+    let range = task("Task 12");
+    assert_eq!(range.list_id, "inbox");
+    assert_eq!(
+        (range.start.as_deref(), range.due.as_deref(), range.remind.as_deref()),
+        (
+            Some("2026-06-07T04:30"),
+            Some("2026-06-07T06:30"),
+            Some("2026-06-07T04:00")
+        )
+    );
+    assert_eq!(range.notes, "Note 12 line 1");
+    // A day without a time, written as midnight in Perth, and its reminder two hours before.
+    let perth = task("Task 2");
+    assert_eq!(
+        (perth.start.as_deref(), perth.due.as_deref()),
+        (None, Some("2024-08-06"))
+    );
+    assert_eq!(perth.remind.as_deref(), Some("2024-08-05T22:00"));
+    assert_eq!(perth.done.as_deref(), Some("2024-08-13T05:10"));
+    assert!(!perth.wont);
+    assert_eq!(
+        task("Task 1").remind.as_deref(),
+        Some("2024-07-18T05:00"),
+        "the first of two reminders"
+    );
+
+    let wont = task("Task 3");
+    assert!(wont.wont && wont.done.is_some());
+    assert_eq!(wont.priority, Priority::High);
+    assert_eq!(task("Task 6").priority, Priority::High);
+    assert_eq!(task("Task 7").priority, Priority::Medium);
+    assert_eq!(task("Task 8").priority, Priority::None);
+    assert!(task("Task 8").done.is_none());
+
+    let notes = task("Task 9");
+    assert_eq!(notes.notes, "Note 9 line 1\nNote 9 line 2");
+    assert_eq!(notes.tags, ["tag9a", "tag9b"]);
+    assert_eq!(notes.due.as_deref(), Some("2024-06-02"));
+
+    let weekly = task("Task 10").repeat.clone().unwrap();
+    assert_eq!((weekly.freq, weekly.weekdays), (Freq::Weekly, vec![1, 3, 5]));
+    let monthly = task("Task 11");
+    assert_eq!(monthly.repeat.as_ref().unwrap().freq, Freq::Monthly);
+    assert_eq!(monthly.due.as_deref(), Some("2024-04-15"));
+
+    // Checklist items become subtasks; an item without text is dropped.
+    let checklist = task("Task 4");
+    assert_eq!(
+        titles(&d.subtasks(checklist.id.clone()).unwrap()),
+        ["Item 4.1", "Item 4.2", "Item 4.3", "Item 4.4", "Item 4.5", "Item 4.6"]
+    );
+    assert!(d.subtasks(task("Task 5").id.clone()).unwrap().is_empty());
+    // Subtasks by parentId, in the order TickTick shows them.
+    assert_eq!(
+        titles(&d.subtasks(task("Task 14").id.clone()).unwrap()),
+        ["Task 15", "Task 16"]
+    );
+
+    let again = d.in_zone(0, || d.import_file(file)).unwrap();
+    assert_eq!((again.lists, again.tasks), (7, 22));
+    assert_eq!(every_task(&d).len(), all.len(), "a second import adds nothing");
+}
+
+#[test]
+fn i12_ticktick_checked_items_unknown_repeats_and_the_older_header() {
+    let d = device();
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("ticktick-backup.csv");
+    std::fs::write(
+        &file,
+        "\u{feff}\"Date: 2024-05-18+0000\"\n\"Version: 7.1\"\n\"Status: \n0 Normal\n1 Completed\n2 Archived\"\n\
+         \"Folder Name\",\"List Name\",\"Title\",\"Kind\",\"Tags\",\"Content\",\"Is Check list\",\"Start Date\",\"Due Date\",\"Reminder\",\"Repeat\",\"Priority\",\"Status\",\"Created Time\",\"Completed Time\",\"Order\",\"Timezone\",\"Is All Day\",\"Is Floating\",\"Column Name\",\"Column Order\",\"View Mode\",\"taskId\",\"parentId\"\n\
+         \"\",\"Home\",\"Pack\",\"CHECKLIST\",\"\",\"Before leaving\n▪Passport\n▫Tickets\n\",\"Y\",\"\",\"\",\"\",\"FREQ=HOURLY;INTERVAL=2\",\"1\",\"0\",\"2024-04-22T16:15:35+0000\",\"\",\"0\",\"UTC\",\"false\",\"false\",,,\"list\",\"1\",\"\"\n",
+    )
+    .unwrap();
+    let report = d.import_file(file.to_string_lossy().into_owned()).unwrap();
+    assert_eq!((report.source.as_str(), report.lists, report.tasks), ("TickTick", 1, 3));
+    assert!(report.notes.contains(
+        &"1 repeat rule was not expressible here; the rule text was added to the notes of the task.".to_string()
+    ));
+    let list = d.lists().unwrap().into_iter().find(|l| l.name == "Home").unwrap();
+    let pack = &d.tasks(Scope::List { id: list.id }).unwrap()[0];
+    assert_eq!(pack.priority, Priority::Low);
+    assert_eq!(pack.notes, "Before leaving\nTickTick repeat: FREQ=HOURLY;INTERVAL=2");
+    assert!(pack.repeat.is_none());
+    let items = d.subtasks(pack.id.clone()).unwrap();
+    assert_eq!(titles(&items), ["Passport", "Tickets"]);
+    assert!(items[0].done.is_some() && items[1].done.is_none());
+}
+
 #[test]
 fn trello_board_json() {
     let d = device();
