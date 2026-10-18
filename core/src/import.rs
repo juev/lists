@@ -739,6 +739,432 @@ fn parse_ticktick(rows: &[Vec<String>]) -> Result<Parsed> {
     Ok(out)
 }
 
+// ---------------------------------------------------------------- Things 3
+
+/// The database version the importer was checked against (Things 3.24.1).
+const THINGS_VERSION: i64 = 29;
+/// `ed` of a repeat rule that never ends: 4001-01-01.
+const THINGS_NEVER: f64 = 64_092_211_200.0;
+
+/// A date of a Things database: `year << 16 | month << 12 | day << 7`; year 4001 is "none".
+fn things_date(value: Option<i64>) -> Option<NaiveDate> {
+    let v = value.filter(|v| *v > 0)?;
+    let year = (v >> 16) as i32;
+    if year >= 4000 {
+        return None;
+    }
+    NaiveDate::from_ymd_opt(year, ((v >> 12) & 15) as u32, ((v >> 7) & 31) as u32)
+}
+
+/// A reminder time of a Things database: `hour << 26 | minute << 20`.
+fn things_time(value: Option<i64>) -> Option<(u32, u32)> {
+    let v = value.filter(|v| *v > 0)?;
+    let (hour, minute) = ((v >> 26) as u32, ((v >> 20) & 63) as u32);
+    (hour < 24 && minute < 60).then_some((hour, minute))
+}
+
+/// An XML property list as JSON: dictionaries, arrays, numbers, strings and booleans.
+fn plist(xml: &[u8]) -> Option<Value> {
+    fn value(node: roxmltree::Node) -> Option<Value> {
+        let children = || node.children().filter(|c| c.is_element());
+        Some(match node.tag_name().name() {
+            "dict" => {
+                let mut map = serde_json::Map::new();
+                let mut key = None;
+                for child in children() {
+                    if child.tag_name().name() == "key" {
+                        key = Some(child.text().unwrap_or_default().to_string());
+                    } else {
+                        map.insert(key.take()?, value(child)?);
+                    }
+                }
+                Value::Object(map)
+            }
+            "array" => Value::Array(children().map(value).collect::<Option<_>>()?),
+            "integer" => json!(node.text()?.trim().parse::<i64>().ok()?),
+            "real" => json!(node.text()?.trim().parse::<f64>().ok()?),
+            "string" => json!(node.text().unwrap_or_default()),
+            "true" => json!(true),
+            "false" => json!(false),
+            _ => return None,
+        })
+    }
+    let text = std::str::from_utf8(xml).ok()?;
+    let doc = roxmltree::Document::parse_with_options(
+        text,
+        roxmltree::ParsingOptions {
+            allow_dtd: true,
+            ..Default::default()
+        },
+    )
+    .ok()?;
+    value(doc.root_element().children().find(|c| c.is_element())?)
+}
+
+/// The repeat rule of a Things template; `None` when the model here cannot hold
+/// it. Every code read here was checked against the dates of the tasks the
+/// rule made (docs/specs/import.md):
+///
+/// - `fu`: the unit, 16 day, 256 week, 8 month, 4 year; `fa`: every how many;
+/// - `of`: `wd` a weekday with Sunday 0, `dy` the day of the month counted from
+///   0, `mo` the month counted from 0 (the day of a yearly rule is the date of
+///   the task, so `dy` and `mo` add nothing there);
+/// - `tp` 1 counts from the completion date; `ed` the end, seconds since 1970.
+fn things_rule(plist: &Value) -> Option<Repeat> {
+    let int = |key: &str| plist.get(key).and_then(Value::as_i64);
+    // Never seen with another value than 0 except on one paused rule: not known what they do.
+    if int("rc").unwrap_or(0) != 0 || int("ts").unwrap_or(0) != 0 {
+        return None;
+    }
+    let interval = int("fa").filter(|n| (1..=999).contains(n))? as u32;
+    let offsets = plist.get("of").and_then(Value::as_array).cloned().unwrap_or_default();
+    let only = |offset: &Value, keys: &[&str]| {
+        offset
+            .as_object()
+            .is_some_and(|o| o.keys().all(|k| keys.contains(&k.as_str())))
+    };
+    let mut out = match int("fu")? {
+        16 => rule(Freq::Daily, interval),
+        256 => {
+            let mut days = Vec::new();
+            for offset in &offsets {
+                let day = offset.get("wd").and_then(Value::as_i64).filter(|d| (0..=6).contains(d));
+                if !only(offset, &["wd"]) || day.is_none() {
+                    return None;
+                }
+                // Monday first here, Sunday 0 in Things.
+                days.push(if day == Some(0) { 7 } else { day? as u32 });
+            }
+            days.sort_unstable();
+            days.dedup();
+            Repeat {
+                weekdays: days,
+                ..rule(Freq::Weekly, interval)
+            }
+        }
+        8 => {
+            let [offset] = offsets.as_slice() else { return None };
+            let day = offset
+                .get("dy")
+                .and_then(Value::as_i64)
+                .filter(|d| (0..=30).contains(d));
+            if !only(offset, &["dy"]) {
+                return None;
+            }
+            Repeat {
+                monthday: Some(day? as u32 + 1),
+                ..rule(Freq::Monthly, interval)
+            }
+        }
+        4 if offsets.len() <= 1 && offsets.iter().all(|o| only(o, &["dy", "mo"])) => rule(Freq::Yearly, interval),
+        _ => return None,
+    };
+    out.from_done = int("tp") == Some(1);
+    let end = plist.get("ed").and_then(Value::as_f64).unwrap_or(THINGS_NEVER);
+    if end < THINGS_NEVER {
+        out.until = Utc
+            .timestamp_opt(end as i64, 0)
+            .single()
+            .map(|d| d.date_naive().format("%Y-%m-%d").to_string());
+    }
+    Some(out)
+}
+
+struct ThingsRow {
+    uuid: String,
+    kind: i64,
+    status: i64,
+    trashed: bool,
+    title: String,
+    notes: String,
+    start: i64,
+    start_date: Option<i64>,
+    deadline: Option<i64>,
+    reminder: Option<i64>,
+    stop: Option<f64>,
+    area: Option<String>,
+    project: Option<String>,
+    heading: Option<String>,
+    rule: Option<Vec<u8>>,
+    template: Option<String>,
+    paused: bool,
+    next: Option<i64>,
+}
+
+/// A Things 3 database (`main.sqlite`), read from a copy in `work`.
+fn parse_things(db: &Path, work: &Path) -> Result<Parsed> {
+    // The live database keeps recent changes in its write-ahead log: copy both, open the copy.
+    let copy = work.join("main.sqlite");
+    std::fs::copy(db, &copy)?;
+    let wal = PathBuf::from(format!("{}-wal", db.display()));
+    if wal.exists() {
+        std::fs::copy(&wal, work.join("main.sqlite-wal"))?;
+    }
+    let conn = Connection::open(&copy)?;
+    let is_things: bool = conn.query_row(
+        "SELECT count(*) > 0 FROM sqlite_master WHERE type = 'table' AND name = 'TMTask'",
+        [],
+        |r| r.get(0),
+    )?;
+    if !is_things {
+        return Err(invalid("an SQLite database, but not one of Things 3"));
+    }
+    let version: Option<i64> = conn
+        .query_row("SELECT value FROM Meta WHERE key = 'databaseVersion'", [], |r| {
+            r.get::<_, String>(0)
+        })
+        .ok()
+        .and_then(|v| plist(v.as_bytes()))
+        .and_then(|v| v.as_i64());
+    let unsupported = |e: rusqlite::Error| {
+        invalid(format!(
+            "this Things database (version {}) is laid out differently from version {THINGS_VERSION}, which the import knows: {e}",
+            version.map_or("unknown".into(), |v| v.to_string())
+        ))
+    };
+    let mut out = Parsed {
+        source: "Things",
+        ..Parsed::default()
+    };
+    let mut stmt = conn
+        .prepare(r#"SELECT uuid, title FROM TMArea ORDER BY "index""#)
+        .map_err(unsupported)?;
+    for area in stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?)))? {
+        let (key, name) = area?;
+        out.lists.push(List {
+            key,
+            name: name.unwrap_or_default(),
+            ..List::default()
+        });
+    }
+    let mut tags: HashMap<String, Vec<String>> = HashMap::new();
+    let mut stmt = conn
+        .prepare("SELECT x.tasks, t.title FROM TMTaskTag x JOIN TMTag t ON t.uuid = x.tags")
+        .map_err(unsupported)?;
+    for tag in stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?)))? {
+        let (task, name) = tag?;
+        tags.entry(task).or_default().extend(name);
+    }
+    let mut stmt = conn
+        .prepare(
+            r#"SELECT uuid, type, status, trashed, title, notes, start, startDate, deadline, reminderTime, stopDate,
+                      area, project, heading, rt1_recurrenceRule, rt1_repeatingTemplate, rt1_instanceCreationPaused,
+                      rt1_nextInstanceStartDate
+               FROM TMTask ORDER BY "index", creationDate"#,
+        )
+        .map_err(unsupported)?;
+    let rows: Vec<ThingsRow> = stmt
+        .query_map([], |r| {
+            Ok(ThingsRow {
+                uuid: r.get(0)?,
+                kind: r.get::<_, Option<i64>>(1)?.unwrap_or(0),
+                status: r.get::<_, Option<i64>>(2)?.unwrap_or(0),
+                trashed: r.get::<_, Option<i64>>(3)?.unwrap_or(0) != 0,
+                title: r.get::<_, Option<String>>(4)?.unwrap_or_default(),
+                notes: r.get::<_, Option<String>>(5)?.unwrap_or_default(),
+                start: r.get::<_, Option<i64>>(6)?.unwrap_or(1),
+                start_date: r.get(7)?,
+                deadline: r.get(8)?,
+                reminder: r.get(9)?,
+                stop: r.get(10)?,
+                area: r.get(11)?,
+                project: r.get(12)?,
+                heading: r.get(13)?,
+                rule: r.get(14)?,
+                template: r.get(15)?,
+                paused: r.get::<_, Option<i64>>(16)?.unwrap_or(0) != 0,
+                next: r.get(17)?,
+            })
+        })?
+        .collect::<rusqlite::Result<_>>()?;
+    let by_id: HashMap<&str, &ThingsRow> = rows.iter().map(|r| (r.uuid.as_str(), r)).collect();
+    let project_of = |row: &ThingsRow| {
+        row.project.clone().or_else(|| {
+            row.heading
+                .as_deref()
+                .and_then(|h| by_id.get(h))
+                .and_then(|h| h.project.clone())
+        })
+    };
+    let gone = |row: &ThingsRow| {
+        row.trashed
+            || [row.project.as_deref(), row.heading.as_deref()]
+                .into_iter()
+                .flatten()
+                .any(|p| by_id.get(p).is_some_and(|p| p.trashed))
+    };
+
+    // A repeating task is a template and the tasks it makes: the rule goes to the
+    // open task it made, or to the template when there is none.
+    let (mut paused, mut text_rules) = (0u32, 0u32);
+    let mut rules: HashMap<String, std::result::Result<Repeat, String>> = HashMap::new();
+    let mut templates_kept: Vec<&str> = Vec::new();
+    for template in rows.iter().filter(|r| r.rule.is_some() && !gone(r)) {
+        if template.paused {
+            paused += 1;
+            continue;
+        }
+        let raw = template.rule.as_deref().unwrap_or_default();
+        let parsed = plist(raw);
+        let rule = parsed
+            .as_ref()
+            .and_then(things_rule)
+            .ok_or_else(|| parsed.map_or_else(|| "?".into(), |v| v.to_string()));
+        let open = rows
+            .iter()
+            .filter(|r| r.template.as_deref() == Some(&template.uuid) && r.status == 0 && !gone(r))
+            .max_by_key(|r| r.start_date);
+        let target = match open {
+            Some(task) => task.uuid.clone(),
+            None => {
+                templates_kept.push(&template.uuid);
+                template.uuid.clone()
+            }
+        };
+        rules.insert(target, rule);
+    }
+
+    let areas: Vec<String> = out.lists.iter().map(|l| l.key.clone()).collect();
+    let (mut someday, mut headings, mut trashed) = (0u32, 0u32, 0u32);
+    let mut done_items: HashMap<String, String> = HashMap::new();
+    for row in &rows {
+        if row.kind == 2 {
+            headings += u32::from(!gone(row));
+            continue;
+        }
+        if gone(row) {
+            trashed += 1;
+            continue;
+        }
+        if row.rule.is_some() && !templates_kept.contains(&row.uuid.as_str()) {
+            continue;
+        }
+        let project = if row.kind == 0 { project_of(row) } else { None };
+        let area = row
+            .area
+            .clone()
+            .or_else(|| {
+                project
+                    .as_deref()
+                    .and_then(|p| by_id.get(p))
+                    .and_then(|p| p.area.clone())
+            })
+            .filter(|a| areas.contains(a));
+        let start_date = things_date(row.start_date).or_else(|| {
+            templates_kept
+                .contains(&row.uuid.as_str())
+                .then(|| things_date(row.next))
+                .flatten()
+        });
+        let remind = start_date
+            .zip(things_time(row.reminder))
+            .and_then(|(d, (h, m))| d.and_hms_opt(h, m, 0))
+            .map(|d| d.format("%Y-%m-%dT%H:%M").to_string());
+        let finished = row
+            .stop
+            .and_then(|s| Utc.timestamp_opt(s as i64, 0).single())
+            .map(local_moment)
+            .unwrap_or_else(|| local_moment(Utc::now()));
+        let mut task = Task {
+            key: row.uuid.clone(),
+            list: area,
+            parent: project.filter(|p| by_id.contains_key(p.as_str())),
+            title: row.title.clone(),
+            notes: row.notes.trim().to_string(),
+            start: start_date.map(|d| d.format("%Y-%m-%d").to_string()),
+            due: things_date(row.deadline).map(|d| d.format("%Y-%m-%d").to_string()),
+            remind,
+            tags: tags.remove(&row.uuid).unwrap_or_default(),
+            done: matches!(row.status, 2 | 3).then(|| finished.clone()),
+            wont: row.status == 2,
+            project: row.kind == 1,
+            ..Task::default()
+        };
+        if row.start == 2 {
+            someday += 1;
+            task.tags.push("someday".into());
+        }
+        match rules.remove(&row.uuid) {
+            Some(Ok(rule)) => task.repeat = Some(rule),
+            Some(Err(text)) => {
+                text_rules += 1;
+                task.notes = format!("{}\nThings repeat: {text}", task.notes).trim().to_string();
+            }
+            None => {}
+        }
+        done_items.insert(row.uuid.clone(), finished);
+        out.tasks.push(task);
+    }
+    let mut stmt = conn
+        .prepare(r#"SELECT uuid, task, title, status, stopDate FROM TMChecklistItem ORDER BY task, "index""#)
+        .map_err(unsupported)?;
+    for item in stmt.query_map([], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, Option<String>>(2)?.unwrap_or_default(),
+            r.get::<_, Option<i64>>(3)?.unwrap_or(0),
+            r.get::<_, Option<f64>>(4)?,
+        ))
+    })? {
+        let (key, parent, title, status, stop) = item?;
+        let Some(fallback) = done_items.get(&parent) else {
+            continue;
+        };
+        let finished = stop
+            .and_then(|s| Utc.timestamp_opt(s as i64, 0).single())
+            .map(local_moment)
+            .unwrap_or_else(|| fallback.clone());
+        out.tasks.push(Task {
+            key,
+            parent: Some(parent),
+            title,
+            done: matches!(status, 2 | 3).then_some(finished),
+            wont: status == 2,
+            ..Task::default()
+        });
+    }
+
+    let plural = |n: u32, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
+    if version != Some(THINGS_VERSION) {
+        out.notes.push(format!(
+            "The import knows Things databases of version {THINGS_VERSION} (Things 3.24); this one is version {}.",
+            version.map_or("unknown".into(), |v| v.to_string())
+        ));
+    }
+    if someday > 0 {
+        out.notes.push(format!(
+            "{} in Someday: they got the tag \"someday\".",
+            plural(someday, "task was", "tasks were")
+        ));
+    }
+    if headings > 0 {
+        out.notes.push(format!(
+            "{} not imported; their tasks stay in the project.",
+            plural(headings, "heading was", "headings were")
+        ));
+    }
+    if trashed > 0 {
+        out.notes.push(format!(
+            "{} in the Trash and not imported.",
+            plural(trashed, "task was", "tasks were")
+        ));
+    }
+    if paused > 0 {
+        out.notes.push(format!(
+            "{} paused and not imported.",
+            plural(paused, "repeating task was", "repeating tasks were")
+        ));
+    }
+    if text_rules > 0 {
+        out.notes.push(format!(
+            "{} not expressible here; the rule was added to the notes of the task.",
+            plural(text_rules, "repeat rule was", "repeat rules were")
+        ));
+    }
+    Ok(out)
+}
+
 // ---------------------------------------------------------------- Trello
 
 fn iso_instant(value: &Value) -> Option<String> {
@@ -1325,21 +1751,33 @@ impl Store {
 impl Store {
     /// Imports a file exported from another task manager. The format is
     /// recognised from the content: a 2Do backup (`.2dodb`), a Todoist CSV
-    /// template, a TickTick CSV backup, a Trello board JSON, Microsoft To Do
-    /// lists as JSON, or a JSON export of this app.
+    /// template, a TickTick CSV backup, a Things 3 database (`main.sqlite` or
+    /// its `.thingsdatabase` folder), a Trello board JSON, Microsoft To Do lists
+    /// as JSON, or a JSON export of this app.
     pub fn import_file(&self, path: String) -> Result<ImportReport> {
         let result = (|| {
-            let path = Path::new(&path);
-            let mut head = [0u8; 4];
+            let mut path = PathBuf::from(&path);
+            // A Things database is a folder (`Things Database.thingsdatabase`) with `main.sqlite` in it.
+            if path.is_dir() {
+                path = path.join("main.sqlite");
+            }
+            let path = path.as_path();
+            let mut head = [0u8; 16];
             let read = std::fs::File::open(path)?.read(&mut head)?;
-            let parsed = if read >= 2 && &head[..2] == b"PK" {
+            let zip = read >= 2 && &head[..2] == b"PK";
+            if zip || (read == 16 && &head == b"SQLite format 3\0") {
                 let work = std::env::temp_dir().join(format!("lists-import-{}", Uuid::now_v7().simple()));
                 std::fs::create_dir_all(&work)?;
-                let parsed = parse_2do(path, &work);
+                let parsed = if zip {
+                    parse_2do(path, &work)
+                } else {
+                    parse_things(path, &work)
+                };
                 let written = parsed.and_then(|p| self.write_import(p));
                 let _ = std::fs::remove_dir_all(&work);
                 return written;
-            } else {
+            }
+            let parsed = {
                 let text =
                     String::from_utf8(std::fs::read(path)?).map_err(|_| invalid("the file is not UTF-8 text"))?;
                 let trimmed = text.trim_start_matches('\u{feff}').trim_start();
@@ -1529,6 +1967,150 @@ mod tests {
         for huge in ["P9999999999999D", "P99999999999999999999D", "P106751991167300D"] {
             let (_, due, remind) = ticktick_dates("2024-08-05T16:00:00+0000", "2024-08-05T16:00:00+0000", false, huge);
             assert!(due.is_some() && remind.is_none(), "{huge}");
+        }
+    }
+
+    /// Values exactly as the Things 3.24.1 database holds them (docs/specs/import.md).
+    #[test]
+    fn things_dates_and_repeat_rules() {
+        // Dates Things itself reported for these values over AppleScript.
+        assert_eq!(things_date(Some(132818432)).unwrap().to_string(), "2026-10-12");
+        assert_eq!(things_date(Some(132816000)).unwrap().to_string(), "2026-09-25");
+        assert_eq!(things_date(Some(132821120)).unwrap().to_string(), "2026-11-01");
+        assert_eq!(things_date(Some(262213760)), None, "year 4001 is no date");
+        assert_eq!(things_date(None), None);
+        assert_eq!(things_time(Some(568328192)), Some((8, 30)));
+        assert_eq!(things_time(Some(1342177280)), Some((20, 0)));
+        assert_eq!(things_time(Some(785383424)), Some((11, 45)));
+
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>ed</key>
+	<real>64092211200</real>
+	<key>fa</key>
+	<integer>1</integer>
+	<key>fu</key>
+	<integer>256</integer>
+	<key>of</key>
+	<array>
+		<dict>
+			<key>wd</key>
+			<integer>6</integer>
+		</dict>
+	</array>
+	<key>tp</key>
+	<integer>0</integer>
+</dict>
+</plist>"#;
+        let weekly = things_rule(&plist(xml).unwrap()).unwrap();
+        assert_eq!(
+            (weekly.freq, weekly.interval, weekly.weekdays),
+            (Freq::Weekly, 1, vec![6])
+        );
+
+        // The thirteen rules of the database, with what the dates of their tasks showed.
+        let never = 64092211200.0;
+        let cases: [(Value, Option<Repeat>); 13] = [
+            (
+                json!({"fu":8,"fa":1,"of":[{"dy":4}],"tp":0,"ts":-2,"rc":0,"ed":never}),
+                None,
+            ),
+            (
+                json!({"fu":256,"fa":1,"of":[{"wd":6}],"tp":0,"ts":0,"rc":0,"ed":never}),
+                Some(Repeat {
+                    weekdays: vec![6],
+                    ..rule(Freq::Weekly, 1)
+                }),
+            ),
+            (
+                json!({"fu":8,"fa":1,"of":[{"dy":24}],"tp":0,"ts":0,"rc":0,"ed":never}),
+                Some(Repeat {
+                    monthday: Some(25),
+                    ..rule(Freq::Monthly, 1)
+                }),
+            ),
+            (
+                json!({"fu":256,"fa":1,"of":[{"wd":6}],"tp":0,"ts":0,"rc":0,"ed":never}),
+                Some(Repeat {
+                    weekdays: vec![6],
+                    ..rule(Freq::Weekly, 1)
+                }),
+            ),
+            (
+                json!({"fu":8,"fa":2,"of":[{"dy":1}],"tp":0,"ts":0,"rc":0,"ed":never}),
+                Some(Repeat {
+                    monthday: Some(2),
+                    ..rule(Freq::Monthly, 2)
+                }),
+            ),
+            (
+                json!({"fu":8,"fa":1,"of":[{"dy":12}],"tp":0,"ts":0,"rc":0,"ed":never}),
+                Some(Repeat {
+                    monthday: Some(13),
+                    ..rule(Freq::Monthly, 1)
+                }),
+            ),
+            (
+                json!({"fu":16,"fa":1,"of":[{"dy":0}],"tp":0,"ts":0,"rc":0,"ed":never}),
+                Some(rule(Freq::Daily, 1)),
+            ),
+            (
+                json!({"fu":4,"fa":1,"of":[{"dy":20,"mo":1}],"tp":0,"ts":0,"rc":0,"ed":never}),
+                Some(rule(Freq::Yearly, 1)),
+            ),
+            (
+                json!({"fu":16,"fa":5,"of":[{"dy":0}],"tp":1,"ts":0,"rc":0,"ed":never}),
+                Some(Repeat {
+                    from_done: true,
+                    ..rule(Freq::Daily, 5)
+                }),
+            ),
+            (
+                json!({"fu":8,"fa":1,"of":[{"dy":14}],"tp":0,"ts":0,"rc":0,"ed":never}),
+                Some(Repeat {
+                    monthday: Some(15),
+                    ..rule(Freq::Monthly, 1)
+                }),
+            ),
+            (
+                json!({"fu":8,"fa":1,"of":[{"dy":17}],"tp":0,"ts":0,"rc":0,"ed":never}),
+                Some(Repeat {
+                    monthday: Some(18),
+                    ..rule(Freq::Monthly, 1)
+                }),
+            ),
+            (
+                json!({"fu":256,"fa":1,"of":[{"wd":0}],"tp":0,"ts":0,"rc":0,"ed":never}),
+                Some(Repeat {
+                    weekdays: vec![7],
+                    ..rule(Freq::Weekly, 1)
+                }),
+            ),
+            (
+                json!({"fu":8,"fa":1,"of":[{"dy":2}],"tp":0,"ts":0,"rc":0,"ed":never}),
+                Some(Repeat {
+                    monthday: Some(3),
+                    ..rule(Freq::Monthly, 1)
+                }),
+            ),
+        ];
+        for (plist, expected) in cases {
+            assert_eq!(things_rule(&plist), expected, "{plist}");
+        }
+
+        // Forms the database did not have: an end date is kept, the rest is refused.
+        let until = things_rule(&json!({"fu":16,"fa":1,"of":[],"tp":0,"ts":0,"rc":0,"ed":1798761600.0})).unwrap();
+        assert_eq!(until.until.as_deref(), Some("2027-01-01"));
+        for odd in [
+            json!({"fu":16,"fa":1,"rc":3}),
+            json!({"fu":32,"fa":1}),
+            json!({"fu":8,"fa":1,"of":[{"wd":2,"wo":2}]}),
+            json!({"fu":8,"fa":1,"of":[{"dy":-1}]}),
+            json!({"fu":16,"fa":0}),
+        ] {
+            assert_eq!(things_rule(&odd), None, "{odd}");
         }
     }
 }

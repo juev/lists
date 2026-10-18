@@ -8,7 +8,7 @@
 //! cargo run --example lists -- <data folder> webdav <url> <user>
 //! LISTS_PASSWORD=… cargo run --example lists -- <data folder> sync
 //! cargo run --example lists -- <data folder> sync-off
-//! cargo run --example lists -- <data folder> import <backup.2dodb | todoist.csv | ticktick-backup.csv | trello.json | todo.json>
+//! cargo run --example lists -- <data folder> import <backup.2dodb | todoist.csv | ticktick-backup.csv | main.sqlite | trello.json | todo.json>
 //! ```
 //!
 //! Close the app before pointing this at its folder.
