@@ -1,6 +1,7 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
+    id("io.github.takahirom.roborazzi")
 }
 
 // A release is signed only when both variables are set; scripts/release-android.sh
@@ -66,6 +67,15 @@ android {
     buildFeatures {
         compose = true
     }
+    // Robolectric draws the screenshots with the resources and fonts of the app (#369).
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+    }
+}
+
+// The screenshots are kept with the tests; `make android` compares them, `make android-screenshots` records them anew.
+roborazzi {
+    outputDir.set(file("src/test/screenshots"))
 }
 
 kotlin {
@@ -90,4 +100,14 @@ dependencies {
     // Runtime of the UniFFI bindings to the Rust core.
     implementation("net.java.dev.jna:jna:5.17.0@aar")
     testImplementation("junit:junit:4.13.2")
+    // Screenshot tests (#369): Compose drawn by Robolectric's native graphics, compared by Roborazzi.
+    testImplementation(composeBom)
+    testImplementation("androidx.compose.ui:ui-test-junit4")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
+    testImplementation("org.robolectric:robolectric:4.17")
+    testImplementation("io.github.takahirom.roborazzi:roborazzi:1.75.0")
+    testImplementation("io.github.takahirom.roborazzi:roborazzi-compose:1.75.0")
+    // Previews of the building blocks in the IDE (ui/Catalog.kt).
+    implementation("androidx.compose.ui:ui-tooling-preview")
+    debugImplementation("androidx.compose.ui:ui-tooling")
 }

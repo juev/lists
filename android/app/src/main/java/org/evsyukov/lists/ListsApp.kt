@@ -52,7 +52,8 @@ import java.time.LocalDateTime
 import java.time.ZoneId
 import java.util.concurrent.TimeUnit
 
-class ListsApp : Application() {
+// Open for the screenshot tests, whose application draws and does nothing else (ScreenshotApp, #369).
+open class ListsApp : Application() {
     /** The database lives in the app's private storage; nothing else on the device can read it. */
     val store: Store by lazy {
         Store.open(File(filesDir, "lists").absolutePath).also {
@@ -86,7 +87,7 @@ class ListsApp : Application() {
 
     companion object {
         lateinit var instance: ListsApp
-            private set
+            internal set
     }
 }
 
