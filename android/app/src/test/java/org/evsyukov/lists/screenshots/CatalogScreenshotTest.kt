@@ -2,6 +2,7 @@ package org.evsyukov.lists.screenshots
 
 import androidx.compose.runtime.Composable
 import com.github.takahirom.roborazzi.captureRoboImage
+import org.evsyukov.lists.LookPrefs
 import org.evsyukov.lists.ui.CatalogPage
 import org.evsyukov.lists.ui.DrawerCatalog
 import org.evsyukov.lists.ui.FieldsCatalog
@@ -12,6 +13,7 @@ import org.evsyukov.lists.ui.theme.ListsTheme
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import uniffi.lists_core.Scope
@@ -63,6 +65,21 @@ class CatalogScreenshotTest {
     fun drawer() {
         shot("drawer_light") { ListsTheme(dark = false, dynamic = false) { DrawerCatalog(LocalDate.now()) } }
         shot("drawer_dark") { ListsTheme(dark = true, dynamic = false) { DrawerCatalog(LocalDate.now()) } }
+    }
+
+    /** R158: Lists and Filters folded; Работа is open, so its row stays. */
+    @Test
+    fun drawer_folded() {
+        val app = RuntimeEnvironment.getApplication()
+        // The folded sections live in an object of the app: they are put back for the other tests.
+        try {
+            LookPrefs.setFolded(app, "lists", true)
+            LookPrefs.setFolded(app, "filters", true)
+            shot("drawer_folded") { ListsTheme(dark = false, dynamic = false) { DrawerCatalog(LocalDate.now()) } }
+        } finally {
+            LookPrefs.setFolded(app, "lists", false)
+            LookPrefs.setFolded(app, "filters", false)
+        }
     }
 
     @Test

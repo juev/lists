@@ -222,6 +222,8 @@
     <string name="moved_to_next">Moved to the next occurrence</string>
     <string name="deleted">Deleted</string>
     <string name="more">More</string>
+    <string name="expanded">Expanded</string>
+    <string name="collapsed">Collapsed</string>
     <string name="one_word">one word</string>
     <string name="remove_time">Remove time</string>
     <string name="repeats_field">Number of repeats</string>

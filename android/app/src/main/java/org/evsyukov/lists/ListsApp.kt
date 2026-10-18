@@ -387,6 +387,31 @@ object LookPrefs {
         prefs(context).edit().putString("rowSpacing", value).apply()
         spacing.value = value
     }
+
+    /** R158: the height of a row of the panel of lists for a spacing of R122, in dp. */
+    fun drawerRowHeight(spacing: String): Int = when (spacing) {
+        "compact" -> 48
+        "relaxed" -> 56
+        else -> 52
+    }
+
+    /** R158: the sections of the panel of lists that fold. */
+    val sections = listOf("lists", "projects", "filters", "tags")
+
+    /** The folded sections a saved value stands for; an unknown name is dropped. */
+    internal fun foldedFrom(saved: Set<String>?): Set<String> = saved.orEmpty().filterTo(mutableSetOf()) { it in sections }
+
+    /** Set once a section is folded or unfolded; the panel reads it, so it is laid out again at once. */
+    private val folded = mutableStateOf<Set<String>?>(null)
+
+    /** R158: the sections folded on this device; not synced. */
+    fun folded(context: Context): Set<String> = folded.value ?: foldedFrom(prefs(context).getStringSet("folded", null))
+
+    fun setFolded(context: Context, section: String, fold: Boolean) {
+        val next = if (fold) folded(context) + section else folded(context) - section
+        prefs(context).edit().putStringSet("folded", next).apply()
+        folded.value = next
+    }
 }
 
 /** How new tasks are entered on this device; not synced. The default list itself is a shared setting (R40). */

@@ -221,6 +221,8 @@
     <string name="moved_to_next">Перенесено на следующий повтор</string>
     <string name="deleted">Удалено</string>
     <string name="more">Ещё</string>
+    <string name="expanded">Развёрнуто</string>
+    <string name="collapsed">Свёрнуто</string>
     <string name="one_word">одно слово</string>
     <string name="remove_time">Убрать время</string>
     <string name="repeats_field">Число повторов</string>
