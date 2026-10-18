@@ -14,7 +14,8 @@ packages:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    ARCHS: arm64
+    # Apple silicon and Intel (#375); a Debug build makes the active one only.
+    ARCHS: "arm64 x86_64"
     MARKETING_VERSION: "0.6.0"
     CURRENT_PROJECT_VERSION: "25"
     # Rust core: C module map and static library produced by scripts/build-apple.sh

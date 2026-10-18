@@ -148,8 +148,11 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: core
+      # Both architectures, as the release builds them (#375); a Debug build alone makes only the active one.
       - name: Build the app
-        run: make apple
+        run: ./scripts/build-apple-app.sh Debug ONLY_ACTIVE_ARCH=NO
+      - name: Check that the app runs on Apple silicon and Intel
+        run: ./scripts/check-universal.sh apple/build/Build/Products/Debug/Lists.app
       - name: Run the Swift tests
         run: make apple-test
       # A build that compiles can still stop at launch, as 0.3.1 did (#239, #240).

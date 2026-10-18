@@ -49,9 +49,9 @@ Every release on the [Releases page](https://github.com/juev/lists/releases) car
 
 ### macOS
 
-Needs macOS 14 or newer on Apple silicon.
+Needs macOS 14 or newer, on Apple silicon or Intel.
 
-1. Download `Lists-<version>-macos-arm64.dmg` and open it.
+1. Download `Lists-<version>-macos-universal.dmg` and open it.
 2. Drag Lists to Applications and start it from there.
 
 A release whose notes say the build is not notarized is refused by macOS on first start. Remove the quarantine flag once:
@@ -192,7 +192,7 @@ Known gaps:
 - the data in the storage is not encrypted;
 - on Android, tasks and lists cannot be reordered by dragging, and the end date of a repeat can only be set on macOS;
 - the web interface has no custom repeat rules;
-- the macOS app is built for Apple silicon only, the released APK for arm64 only.
+- the released APK is built for arm64 only.
 
 ## License
 
