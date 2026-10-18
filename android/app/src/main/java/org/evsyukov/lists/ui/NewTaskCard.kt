@@ -79,6 +79,9 @@ import org.evsyukov.lists.str
 import org.evsyukov.lists.summary
 import org.evsyukov.lists.title
 import org.evsyukov.lists.today
+import org.evsyukov.lists.ui.theme.PriorityColors
+import org.evsyukov.lists.ui.theme.ViewTint
+import org.evsyukov.lists.ui.theme.viewTint
 import uniffi.lists_core.Freq
 import uniffi.lists_core.NewTask
 import uniffi.lists_core.Priority
@@ -467,7 +470,7 @@ fun NewTaskCard(
                         shownDue?.let { ValueChip(dateLabel(it), Icons.Outlined.Event, str(R.string.due)) { dialog = "due" } }
                         repeat?.let { ValueChip(it.summary(), Icons.Outlined.Repeat, str(R.string.repeat)) { dialog = "repeat" } }
                         if (shownPriority != Priority.NONE) {
-                            ValueChip(shownPriority.title(), Icons.Outlined.Flag, str(R.string.priority), color = PriorityColor) { dialog = "priority" }
+                            ValueChip(shownPriority.title(), Icons.Outlined.Flag, str(R.string.priority), color = PriorityColors.chip) { dialog = "priority" }
                         }
                         filesText?.let { ValueChip(it, Icons.Outlined.AttachFile, str(R.string.file_or_image)) { pickFiles.launch("*/*") } }
                         // Read from the title and changed there (R41).

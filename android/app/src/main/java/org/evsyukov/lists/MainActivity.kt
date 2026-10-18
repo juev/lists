@@ -12,11 +12,6 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.platform.LocalContext
@@ -31,6 +26,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.evsyukov.lists.ui.MainScreen
 import org.evsyukov.lists.ui.MainViewModel
+import org.evsyukov.lists.ui.theme.ListsTheme
 import uniffi.lists_core.SyncConfig
 
 /** [bars] is set by a screen that draws under the system bars: their icons then follow the look of the app. */
@@ -53,12 +49,7 @@ fun AppTheme(bars: Boolean = false, content: @Composable () -> Unit) {
             }
         }
     }
-    val colors = when {
-        Build.VERSION.SDK_INT >= 31 -> if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-        dark -> darkColorScheme()
-        else -> lightColorScheme()
-    }
-    MaterialTheme(colorScheme = colors, content = content)
+    ListsTheme(dark, content = content)
 }
 
 class MainActivity : ComponentActivity() {
