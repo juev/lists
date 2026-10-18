@@ -1308,7 +1308,13 @@ final class AppModel {
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
         panel.message = L("A Lists export (.json), a 2Do backup (.2dodb), a Todoist CSV, a TickTick backup (.csv), an OmniFocus export (.csv), a Things database (main.sqlite), a Trello board JSON or Microsoft To Do lists as JSON")
-        guard panel.runModal() == .OK, let url = panel.url, let store else { return }
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        importFile(at: url)
+    }
+
+    /// Imports the file at `url` and shows the report; what Import… does once a file is chosen.
+    func importFile(at url: URL) {
+        guard let store else { return }
         // R140: reading a large export and writing its tasks runs off the main thread.
         _Concurrency.Task { [weak self] in
             let outcome = await _Concurrency.Task.detached(priority: .userInitiated) {
