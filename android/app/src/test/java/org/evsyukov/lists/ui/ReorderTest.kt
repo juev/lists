@@ -62,4 +62,15 @@ class ReorderTest {
         reorder.start("a", listOf("a", "b"))
         assertEquals(Dropped.Kept, reorder.drop(slop = 0f))
     }
+
+    @Test
+    fun r157_a_row_held_at_an_edge_scrolls_the_column_faster_the_closer_it_is() {
+        // A column from 0 to 1000, rows 100 high: the strips are 0–100 and 900–1000.
+        assertEquals(0f, edgeStep(top = 400f, size = 100f, start = 0f, end = 1000f), 0f)
+        assertEquals(12.5f, edgeStep(top = 850f, size = 100f, start = 0f, end = 1000f), 0.001f)
+        assertEquals(25f, edgeStep(top = 900f, size = 100f, start = 0f, end = 1000f), 0.001f)
+        assertEquals(25f, edgeStep(top = 990f, size = 100f, start = 0f, end = 1000f), 0.001f)
+        assertEquals(-12.5f, edgeStep(top = 50f, size = 100f, start = 0f, end = 1000f), 0.001f)
+        assertEquals(-25f, edgeStep(top = -20f, size = 100f, start = 0f, end = 1000f), 0.001f)
+    }
 }

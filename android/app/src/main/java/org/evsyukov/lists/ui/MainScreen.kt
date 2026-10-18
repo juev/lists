@@ -118,6 +118,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -385,6 +386,14 @@ fun MainScreen(model: MainViewModel, onReminderSet: () -> Unit) {
                     // R157: a row of a view sorted by hand is dragged to its place; the store learns the place when it is let go.
                     val reorderable = state.reorderable()
                     LaunchedEffect(state.sections) { reorder.forget() }
+                    // While a row is dragged, a row held at an edge scrolls the column, frame by frame.
+                    LaunchedEffect(reorder.dragging) {
+                        val section = state.sections.firstOrNull() ?: return@LaunchedEffect
+                        while (reorder.dragging != null) {
+                            withFrameNanos {}
+                            reorder.autoscroll(rows) { rowKey(section.key, it) }
+                        }
+                    }
                     LazyColumn(Modifier.fillMaxSize(), state = rows, contentPadding = PaddingValues(bottom = 88.dp)) {
                         if (state.search == null) item(key = "title") { ViewTitle(state) }
                         if (eventsShown) item(key = "events") { EventsBlock(events) }

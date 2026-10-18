@@ -78,10 +78,31 @@ class Reorder {
      * lazy column with [rows] has laid out under the key [keyOf] of its id.
      */
     fun drag(dy: Float, rows: LazyListState, keyOf: (String) -> Any) {
-        val id = dragging ?: return
-        val current = order ?: return
+        if (dragging == null) return
         offset += dy
         travel += kotlin.math.abs(dy)
+        settle(rows, keyOf)
+    }
+
+    /**
+     * Called on every frame while a row is dragged: held near an edge of the column, the rows scroll
+     * under it, faster the closer it is, so a row is taken past what is on screen. The row is drawn
+     * that much further, to stay under the finger.
+     */
+    fun autoscroll(rows: LazyListState, keyOf: (String) -> Any) {
+        val id = dragging ?: return
+        val info = rows.layoutInfo
+        val self = info.visibleItemsInfo.firstOrNull { it.key == keyOf(id) } ?: return
+        val step = edgeStep(self.offset + offset, self.size.toFloat(), info.viewportStartOffset.toFloat(), info.viewportEndOffset.toFloat())
+        if (step == 0f) return
+        offset += rows.dispatchRawDelta(step)
+        settle(rows, keyOf)
+    }
+
+    /** Puts the dragged row in place of the row under its middle. */
+    private fun settle(rows: LazyListState, keyOf: (String) -> Any) {
+        val id = dragging ?: return
+        val current = order ?: return
         val items = rows.layoutInfo.visibleItemsInfo
         val self = items.firstOrNull { it.key == keyOf(id) } ?: return
         val middle = self.offset + offset + self.size / 2f
@@ -127,6 +148,22 @@ class Reorder {
         offset = 0f
         moved = false
         travel = 0f
+    }
+}
+
+/**
+ * R157: how far the rows scroll in a frame under a dragged row whose top is at [top] and which is [size] high,
+ * in a column that shows from [start] to [end]: nothing outside the strip of one row at each edge, up to a
+ * quarter of a row at the very edge; negative toward the start.
+ */
+internal fun edgeStep(top: Float, size: Float, start: Float, end: Float): Float {
+    if (size <= 0f) return 0f
+    val towardEnd = top + size - (end - size)
+    val towardStart = (start + size) - top
+    return when {
+        towardEnd > 0f -> (towardEnd / size).coerceAtMost(1f) * size / 4f
+        towardStart > 0f -> -(towardStart / size).coerceAtMost(1f) * size / 4f
+        else -> 0f
     }
 }
 
