@@ -96,7 +96,7 @@ A repeat is set in the card of a task. On macOS the card of a new task, in the m
 
 Presets: every day, on weekdays, every week, every two weeks, every month, every quarter, every year.
 
-A custom rule repeats every N days, weeks, months or years. Weekly rules take a set of weekdays; monthly rules take a day of the month or "the first … fifth, last" weekday. A rule ends never, after N repeats or on a date, and counts either from the due date or from the day the task was completed. Day 31 in a shorter month means its last day.
+A custom rule repeats every N days, weeks, months or years. Weekly rules take a set of weekdays; monthly rules take a day of the month or "the first … fifth, last" weekday. A rule ends never, after N repeats or on a date, and counts either from the due date or from the day the task was completed. The same choice is in Custom… on macOS, on Android and in the web interface, where it opens under the fields of the task. Day 31 in a shorter month means its last day.
 
 Completing a repeating task moves its dates to the next occurrence, reopens its subtasks and adds a record to Completed. After the last occurrence the task completes like any other.
 
