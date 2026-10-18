@@ -189,7 +189,7 @@ Version 0.6.0. What is implemented and how each part was checked is listed at th
 Known gaps:
 
 - no iOS app; the web interface covers the phone;
-- the data in the storage is not encrypted;
+- a CalDAV storage is not encrypted, and neither is a WebDAV or folder storage until a passphrase is set ([Sync](#sync));
 - the released APK is built for arm64 only.
 
 ## License
