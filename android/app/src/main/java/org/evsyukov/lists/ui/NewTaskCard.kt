@@ -20,7 +20,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -79,7 +78,10 @@ import org.evsyukov.lists.str
 import org.evsyukov.lists.summary
 import org.evsyukov.lists.title
 import org.evsyukov.lists.today
+import org.evsyukov.lists.ui.theme.Corners
 import org.evsyukov.lists.ui.theme.PriorityColors
+import org.evsyukov.lists.ui.theme.Sizes
+import org.evsyukov.lists.ui.theme.Space
 import org.evsyukov.lists.ui.theme.ViewTint
 import org.evsyukov.lists.ui.theme.viewTint
 import uniffi.lists_core.Freq
@@ -413,7 +415,7 @@ fun NewTaskCard(
     // One tree for both sizes: the title and the note stay the same fields, so the cursor stays where it was.
     Column(if (full) modifier.fillMaxHeight() else modifier) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            if (!full) Mark(MarkState.Open, null, Modifier.padding(start = 16.dp))
+            if (!full) Mark(MarkState.Open, null, Modifier.padding(start = Space.xl))
             TextField(
                 value = text,
                 onValueChange = { text = it },
@@ -432,7 +434,7 @@ fun NewTaskCard(
             }
         }
         Column(if (full) Modifier.weight(1f).verticalScroll(rememberScrollState()) else Modifier) {
-            if (parse && full) QuickChips(text, Modifier.padding(start = 16.dp, bottom = 4.dp))
+            if (parse && full) QuickChips(text, Modifier.padding(start = Space.xl, bottom = Space.xs))
             TextField(
                 value = note,
                 onValueChange = { note = it },
@@ -447,7 +449,7 @@ fun NewTaskCard(
                 colors = transparentField(),
                 keyboardOptions = SentenceKeyboard,
                 // Compact, the note begins under the title, past the mark.
-                modifier = Modifier.fillMaxWidth().padding(start = if (full) 0.dp else 34.dp),
+                modifier = Modifier.fillMaxWidth().padding(start = if (full) 0.dp else AFTER_MARK),
             )
             // The same fields as in the editor, so that nothing has to be typed as text.
             val startText = start?.let { dateLabel(it).lowercase() }
@@ -464,7 +466,7 @@ fun NewTaskCard(
                 if (listName != null) FieldRow(Icons.AutoMirrored.Outlined.List, str(R.string.list), listName) { dialog = "list" }
             } else {
                 FieldsRow(
-                    Modifier.fillMaxWidth().padding(start = 50.dp, end = 8.dp),
+                    Modifier.fillMaxWidth().padding(start = AFTER_MARK + Space.xl, end = Space.m),
                     chips = {
                         start?.let { ValueChip(dateLabel(it), Icons.Outlined.PlayArrow, str(R.string.start)) { dialog = "start" } }
                         shownDue?.let { ValueChip(dateLabel(it), Icons.Outlined.Event, str(R.string.due)) { dialog = "due" } }
@@ -490,20 +492,20 @@ fun NewTaskCard(
             if (entry.subtasksShown) DraftSubtasks(entry, full, subtaskFocus)
         }
         if (!full) {
-            HorizontalDivider(Modifier.padding(top = 6.dp), color = MaterialTheme.colorScheme.outlineVariant)
+            HorizontalDivider(Modifier.padding(top = Space.s), color = MaterialTheme.colorScheme.outlineVariant)
             Row(
-                Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, top = 6.dp),
+                Modifier.fillMaxWidth().padding(start = Space.m, end = Space.m, top = Space.s),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 // The list or the project the task goes to (R129).
                 if (listName != null) {
                     Row(
-                        Modifier.weight(1f, fill = false).clip(CircleShape).clickable(role = Role.Button) { dialog = "list" }.heightIn(min = 40.dp).padding(horizontal = 8.dp),
+                        Modifier.weight(1f, fill = false).clip(Corners.round).clickable(role = Role.Button) { dialog = "list" }.heightIn(min = Sizes.lightTarget).padding(horizontal = Space.m),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Icon(Icons.AutoMirrored.Outlined.List, str(R.string.list), Modifier.size(18.dp), tint = chosen?.tint() ?: MaterialTheme.colorScheme.onSurfaceVariant)
-                        Spacer(Modifier.width(6.dp))
+                        Icon(Icons.AutoMirrored.Outlined.List, str(R.string.list), Modifier.size(Sizes.rowIcon), tint = chosen?.tint() ?: MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(Modifier.width(Space.s))
                         Text(listName, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 } else {
@@ -512,7 +514,7 @@ fun NewTaskCard(
                 Button(
                     onClick = { submit() },
                     enabled = text.isNotBlank() && !saving,
-                    shape = CircleShape,
+                    shape = Corners.round,
                     colors = ButtonDefaults.buttonColors(containerColor = viewTint(ViewTint.Blue), contentColor = Color.White),
                     contentPadding = PaddingValues(horizontal = 18.dp),
                 ) { Text(str(R.string.save)) }
@@ -536,6 +538,9 @@ fun NewTaskCard(
 /** The most the typed subtasks of the compact card take before they scroll inside it: the title stays above the keyboard (R64). */
 private val COMPACT_SUBTASKS_HEIGHT = 144.dp
 
+/** Where the text of the compact card starts: after the mark, in line with the title. */
+private val AFTER_MARK = 34.dp
+
 /**
  * R113: the subtasks typed for a task that does not exist yet. Each is a line with a title that can be
  * corrected and removed; under them is the field of the next one, where "Done" adds the line and leaves the cursor.
@@ -546,11 +551,11 @@ private fun DraftSubtasks(entry: NewTaskEntry, full: Boolean, focus: FocusReques
     // The line just added is the one in view.
     LaunchedEffect(entry.subtasks.size) { scroll.scrollTo(scroll.maxValue) }
     // Compact, the lines begin where the note does.
-    Column(Modifier.padding(start = if (full) 4.dp else 34.dp)) {
+    Column(Modifier.padding(start = if (full) Space.xs else AFTER_MARK)) {
         Column(if (full) Modifier else Modifier.heightIn(max = COMPACT_SUBTASKS_HEIGHT).verticalScroll(scroll)) {
             entry.subtasks.forEachIndexed { index, title ->
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) { Mark(MarkState.Open, null, round = true) }
+                    Box(Modifier.size(Sizes.touch), contentAlignment = Alignment.Center) { Mark(MarkState.Open, null, round = true) }
                     TextField(
                         value = title,
                         onValueChange = { typed -> entry.subtasks = entry.subtasks.toMutableList().also { it[index] = typed } },
@@ -588,11 +593,11 @@ private fun DraftSubtasks(entry: NewTaskEntry, full: Boolean, focus: FocusReques
 @Composable
 private fun FieldRow(icon: ImageVector, label: String, value: String?, onClick: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onClick).heightIn(min = 48.dp).padding(horizontal = 16.dp),
+        Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onClick).heightIn(min = Sizes.touch).padding(horizontal = Space.xl),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(icon, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-        Spacer(Modifier.width(16.dp))
+        Icon(icon, null, Modifier.size(Sizes.lightIcon), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.width(Space.xl))
         Text(label)
         Text(
             value.orEmpty(),
@@ -600,7 +605,7 @@ private fun FieldRow(icon: ImageVector, label: String, value: String?, onClick: 
             overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.End,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.weight(1f).padding(start = 16.dp),
+            modifier = Modifier.weight(1f).padding(start = Space.xl),
         )
     }
 }

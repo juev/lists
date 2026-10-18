@@ -67,7 +67,7 @@ object Sizes {
     /** A light icon of a field that is not set (R64). */
     val lightIcon = 20.dp
 
-    /** The circle a light icon is tapped in. */
+    /** The least side of a small tap target: the circle of a light icon, the list button of a card. */
     val lightTarget = 40.dp
 
     /** The least height of a chip and of the row of fields. */
