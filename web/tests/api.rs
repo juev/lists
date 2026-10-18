@@ -153,6 +153,34 @@ fn nothing_is_served_without_a_session() {
     );
 }
 
+/// R15, #374: a custom rule as the form of the page sends it, empty parts as null, is kept whole.
+#[test]
+fn r15_a_custom_rule_from_the_page_is_kept_whole() {
+    let web = web(Some("secret"));
+    let cookie = login(&web, "secret").unwrap();
+    let task = call(
+        &web,
+        &cookie,
+        json!({ "op": "quickAdd", "text": "полить цветы", "scope": "inbox" }),
+    );
+    let id = task["id"].as_str().unwrap().to_string();
+    let rules = [
+        json!({ "freq": "weekly", "interval": 2, "weekdays": [1, 3], "monthday": null, "nth": null, "nth_weekday": null,
+                "from_done": false, "count": 3, "until": null }),
+        json!({ "freq": "monthly", "interval": 2, "weekdays": [], "monthday": null, "nth": -1, "nth_weekday": 5,
+                "from_done": true, "count": null, "until": "2027-03-31" }),
+    ];
+    let kept = [
+        json!({ "freq": "weekly", "interval": 2, "weekdays": [1, 3], "from_done": false, "count": 3 }),
+        json!({ "freq": "monthly", "interval": 2, "nth": -1, "nth_weekday": 5, "from_done": true, "until": "2027-03-31" }),
+    ];
+    for (rule, expected) in rules.into_iter().zip(kept) {
+        call(&web, &cookie, json!({ "op": "setRepeat", "id": id, "value": rule }));
+        let detail = get(&web, &cookie, &format!("/api/task?id={id}"));
+        assert_eq!(detail["task"]["repeat"], expected);
+    }
+}
+
 #[test]
 fn a_task_from_quick_entry_to_the_trash() {
     let web = web(Some("secret"));
