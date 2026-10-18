@@ -15,6 +15,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.Arrangement
@@ -128,6 +129,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -140,6 +142,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.SpanStyle
@@ -153,6 +156,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import androidx.core.graphics.toColorInt
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
@@ -224,6 +228,8 @@ fun MainScreen(model: MainViewModel, onReminderSet: () -> Unit) {
     val selecting = selection != null
     var batchDialog by remember { mutableStateOf<String?>(null) }
     val rows = rememberLazyListState()
+    // R157: the row being dragged; a view of its own starts with none.
+    val reorder = remember(state.scope) { Reorder() }
     BackHandler(enabled = selecting) { model.endSelection() }
     var adding by rememberSaveable { mutableStateOf(false) }
     // R97: what the card held when it was closed, once the person asks for it back.
@@ -250,6 +256,7 @@ fun MainScreen(model: MainViewModel, onReminderSet: () -> Unit) {
                 state = state,
                 onSelect = { model.select(it); scope.launch { drawer.close() } },
                 onEditList = { editingList = it },
+                onMoveList = model::moveList,
                 onNewList = { creatingList = true },
                 onEditFilter = { editingFilter = it },
                 onNewFilter = { creatingFilter = true },
@@ -375,6 +382,9 @@ fun MainScreen(model: MainViewModel, onReminderSet: () -> Unit) {
                     }
                 } else {
                     // Room below the last row, so that the add button does not cover it.
+                    // R157: a row of a view sorted by hand is dragged to its place; the store learns the place when it is let go.
+                    val reorderable = state.reorderable()
+                    LaunchedEffect(state.sections) { reorder.forget() }
                     LazyColumn(Modifier.fillMaxSize(), state = rows, contentPadding = PaddingValues(bottom = 88.dp)) {
                         if (state.search == null) item(key = "title") { ViewTitle(state) }
                         if (eventsShown) item(key = "events") { EventsBlock(events) }
@@ -384,9 +394,24 @@ fun MainScreen(model: MainViewModel, onReminderSet: () -> Unit) {
                                     GroupHeading(title)
                                 }
                             }
-                            items(section.tasks, key = { rowKey(section.key, it.id) }) { task ->
+                            val shown = reorder.order?.takeIf { reorderable }
+                                ?.mapNotNull { id -> section.tasks.firstOrNull { it.id == id } }
+                                ?.takeIf { it.size == section.tasks.size } ?: section.tasks
+                            items(shown, key = { rowKey(section.key, it.id) }) { task ->
+                                val drag = if (reorderable) {
+                                    RowDrag(
+                                        onStart = { reorder.start(task.id, section.tasks.map { it.id }) },
+                                        onDrag = { dy -> reorder.drag(dy, rows) { rowKey(section.key, it) } },
+                                        onEnd = { slop -> reorder.drop(slop).also { if (it is Dropped.Moved) model.moveTask(it.id, it.after) } },
+                                        onCancel = reorder::cancel,
+                                    )
+                                } else null
+                                val lifted = reorder.dragging == task.id
                                 // One item for the row and its lines: the drag over the circles reads the task from the item (R109).
-                                Column {
+                                Column(
+                                    if (lifted) Modifier.zIndex(1f).graphicsLayer { translationY = reorder.offset; shadowElevation = 8f }
+                                    else Modifier.animateItem(),
+                                ) {
                                     if (selection != null) {
                                         Surface {
                                             TaskRow(
@@ -401,6 +426,7 @@ fun MainScreen(model: MainViewModel, onReminderSet: () -> Unit) {
                                         onOpen = { model.open(task.id) },
                                         onPickDue = { duePickerFor = task },
                                         model = model,
+                                        drag = drag,
                                     )
                                     // R22: the subtasks the search found the task by.
                                     state.found[task.id]?.forEach { FoundSubtask(it) }
@@ -770,7 +796,7 @@ fun swipeAction(offset: Float, width: Float): Swipe? = when {
  * grows pale with the finger and turns bright with a vibration at the threshold; only letting go past it acts.
  */
 @Composable
-private fun SwipeRow(task: TaskItem, state: UiState, onToggle: () -> Unit, onOpen: () -> Unit, onPickDue: () -> Unit, model: MainViewModel) {
+private fun SwipeRow(task: TaskItem, state: UiState, onToggle: () -> Unit, onOpen: () -> Unit, onPickDue: () -> Unit, model: MainViewModel, drag: RowDrag? = null) {
     val locked = task.deleted || task.isLog
     // The drag keeps the callback it was made with: it must reach the task as it is now, not as it was then.
     val toggle by rememberUpdatedState(onToggle)
@@ -818,7 +844,7 @@ private fun SwipeRow(task: TaskItem, state: UiState, onToggle: () -> Unit, onOpe
                         },
                     )
                 ),
-        ) { TaskRow(task, state, onToggle, onOpen, model, showOrigin = state.showsOrigin(), selectable = true) }
+        ) { TaskRow(task, state, onToggle, onOpen, model, showOrigin = state.showsOrigin(), selectable = true, drag = drag) }
     }
 }
 
@@ -843,8 +869,14 @@ fun TaskRow(
     // R109: set in the selection mode, where the whole row only selects.
     selected: Boolean? = null,
     onSelect: () -> Unit = {},
+    // R157: in a view sorted by hand the long press drags the row; let go in place, it opens the menu.
+    drag: RowDrag? = null,
 ) {
     var menu by remember { mutableStateOf(false) }
+    val haptic = LocalHapticFeedback.current
+    val menuLabel = str(R.string.more)
+    // The gesture outlives a recomposition: it reaches the drag of the row as it is now.
+    val currentDrag by rememberUpdatedState(drag)
     val done = task.done != null
     // R122: the spacing chosen in the settings; a subtask in a card keeps its own.
     val padding = if (subtask) 6.dp else LookPrefs.rowPadding(LookPrefs.rowSpacing(LocalContext.current)).dp
@@ -852,7 +884,26 @@ fun TaskRow(
         Modifier
             .fillMaxWidth()
             .then(
-                if (selected == null) Modifier.combinedClickable(onClick = onOpen, onLongClick = { menu = true })
+                if (selected == null && drag != null) {
+                    Modifier
+                        .combinedClickable(onClick = onOpen)
+                        // A screen reader has no drag: its long press still opens the menu.
+                        .semantics { onLongClick(menuLabel) { menu = true; true } }
+                        .pointerInput(task.id) {
+                            detectDragGesturesAfterLongPress(
+                                onDragStart = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    currentDrag?.onStart?.invoke()
+                                },
+                                onDrag = { change, amount ->
+                                    change.consume()
+                                    currentDrag?.onDrag?.invoke(amount.y)
+                                },
+                                onDragEnd = { if (currentDrag?.onEnd?.invoke(viewConfiguration.touchSlop) == Dropped.Still) menu = true },
+                                onDragCancel = { currentDrag?.onCancel?.invoke() },
+                            )
+                        }
+                } else if (selected == null) Modifier.combinedClickable(onClick = onOpen, onLongClick = { menu = true })
                 else Modifier
                     .background(if (selected) viewTint(ViewTint.Blue).copy(alpha = 0.12f) else Color.Transparent)
                     .toggleable(value = selected, role = Role.Checkbox, onValueChange = { onSelect() })
@@ -1144,6 +1195,7 @@ private fun Drawer(
     state: UiState,
     onSelect: (Scope) -> Unit,
     onEditList: (TaskList) -> Unit,
+    onMoveList: (id: String, after: String?) -> Unit,
     onNewList: () -> Unit,
     onEditFilter: (SavedFilter) -> Unit,
     onNewFilter: () -> Unit,
@@ -1168,9 +1220,43 @@ private fun Drawer(
             }
 
             DrawerHeading(str(R.string.lists))
-            for (list in state.lists.filter { it.id != "inbox" && !it.archived }) {
+            // R157: a list is dragged to its place; its rows are of one height, so the place is counted in rows.
+            val shownLists = state.lists.filter { it.id != "inbox" && !it.archived }
+            var draggedList by remember { mutableStateOf<String?>(null) }
+            var listOffset by remember { mutableFloatStateOf(0f) }
+            val rowHeight = with(LocalDensity.current) { DRAWER_ROW.toPx() }
+            val from = shownLists.indexOfFirst { it.id == draggedList }
+            val to = if (from < 0) -1 else landing(from, listOffset, rowHeight, shownLists.size)
+            for ((index, list) in shownLists.withIndex()) {
                 val scope = Scope.List(list.id)
-                DrawerItem(list.name, Icons.AutoMirrored.Outlined.List, list.openCount, state.scope == scope, tint = list.tint(), onLong = { onEditList(list) }) { onSelect(scope) }
+                val lifted = list.id == draggedList
+                val drag = RowDrag(
+                    onStart = { draggedList = list.id; listOffset = 0f },
+                    onDrag = { dy -> listOffset += dy },
+                    onEnd = { slop ->
+                        val start = shownLists.indexOfFirst { it.id == list.id }
+                        val end = landing(start, listOffset, rowHeight, shownLists.size)
+                        val travelled = abs(listOffset)
+                        draggedList = null
+                        listOffset = 0f
+                        when {
+                            end != start -> {
+                                val order = shownLists.map { it.id }.moved(start, end)
+                                onMoveList(list.id, placedAfter(order, list.id))
+                                Dropped.Moved(list.id, placedAfter(order, list.id))
+                            }
+                            travelled < slop -> Dropped.Still
+                            else -> Dropped.Kept
+                        }
+                    },
+                    onCancel = { draggedList = null; listOffset = 0f },
+                )
+                Box(
+                    if (lifted) Modifier.zIndex(1f).graphicsLayer { translationY = listOffset; shadowElevation = 8f }
+                    else Modifier.graphicsLayer { translationY = shiftOf(index, from, to) * rowHeight },
+                ) {
+                    DrawerItem(list.name, Icons.AutoMirrored.Outlined.List, list.openCount, state.scope == scope, tint = list.tint(), onLong = { onEditList(list) }, drag = drag) { onSelect(scope) }
+                }
             }
             DrawerItem(str(R.string.new_list), Icons.Outlined.Add, 0u, false, onClick = onNewList)
 
@@ -1233,6 +1319,9 @@ private fun DrawerHeading(text: String) {
     Text(text, Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }
 
+/** The height of a row of the panel of lists. */
+private val DRAWER_ROW = 56.dp
+
 /** R30: the counter of a project in the drawer, "done/total", shown for an empty project as well (R127). */
 internal fun projectCounter(done: UInt, total: UInt): String = "$done/$total"
 
@@ -1252,19 +1341,49 @@ private fun DrawerItem(
     counter: String? = null,
     onLong: (() -> Unit)? = null,
     leading: (@Composable () -> Unit)? = null,
+    // R157: a row that is put in order by hand: the long press drags it, let go in place it does [onLong].
+    drag: RowDrag? = null,
     onClick: () -> Unit,
 ) {
+    val configure = str(R.string.configure)
+    val haptic = LocalHapticFeedback.current
+    // The gesture outlives a recomposition: it reaches the drag and the settings of the row as they are now.
+    val currentDrag by rememberUpdatedState(drag)
+    val currentLong by rememberUpdatedState(onLong)
     Row(
         Modifier
             .fillMaxWidth()
-            .height(56.dp)
+            .height(DRAWER_ROW)
             .clip(CircleShape)
             .background(if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
-            .combinedClickable(
-                role = Role.Tab,
-                onLongClickLabel = if (onLong != null) str(R.string.configure) else null,
-                onLongClick = onLong,
-                onClick = onClick,
+            .then(
+                if (drag == null) {
+                    Modifier.combinedClickable(
+                        role = Role.Tab,
+                        onLongClickLabel = if (onLong != null) configure else null,
+                        onLongClick = onLong,
+                        onClick = onClick,
+                    )
+                } else {
+                    Modifier
+                        .combinedClickable(role = Role.Tab, onClick = onClick)
+                        // A screen reader has no drag: its long press still opens the settings.
+                        .semantics { if (onLong != null) onLongClick(configure) { onLong(); true } }
+                        .pointerInput(Unit) {
+                            detectDragGesturesAfterLongPress(
+                                onDragStart = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    currentDrag?.onStart?.invoke()
+                                },
+                                onDrag = { change, amount ->
+                                    change.consume()
+                                    currentDrag?.onDrag?.invoke(amount.y)
+                                },
+                                onDragEnd = { if (currentDrag?.onEnd?.invoke(viewConfiguration.touchSlop) == Dropped.Still) currentLong?.invoke() },
+                                onDragCancel = { currentDrag?.onCancel?.invoke() },
+                            )
+                        }
+                },
             )
             .semantics { this.selected = selected }
             .padding(start = 16.dp, end = 24.dp),
