@@ -224,7 +224,12 @@
     <string name="more">More</string>
     <string name="one_word">one word</string>
     <string name="remove_time">Remove time</string>
-    <string name="repeats_field">Number of repeats (empty: no end)</string>
+    <string name="repeats_field">Number of repeats</string>
+    <string name="repeat_ends">Ends</string>
+    <string name="repeat_end_never">Never</string>
+    <string name="repeat_end_count">After a number of repeats</string>
+    <string name="repeat_end_date">On a date</string>
+    <string name="repeat_end_day">Last repeat</string>
     <string name="archived_switch">Archived</string>
     <string name="via_webdav">Through WebDAV</string>
     <string name="local_only">Data is kept on this device only.</string>

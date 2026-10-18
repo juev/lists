@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
@@ -127,6 +128,7 @@ import org.evsyukov.lists.Secrets
 import org.evsyukov.lists.SystemCalendars
 import org.evsyukov.lists.TodayNotice
 import org.evsyukov.lists.dateLabel
+import org.evsyukov.lists.dayOf
 import org.evsyukov.lists.displayName
 import org.evsyukov.lists.every
 import org.evsyukov.lists.fromStore
@@ -804,6 +806,23 @@ internal fun TagDialog(known: List<String>, onDismiss: () -> Unit, onAdd: (Strin
     )
 }
 
+/** R15: how a custom rule ends. Only one of the count and the date is kept. */
+internal enum class RepeatEnd { Never, Count, Date }
+
+/** The ending a rule already has; a rule with both a count and a date is shown as ending on the date, as it does first. */
+internal fun Repeat?.ending(): RepeatEnd = when {
+    this?.until != null -> RepeatEnd.Date
+    this?.count != null -> RepeatEnd.Count
+    else -> RepeatEnd.Never
+}
+
+/** The count and the end date a rule gets for the [end] chosen; a count that is not a positive number is no end. */
+internal fun repeatEnd(end: RepeatEnd, count: String, until: String?): Pair<UInt?, String?> = when (end) {
+    RepeatEnd.Never -> null to null
+    RepeatEnd.Count -> count.toUIntOrNull()?.takeIf { it > 0u } to null
+    RepeatEnd.Date -> null to until?.let(::dayOf)
+}
+
 /** Presets first; the custom controls appear only when asked for. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -818,6 +837,10 @@ fun RepeatDialog(value: Repeat?, onPick: (Repeat?) -> Unit, onDismiss: () -> Uni
     var nthWeekday by rememberSaveable { mutableIntStateOf(value?.nthWeekday?.toInt() ?: 1) }
     var fromDone by rememberSaveable { mutableStateOf(value?.fromDone ?: false) }
     var count by rememberSaveable { mutableStateOf(value?.count?.toString().orEmpty()) }
+    var end by rememberSaveable { mutableStateOf(value.ending()) }
+    // A month from today until a date is picked, as on macOS.
+    var until by rememberSaveable { mutableStateOf(value?.until ?: java.time.LocalDate.now().plusDays(30).toString()) }
+    var pickUntil by rememberSaveable { mutableStateOf(false) }
 
     FormDialog(
         title = str(R.string.repeat),
@@ -876,14 +899,31 @@ fun RepeatDialog(value: Repeat?, onPick: (Repeat?) -> Unit, onDismiss: () -> Uni
                         }
                     }
                     SwitchRow(str(R.string.from_completion), fromDone) { fromDone = it }
-                    OutlinedTextField(
-                        value = count,
-                        onValueChange = { count = it.filter(Char::isDigit).take(2) },
-                        label = { Text(str(R.string.repeats_field)) },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.padding(top = 8.dp),
-                    )
+                    Text(str(R.string.repeat_ends), Modifier.padding(top = 8.dp), style = MaterialTheme.typography.labelLarge)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        for ((option, label) in listOf(RepeatEnd.Never to R.string.repeat_end_never, RepeatEnd.Count to R.string.repeat_end_count, RepeatEnd.Date to R.string.repeat_end_date)) {
+                            FilterChip(selected = end == option, onClick = { end = option }, label = { Text(str(label)) })
+                        }
+                    }
+                    when (end) {
+                        RepeatEnd.Never -> {}
+                        RepeatEnd.Count -> OutlinedTextField(
+                            value = count,
+                            onValueChange = { count = it.filter(Char::isDigit).take(2) },
+                            label = { Text(str(R.string.repeats_field)) },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.padding(top = 8.dp),
+                        )
+                        RepeatEnd.Date -> Row(
+                            Modifier.fillMaxWidth().clickable(role = Role.Button) { pickUntil = true }.heightIn(min = 48.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(str(R.string.repeat_end_day))
+                            Text(dateLabel(until), color = MaterialTheme.colorScheme.primary)
+                        }
+                    }
                 }
             }
         },
@@ -896,10 +936,10 @@ fun RepeatDialog(value: Repeat?, onPick: (Repeat?) -> Unit, onDismiss: () -> Uni
                             nth = if (monthlyByWeekday) nth else null,
                             nthWeekday = if (monthlyByWeekday) nthWeekday.toUInt() else null,
                             fromDone = fromDone,
-                            count = count.toUIntOrNull()?.takeIf { it > 0u },
-                            // The end date is set on the desktop; it is kept here, not edited.
-                            until = value?.until,
-                        ),
+                        ).let { rule ->
+                            val (times, last) = repeatEnd(end, count, until)
+                            rule.copy(count = times, until = last)
+                        },
                     )
                     onDismiss()
                 }) { Text(str(R.string.done)) }
@@ -907,6 +947,9 @@ fun RepeatDialog(value: Repeat?, onPick: (Repeat?) -> Unit, onDismiss: () -> Uni
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text(str(R.string.cancel)) } },
     )
+    if (pickUntil) {
+        MomentDialog(str(R.string.repeat_end_day), until, onPick = { picked -> if (picked != null) until = dayOf(picked) }, onDismiss = { pickUntil = false })
+    }
 }
 
 /**
