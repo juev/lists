@@ -986,12 +986,13 @@ fn parse_things(db: &Path, work: &Path) -> Result<Parsed> {
                 .and_then(|h| h.project.clone())
         })
     };
+    // In the Trash itself, or with its heading or project there (the project of a heading counts).
     let gone = |row: &ThingsRow| {
         row.trashed
-            || [row.project.as_deref(), row.heading.as_deref()]
+            || [project_of(row), row.heading.clone()]
                 .into_iter()
                 .flatten()
-                .any(|p| by_id.get(p).is_some_and(|p| p.trashed))
+                .any(|p| by_id.get(p.as_str()).is_some_and(|p| p.trashed))
     };
 
     // A repeating task is a template and the tasks it makes: the rule goes to the

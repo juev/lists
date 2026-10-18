@@ -392,6 +392,17 @@ fn i13_things_database_brings_areas_projects_dates_checklists_and_repeats() {
     std::fs::create_dir(&folder).unwrap();
     let source = format!("{}/tests/data/things.sqlite", env!("CARGO_MANIFEST_DIR"));
     std::fs::copy(&source, folder.join("main.sqlite")).unwrap();
+    // A task under a heading of a project in the Trash is in the Trash as well.
+    let conn = rusqlite::Connection::open(folder.join("main.sqlite")).unwrap();
+    conn.execute_batch(
+        "INSERT INTO TMTask (uuid, type, status, trashed, title, start, \"index\", creationDate) VALUES
+            ('gone-project', 1, 0, 1, 'Gone project', 1, 0, 0), ('gone-heading', 2, 0, 0, 'Gone heading', 1, 0, 0);
+         UPDATE TMTask SET project = 'gone-project' WHERE uuid = 'gone-heading';
+         INSERT INTO TMTask (uuid, type, status, trashed, title, start, heading, \"index\", creationDate)
+            VALUES ('gone-task', 0, 0, 0, 'Gone with its project', 1, 'gone-heading', 0, 0);",
+    )
+    .unwrap();
+    drop(conn);
     let before = std::fs::read(folder.join("main.sqlite")).unwrap();
     let path = folder.to_string_lossy().into_owned();
     let report = d.in_zone(0, || d.import_file(path.clone())).unwrap();
@@ -401,7 +412,7 @@ fn i13_things_database_brings_areas_projects_dates_checklists_and_repeats() {
         [
             "2 tasks were in Someday: they got the tag \"someday\".",
             "1 heading was not imported; their tasks stay in the project.",
-            "1 task was in the Trash and not imported.",
+            "3 tasks were in the Trash and not imported.",
             "1 repeating task was paused and not imported.",
         ]
     );
@@ -461,7 +472,13 @@ fn i13_things_database_brings_areas_projects_dates_checklists_and_repeats() {
         [false, true, true]
     );
     // Neither the trashed task, the heading nor the paused template came over.
-    for gone in ["Task 22", "Heading 5", "Task 1"] {
+    for gone in [
+        "Task 22",
+        "Heading 5",
+        "Task 1",
+        "Gone project",
+        "Gone with its project",
+    ] {
         assert!(all.iter().all(|t| t.title != gone), "{gone}");
     }
 
