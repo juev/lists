@@ -1053,7 +1053,7 @@ impl App {
                     };
                     let dir = std::env::temp_dir().join(format!("lists-upload-{}", uuid::Uuid::new_v4().simple()));
                     std::fs::create_dir_all(&dir).map_err(|e| AppError::Storage { msg: e.to_string() })?;
-                    // The name carries no meaning to the importer except as a Todoist list name.
+                    // The name carries no meaning to the importer except as a Todoist or OmniFocus list name.
                     let name = query(&url, "name")
                         .map(|n| n.replace(['/', '\\'], "_"))
                         .filter(|n| !n.is_empty())
