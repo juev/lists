@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Builds Lists.app in Release and packs it into dist/Lists-<version>-macos-arm64.dmg.
+# Builds Lists.app in Release, for Apple silicon and Intel, and packs it into
+# dist/Lists-<version>-macos-universal.dmg.
 #
 # With a "Developer ID Application" certificate in the keychain the app and the
 # disk image are signed with it, with the hardened runtime and a timestamp.
@@ -32,9 +33,10 @@ fi
 
 app="$root/apple/build/Build/Products/Release/Lists.app"
 version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")"
-dmg="$root/dist/Lists-$version-macos-arm64.dmg"
+dmg="$root/dist/Lists-$version-macos-universal.dmg"
 
 codesign --verify --deep --strict "$app"
+"$root/scripts/check-universal.sh" "$app"
 # The helper of quick entry: its launch agent names this place.
 if [ ! -d "$app/Contents/Library/LoginItems/ListsHelper.app" ]; then
     echo "macos: the helper of quick entry is not in the app" >&2
