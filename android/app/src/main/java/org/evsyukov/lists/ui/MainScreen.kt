@@ -184,6 +184,8 @@ import org.evsyukov.lists.rowDate
 import org.evsyukov.lists.str
 import org.evsyukov.lists.title
 import org.evsyukov.lists.today
+import org.evsyukov.lists.ui.theme.ViewTint
+import org.evsyukov.lists.ui.theme.viewTint
 import uniffi.lists_core.Priority
 import uniffi.lists_core.QuickParse
 import uniffi.lists_core.SavedFilter

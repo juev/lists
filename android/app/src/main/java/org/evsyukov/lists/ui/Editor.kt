@@ -145,6 +145,7 @@ import org.evsyukov.lists.str
 import org.evsyukov.lists.summary
 import org.evsyukov.lists.title
 import org.evsyukov.lists.today
+import org.evsyukov.lists.ui.theme.PriorityColors
 import org.evsyukov.lists.weekdayNames
 import uniffi.lists_core.Attachment
 import uniffi.lists_core.ConnectionCheck
@@ -451,7 +452,7 @@ fun EditorSheet(editing: Editing, state: UiState, model: MainViewModel, onRemind
                         task.repeat?.let { ValueChip(it.summary(), Icons.Outlined.Repeat, str(R.string.repeat)) { dialog = "repeat" } }
                         task.remind?.let { ValueChip(dateLabel(it), Icons.Outlined.Notifications, str(R.string.reminder)) { dialog = "remind" } }
                         if (task.priority != Priority.NONE) {
-                            ValueChip(task.priority.title(), Icons.Outlined.Flag, str(R.string.priority), color = PriorityColor) { dialog = "priority" }
+                            ValueChip(task.priority.title(), Icons.Outlined.Flag, str(R.string.priority), color = PriorityColors.chip) { dialog = "priority" }
                         }
                         for (tag in task.tags) {
                             ValueChip("#$tag", trailing = Icons.Outlined.Close, trailingLabel = str(R.string.remove_tag)) { model.change { it.removeTag(task.id, tag) } }

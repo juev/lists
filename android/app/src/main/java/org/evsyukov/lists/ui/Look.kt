@@ -14,8 +14,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Close
@@ -28,41 +26,21 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
 import org.evsyukov.lists.title
+import org.evsyukov.lists.ui.theme.Corners
+import org.evsyukov.lists.ui.theme.PriorityColors
+import org.evsyukov.lists.ui.theme.Sizes
+import org.evsyukov.lists.ui.theme.Space
+import org.evsyukov.lists.ui.theme.label
 import uniffi.lists_core.Priority
 
-// The colours of the icons of the built-in views (R79): the same as on macOS, a lighter shade in the dark look.
-// They come neither from a list nor from the dynamic palette.
-internal enum class ViewTint(val light: Long, val dark: Long) {
-    Blue(0xFF007AFF, 0xFF0A84FF),
-    Yellow(0xFFFFCC00, 0xFFFFD60A),
-    Pink(0xFFFF2D55, 0xFFFF375F),
-    Teal(0xFF30B0C7, 0xFF40C8E0),
-    Green(0xFF34C759, 0xFF30D158),
-    Gray(0xFF8E8E93, 0xFF98989D),
-}
-
-@Composable
-internal fun viewTint(tint: ViewTint): Color =
-    Color(if (MaterialTheme.colorScheme.surface.luminance() < 0.5f) tint.dark else tint.light)
-
-/** The colour of a priority, in a row and in a chip. */
-val PriorityColor = Color(0xFFE8890C)
-
 /** R72: the colour of the bar a row shows for the priority of its task; none for a task without one. */
-fun priorityBarColor(priority: Priority): Color? = when (priority) {
-    Priority.HIGH -> Color(0xFFE5484D)
-    Priority.MEDIUM -> PriorityColor
-    Priority.LOW -> Color(0xFF3B82F6)
-    else -> null
-}
+fun priorityBarColor(priority: Priority): Color? = PriorityColors.of(priority)
 
 /** R72: the bar after the mark of a row. Its place is kept for a task without a priority; [tall] is a row of two lines. */
 @Composable
@@ -71,10 +49,10 @@ fun PriorityBar(priority: Priority, tall: Boolean) {
     val name = priority.title()
     Box(
         Modifier
-            .padding(end = 10.dp)
-            .width(3.dp)
-            .height(if (tall) 34.dp else 20.dp)
-            .background(color ?: Color.Transparent, RoundedCornerShape(2.dp))
+            .padding(end = Space.chipInset)
+            .width(Sizes.priorityBar)
+            .height(if (tall) Sizes.priorityBarTall else Sizes.priorityBarShort)
+            .background(color ?: Color.Transparent, Corners.bar)
             .then(if (color != null) Modifier.semantics { contentDescription = name } else Modifier)
     )
 }
@@ -90,19 +68,19 @@ fun Mark(state: MarkState, description: String?, modifier: Modifier = Modifier, 
     val color = MaterialTheme.colorScheme.outline
     // R133: a record of a repeat whose completion can no longer be taken back shows the repeat icon instead.
     if (state == MarkState.History) {
-        Icon(Icons.Outlined.Repeat, description, modifier.size(16.dp), tint = color)
+        Icon(Icons.Outlined.Repeat, description, modifier.size(Sizes.mark), tint = color)
         return
     }
     Box(
         modifier
-            .size(16.dp)
-            .border(1.5.dp, color, if (round) CircleShape else RoundedCornerShape(5.dp))
+            .size(Sizes.mark)
+            .border(Sizes.stroke, color, if (round) Corners.round else Corners.mark)
             .semantics { if (description != null) contentDescription = description },
         contentAlignment = Alignment.Center,
     ) {
         when (state) {
-            MarkState.Done -> Icon(Icons.Outlined.Check, null, Modifier.size(12.dp), tint = color)
-            MarkState.Wont -> Icon(Icons.Outlined.Close, null, Modifier.size(12.dp), tint = color)
+            MarkState.Done -> Icon(Icons.Outlined.Check, null, Modifier.size(Sizes.markGlyph), tint = color)
+            MarkState.Wont -> Icon(Icons.Outlined.Close, null, Modifier.size(Sizes.markGlyph), tint = color)
             MarkState.Open, MarkState.History -> {}
         }
     }
@@ -123,25 +101,25 @@ fun ValueChip(
 ) {
     Row(
         Modifier
-            .clip(RoundedCornerShape(8.dp))
+            .clip(Corners.chip)
             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
             .clickable(enabled = onClick != null, role = Role.Button) { onClick?.invoke() }
-            .heightIn(min = 32.dp)
-            .padding(horizontal = 10.dp),
+            .heightIn(min = Sizes.chip)
+            .padding(horizontal = Space.chipInset),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(5.dp),
+        horizontalArrangement = Arrangement.spacedBy(Space.chipGap),
     ) {
-        if (icon != null) Icon(icon, label, Modifier.size(16.dp), tint = color)
-        Text(text, style = MaterialTheme.typography.labelLarge, color = color, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
-        if (trailing != null) Icon(trailing, trailingLabel, Modifier.size(14.dp), tint = MaterialTheme.colorScheme.outline)
+        if (icon != null) Icon(icon, label, Modifier.size(Sizes.mark), tint = color)
+        Text(text, style = MaterialTheme.typography.label, color = color, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+        if (trailing != null) Icon(trailing, trailingLabel, Modifier.size(Sizes.metaIcon), tint = MaterialTheme.colorScheme.outline)
     }
 }
 
 /** A field that is not set: a light icon without a caption at the right of the row of fields. */
 @Composable
 fun LightIcon(icon: ImageVector, label: String, onClick: () -> Unit) {
-    Box(Modifier.size(40.dp).clip(CircleShape).clickable(role = Role.Button, onClick = onClick), contentAlignment = Alignment.Center) {
-        Icon(icon, label, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.outline)
+    Box(Modifier.size(Sizes.lightTarget).clip(Corners.round).clickable(role = Role.Button, onClick = onClick), contentAlignment = Alignment.Center) {
+        Icon(icon, label, Modifier.size(Sizes.lightIcon), tint = MaterialTheme.colorScheme.outline)
     }
 }
 
@@ -149,8 +127,8 @@ fun LightIcon(icon: ImageVector, label: String, onClick: () -> Unit) {
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun FieldsRow(modifier: Modifier = Modifier, chips: @Composable () -> Unit, icons: @Composable RowScope.() -> Unit) {
-    FlowRow(modifier, horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    FlowRow(modifier, horizontalArrangement = Arrangement.spacedBy(Space.m), verticalArrangement = Arrangement.spacedBy(Space.s)) {
         chips()
-        Row(Modifier.weight(1f).heightIn(min = 32.dp), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically, content = icons)
+        Row(Modifier.weight(1f).heightIn(min = Sizes.chip), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically, content = icons)
     }
 }
