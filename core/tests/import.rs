@@ -501,6 +501,128 @@ fn i13_an_sqlite_file_of_another_app_is_refused() {
     assert!(d.tasks(Scope::All).unwrap().is_empty());
 }
 
+/// I14 on rows of a real OmniFocus 2 export, with their text replaced.
+#[test]
+fn i14_omnifocus_export_brings_projects_actions_groups_dates_and_completion() {
+    let d = device();
+    let file = format!("{}/tests/data/OmniFocus.csv", env!("CARGO_MANIFEST_DIR"));
+    let report = d.in_zone(0, || d.import_file(file.clone())).unwrap();
+    assert_eq!(
+        (report.source.as_str(), report.lists, report.tasks),
+        ("OmniFocus", 1, 64)
+    );
+    assert_eq!(
+        report.notes,
+        [
+            "4 tasks had an estimated duration, which is not imported.",
+            "An OmniFocus export has no repeat rules, folders or attachments.",
+        ]
+    );
+    let list = d.lists().unwrap().into_iter().find(|l| l.name == "OmniFocus").unwrap();
+    let projects = d.projects().unwrap();
+    assert_eq!(
+        titles(&projects),
+        ["Project 1", "Project 4", "Project 6", "Project 10", "Project 33"]
+    );
+    assert!(projects.iter().all(|p| p.list_id == list.id));
+    let in_project = |title: &str| {
+        let project = projects.iter().find(|p| p.title == title).unwrap();
+        d.tasks(Scope::Project { id: project.id.clone() }).unwrap()
+    };
+
+    // Actions are tasks of the project; an action group keeps its actions as subtasks.
+    let first = in_project("Project 1");
+    assert_eq!(titles(&first), ["Action 1.1", "Action 1.2", "Action 1.3", "Action 1.4"]);
+    assert_eq!(first[1].notes, "Note 1.2 line 1");
+    assert_eq!(
+        titles(&d.subtasks(first[2].id.clone()).unwrap()),
+        [
+            "Action 1.3.1",
+            "Action 1.3.2",
+            "Action 1.3.3",
+            "Action 1.3.4",
+            "Action 1.3.5"
+        ]
+    );
+    // Deeper levels come up to one (I9), right after their former parent.
+    let group = &in_project("Project 10")[0];
+    assert_eq!(group.notes, "Note 10.1 line 1\nNote 10.1 line 2");
+    assert_eq!(
+        titles(&d.subtasks(group.id.clone()).unwrap()),
+        [
+            "Action 10.1.1",
+            "Action 10.1.1.1",
+            "Action 10.1.1.2",
+            "Action 10.1.1.3",
+            "Action 10.1.1.3.1",
+            "Action 10.1.1.3.2"
+        ]
+    );
+
+    // Dates and completion in UTC, as the test zone reads them.
+    let done = in_project("Project 4")
+        .into_iter()
+        .find(|t| t.title == "Action 4.1")
+        .unwrap();
+    assert_eq!(done.due.as_deref(), Some("2018-11-20T12:00"));
+    assert_eq!(done.done.as_deref(), Some("2018-11-20T09:25"));
+    let finished = d.tasks(Scope::Completed).unwrap();
+    let project = finished.iter().find(|t| t.title == "Project 28").unwrap();
+    assert!(project.is_project && !project.wont);
+    assert_eq!(project.done.as_deref(), Some("2018-04-02T07:33"));
+
+    let again = d.in_zone(0, || d.import_file(file)).unwrap();
+    assert_eq!(again.tasks, 64);
+    assert_eq!(
+        d.projects().unwrap().len() + d.tasks(Scope::Completed).unwrap().len(),
+        projects.len() + finished.len()
+    );
+    assert_eq!(in_project("Project 1").len(), 4, "a second import adds nothing");
+    assert_eq!(d.subtasks(first[2].id.clone()).unwrap().len(), 5);
+}
+
+/// I14 for the columns of OmniFocus 3 and 4 as two independent descriptions give them.
+#[test]
+fn i14_omnifocus_3_and_4_columns_inbox_dropped_and_flagged() {
+    let d = device();
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("Work.csv");
+    std::fs::write(
+        &file,
+        "Task ID,Type,Name,Status,Project,Context,Start Date,Planned Date,Due Date,Completion Date,Duration,Flagged,Notes,Tags\r\n\
+         1,Inbox,Call back,,,Phone,,,,,,1,,\"Phone, Home\"\r\n\
+         2,Project,Garden,dropped,,,,,,,,0,,\r\n\
+         2.1,Action,Buy seeds,,Garden,,2026-09-07 07:00:00 +0000,2026-09-08 07:00:00 +0000,,,15m,0,,Errands\r\n",
+    )
+    .unwrap();
+    let report = d
+        .in_zone(0, || d.import_file(file.to_string_lossy().into_owned()))
+        .unwrap();
+    assert_eq!(
+        (report.source.as_str(), report.lists, report.tasks),
+        ("OmniFocus", 1, 3)
+    );
+    assert!(report
+        .notes
+        .contains(&"1 task had a planned date, which is not imported.".to_string()));
+    let inbox = d.tasks(Scope::Inbox).unwrap();
+    assert_eq!(titles(&inbox), ["Call back"]);
+    assert_eq!(inbox[0].priority, Priority::High, "flagged");
+    assert_eq!(inbox[0].tags, ["home", "phone"], "the Tags column wins over Context");
+    let dropped = d.tasks(Scope::WontDo).unwrap();
+    assert_eq!(titles(&dropped), ["Garden"]);
+    let seeds = &d
+        .tasks(Scope::Project {
+            id: dropped[0].id.clone(),
+        })
+        .unwrap()[0];
+    assert_eq!(
+        (seeds.title.as_str(), seeds.start.as_deref()),
+        ("Buy seeds", Some("2026-09-07T07:00"))
+    );
+    assert_eq!(seeds.tags, ["errands"]);
+}
+
 #[test]
 fn trello_board_json() {
     let d = device();

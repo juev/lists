@@ -359,6 +359,7 @@ Neither holds the content of the attachments or the trash. A backup (above) is t
 | Todoist | CSV template |
 | TickTick | backup, CSV (Settings → Account → Generate backup) |
 | Things 3 | its database, `main.sqlite` (below) |
+| OmniFocus | CSV export (File → Export…) |
 | Trello | board exported as JSON |
 | Microsoft To Do | lists as JSON |
 

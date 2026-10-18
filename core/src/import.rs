@@ -739,6 +739,113 @@ fn parse_ticktick(rows: &[Vec<String>]) -> Result<Parsed> {
     Ok(out)
 }
 
+// ---------------------------------------------------------------- OmniFocus
+
+/// Whether a CSV row is the header of an OmniFocus export.
+fn omnifocus_header(row: &[String]) -> bool {
+    ["Task ID", "Type", "Name"]
+        .iter()
+        .all(|name| row.iter().any(|h| h.trim() == *name))
+}
+
+/// An OmniFocus CSV export: one row per project and action, `Task ID` is the path in the outline.
+fn parse_omnifocus(rows: &[Vec<String>], name: &str) -> Result<Parsed> {
+    let header: Vec<&str> = rows
+        .first()
+        .filter(|r| omnifocus_header(r))
+        .ok_or_else(|| invalid("not an OmniFocus export: no Task ID, Type and Name columns"))?
+        .iter()
+        .map(|h| h.trim())
+        .collect();
+    let col = |name: &str| header.iter().position(|h| *h == name);
+    let get = |row: &Vec<String>, name: &str| {
+        col(name)
+            .and_then(|i| row.get(i))
+            .map(|v| v.replace("\r\n", "\n").trim().to_string())
+            .unwrap_or_default()
+    };
+    let moment = |text: &str| {
+        DateTime::parse_from_str(text, "%Y-%m-%d %H:%M:%S %z")
+            .ok()
+            .map(|d| local_moment(d.with_timezone(&Utc)))
+    };
+    let mut out = Parsed {
+        source: "OmniFocus",
+        ..Parsed::default()
+    };
+    out.lists.push(List {
+        key: name.to_string(),
+        name: name.to_string(),
+        ..List::default()
+    });
+    let ids: std::collections::HashSet<String> = rows.iter().skip(1).map(|r| get(r, "Task ID")).collect();
+    let (mut durations, mut planned) = (0u32, 0u32);
+    for row in rows.iter().skip(1) {
+        let id = get(row, "Task ID");
+        if id.is_empty() {
+            continue;
+        }
+        let kind = get(row, "Type");
+        // The parent is the nearest shorter path in the file: `1.3` for `1.3.2`, `1` for `1.3`.
+        let parent = (kind != "Inbox")
+            .then(|| {
+                let mut path = id.as_str();
+                while let Some((up, _)) = path.rsplit_once('.') {
+                    if ids.contains(up) {
+                        return Some(up.to_string());
+                    }
+                    path = up;
+                }
+                None
+            })
+            .flatten();
+        let status = get(row, "Status").to_lowercase();
+        let completed = get(row, "Completion Date");
+        let finished = !completed.is_empty() || matches!(status.as_str(), "done" | "completed" | "dropped");
+        let tags = match col("Tags") {
+            Some(_) => get(row, "Tags"),
+            None => get(row, "Context"),
+        };
+        if !get(row, "Duration").is_empty() {
+            durations += 1;
+        }
+        if !get(row, "Planned Date").is_empty() {
+            planned += 1;
+        }
+        out.tasks.push(Task {
+            key: id.clone(),
+            list: (kind != "Inbox").then(|| name.to_string()),
+            parent,
+            title: get(row, "Name"),
+            notes: get(row, "Notes"),
+            start: moment(&get(row, "Start Date")),
+            due: moment(&get(row, "Due Date")),
+            priority: if get(row, "Flagged") == "1" { 3 } else { 0 },
+            tags: tags.split(',').map(str::to_string).collect(),
+            done: finished.then(|| moment(&completed).unwrap_or_else(|| local_moment(Utc::now()))),
+            wont: status == "dropped",
+            project: kind == "Project",
+            ..Task::default()
+        });
+    }
+    let plural = |n: u32, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
+    if durations > 0 {
+        out.notes.push(format!(
+            "{} an estimated duration, which is not imported.",
+            plural(durations, "task had", "tasks had")
+        ));
+    }
+    if planned > 0 {
+        out.notes.push(format!(
+            "{} a planned date, which is not imported.",
+            plural(planned, "task had", "tasks had")
+        ));
+    }
+    out.notes
+        .push("An OmniFocus export has no repeat rules, folders or attachments.".into());
+    Ok(out)
+}
+
 // ---------------------------------------------------------------- Things 3
 
 /// The database version the importer was checked against (Things 3.24.1).
@@ -1752,7 +1859,7 @@ impl Store {
 impl Store {
     /// Imports a file exported from another task manager. The format is
     /// recognised from the content: a 2Do backup (`.2dodb`), a Todoist CSV
-    /// template, a TickTick CSV backup, a Things 3 database (`main.sqlite` or
+    /// template, a TickTick CSV backup, an OmniFocus CSV export, a Things 3 database (`main.sqlite` or
     /// its `.thingsdatabase` folder), a Trello board JSON, Microsoft To Do lists
     /// as JSON, or a JSON export of this app.
     pub fn import_file(&self, path: String) -> Result<ImportReport> {
@@ -1800,6 +1907,8 @@ impl Store {
                     let rows = csv(&text);
                     if rows.iter().take(16).any(|r| ticktick_header(r)) {
                         parse_ticktick(&rows)?
+                    } else if rows.first().is_some_and(|r| omnifocus_header(r)) {
+                        parse_omnifocus(&rows, &name)?
                     } else {
                         parse_todoist(&text, &name)?
                     }
