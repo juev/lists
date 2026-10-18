@@ -62,10 +62,12 @@ class Reorder {
 
     private var moved = false
     private var travel = 0f
+    private var initial: List<String> = emptyList()
 
     fun start(id: String, ids: List<String>) {
         dragging = id
         order = ids
+        initial = ids
         offset = 0f
         moved = false
         travel = 0f
@@ -100,7 +102,8 @@ class Reorder {
         val id = dragging
         val now = order
         val result = when {
-            id != null && now != null && moved -> Dropped.Moved(id, placedAfter(now, id))
+            // Taken away and brought back is no move.
+            id != null && now != null && moved && now != initial -> Dropped.Moved(id, placedAfter(now, id))
             travel < slop -> Dropped.Still
             else -> Dropped.Kept
         }

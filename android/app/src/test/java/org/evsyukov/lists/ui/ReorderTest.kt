@@ -55,4 +55,11 @@ class ReorderTest {
         assertEquals(null, reorder.dragging)
         assertEquals(null, reorder.order)
     }
+
+    @Test
+    fun r157_a_row_dragged_back_to_its_place_is_not_moved() {
+        val reorder = Reorder()
+        reorder.start("a", listOf("a", "b"))
+        assertEquals(Dropped.Kept, reorder.drop(slop = 0f))
+    }
 }
