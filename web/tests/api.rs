@@ -1940,4 +1940,5 @@ fn r162_the_sidebar_has_the_icons_of_the_apps_and_a_settings_heading() {
     }
     assert!(page.contains(r#"{ class: "side-title" }, t("Settings"))"#));
     assert!(!page.contains("text-transform: uppercase"));
+    assert!(page.contains("@media (min-width: 721px) { body { font-size: 14px; } }"));
 }
