@@ -103,11 +103,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -1322,6 +1324,7 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
                                 SectionRow(Icons.Outlined.FileDownload, str(R.string.import_file)) { pickImport.launch(arrayOf("*/*")) }
                                 SectionRow(Icons.Outlined.FileUpload, str(R.string.export_file)) { choosing = "export" }
                             }
+                            AboutLine(runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull() ?: "?")
                         }
                         "general" -> {
                             SettingRow(str(R.string.appearance), lookLabels[LookPrefs.choices.indexOf(LookPrefs.appearance(context))]) { choosing = "appearance" }
@@ -1750,6 +1753,21 @@ private fun SectionRow(icon: ImageVector, title: String, onClick: () -> Unit) {
         }
         Text(title, Modifier.padding(start = Space.xl), style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
     }
+}
+
+/** R160: the version and the author under the sections; the name is the same in both languages. */
+@Composable
+fun AboutLine(version: String) {
+    val uriHandler = LocalUriHandler.current
+    Text(
+        "Lists $version · Denis Evsyukov",
+        Modifier.fillMaxWidth()
+            .clickable(role = Role.Button) { runCatching { uriHandler.openUri("https://denis.evsyukov.org") } }
+            .heightIn(min = Sizes.touch).padding(horizontal = Space.xl, vertical = Space.m),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        textAlign = TextAlign.Center,
+    )
 }
 
 /** R159: the icon of a section of the settings (R101). */
