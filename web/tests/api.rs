@@ -1917,3 +1917,27 @@ fn r160_the_page_names_the_version_and_the_author() {
     assert!(page.contains("https://denis.evsyukov.org"));
     assert!(page.contains("Denis Evsyukov"));
 }
+
+#[test]
+fn r162_the_sidebar_has_the_icons_of_the_apps_and_a_settings_heading() {
+    let web = web(Some("secret"));
+    let page = ureq::get(&format!("{}/", web.base))
+        .call()
+        .unwrap()
+        .into_string()
+        .unwrap();
+    // The colours of R79 in the light and the dark look.
+    for colour in [
+        "#007aff", "#ffcc00", "#ff2d55", "#30b0c7", "#34c759", "#8e8e93", "#0a84ff", "#ffd60a",
+    ] {
+        assert!(page.contains(colour), "{colour}");
+    }
+    for view in ["inbox", "today", "upcoming", "all", "completed", "wontdo", "trash"] {
+        assert!(
+            page.contains(&format!("{{ icon: \"{view}\"")) || page.contains(&format!("icon: \"{view}\" }}")),
+            "{view}"
+        );
+    }
+    assert!(page.contains(r#"{ class: "side-title" }, t("Settings"))"#));
+    assert!(!page.contains("text-transform: uppercase"));
+}
