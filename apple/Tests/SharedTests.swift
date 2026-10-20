@@ -89,7 +89,17 @@ final class SidebarFoldingTests: XCTestCase {
     }
 }
 
-/// The bindings reach the Rust core:the static library is linked and a store opens and takes a task.
+/// R161: the sidebar grows half as fast as the tasks.
+final class SidebarTextTests: XCTestCase {
+    func testTheSidebarGrowsHalfAsFastAsTheTasks() {
+        XCTAssertEqual(SidebarText.scale(1), 1)
+        XCTAssertEqual(SidebarText.scale(1.15), 1.075, accuracy: 0.0001)
+        XCTAssertEqual(13 * SidebarText.scale(1.5), 16.25, accuracy: 0.0001)
+        XCTAssertEqual(SidebarText.scale(0.9), 0.95, accuracy: 0.0001)
+    }
+}
+
+/// The bindings reach the Rust core: the static library is linked and a store opens and takes a task.
 final class CoreTests: XCTestCase {
     func testAStoreOpensThroughTheBindingsAndTakesATask() throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("lists-tests-\(UUID().uuidString)")

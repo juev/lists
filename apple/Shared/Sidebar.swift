@@ -24,3 +24,10 @@ enum SidebarFolding {
         folded ? rows.filter(isOpen) : rows
     }
 }
+
+/// R161: the text of the sidebar grows half as fast as the text of the tasks, so that its narrow column
+/// does not look larger than the list.
+enum SidebarText {
+    /// The factor of the sidebar at the size step `textScale` (R35).
+    static func scale(_ textScale: Double) -> Double { 1 + (textScale - 1) / 2 }
+}

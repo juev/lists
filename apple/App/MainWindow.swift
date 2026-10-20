@@ -22,13 +22,16 @@ struct MainWindow: View {
     @Environment(\.undoManager) private var undoManager
     @Environment(\.openWindow) private var openWindow
 
+    private var sidebarScale: CGFloat { SidebarText.scale(model.textScale) }
+
     var body: some View {
         @Bindable var model = model
         NavigationSplitView {
             Sidebar()
                 // Set per column: the split view does not pass the font down from the window.
                 .font(AppFont.style(.body))
-                .navigationSplitViewColumnWidth(min: 190, ideal: 220, max: 320)
+                // R161: the column is as much wider as the text of the sidebar is larger.
+                .navigationSplitViewColumnWidth(min: 190 * sidebarScale, ideal: 220 * sidebarScale, max: 320 * sidebarScale)
         } detail: {
             TaskListView()
                 .font(AppFont.style(.body))
