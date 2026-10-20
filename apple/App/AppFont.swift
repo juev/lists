@@ -26,7 +26,9 @@ enum RowSpacing {
 /// macOS has no system-wide text size for apps to follow, so the app keeps its
 /// own: every text style is the system size for that style times a factor.
 enum AppFont {
-    static let scales: [(String, Double)] = [("Small", 0.9), ("Default", 1.0), ("Large", 1.15), ("Larger", 1.3), ("Largest", 1.5)]
+    static let scales: [(String, Double)] = [("Small", 0.9), ("Regular", 1.0), ("Large", 1.15), ("Larger", 1.3), ("Largest", 1.5)]
+    /// The size of a Mac on which none was chosen: the system one reads small in the window of Lists (R35, #397).
+    static let defaultScale = 1.15
     static let designs: [(String, String)] = [("System", "default"), ("Rounded", "rounded"), ("Serif", "serif"), ("Monospaced", "monospaced")]
 
     static let scaleKey = "textScale"
@@ -66,11 +68,11 @@ enum AppFont {
         return .system(size: size, weight: weight ?? headline ?? .regular, design: design(model.fontDesign))
     }
 
-    /// The same font for AppKit views.
+    /// The same font for AppKit views; `scale` stands in for the chosen size, as the sidebar's does (R161).
     @MainActor
-    static func native(_ style: Font.TextStyle) -> NSFont {
+    static func native(_ style: Font.TextStyle, scale: Double? = nil) -> NSFont {
         let model = AppModel.shared
-        let size = NSFont.preferredFont(forTextStyle: base(style)).pointSize * model.textScale
+        let size = NSFont.preferredFont(forTextStyle: base(style)).pointSize * (scale ?? model.textScale)
         let system = NSFont.systemFont(ofSize: size)
         let design: NSFontDescriptor.SystemDesign
         switch model.fontDesign {
@@ -80,5 +82,11 @@ enum AppFont {
         default: return system
         }
         return system.fontDescriptor.withDesign(design).flatMap { NSFont(descriptor: $0, size: size) } ?? system
+    }
+
+    /// R161: a font of the sidebar, which grows half as fast as the text of the tasks.
+    @MainActor
+    static func sidebar(_ style: Font.TextStyle) -> NSFont {
+        native(style, scale: SidebarText.scale(AppModel.shared.textScale))
     }
 }

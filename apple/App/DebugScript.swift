@@ -896,7 +896,7 @@ enum DebugScript {
                         image.size = size
                         page.cacheDisplay(in: page.bounds, to: image)
                         try? image.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: argument))
-                        print("debug: sidebar drawn, \(rows.count) rows: \(coordinator.titles)")
+                        print("debug: sidebar drawn, \(rows.count) rows: \(coordinator.titles), text scale \(model.textScale), sidebar \(AppFont.sidebar(.body).pointSize), tasks \(AppFont.native(.body).pointSize)")
                     }
                 case "viewicons":
                     let scopes: [Scope] = [.inbox, .today, .upcoming, .all, .completed, .wontDo, .trash]

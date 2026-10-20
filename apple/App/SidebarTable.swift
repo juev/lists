@@ -220,11 +220,11 @@ struct SidebarTable: NSViewRepresentable {
         func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? { SidebarRowView() }
 
         func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
-            let line = TaskTableMetrics.lineHeight(AppFont.native(.body))
+            let line = TaskTableMetrics.lineHeight(AppFont.sidebar(.body))
             switch rows[row] {
             // As the sidebar of SwiftUI had them at the usual size of text: 32 points a view, 19 a heading;
             // a heading has room above it, so that the sections read as groups (R161).
-            case .heading: return TaskTableMetrics.lineHeight(TaskTableMetrics.headingFont) + 5 + SidebarHeadingCell.room
+            case .heading: return TaskTableMetrics.lineHeight(SidebarHeadingCell.font) + 5 + SidebarHeadingCell.room
             case .item: return line + 16
             }
         }
@@ -402,6 +402,11 @@ final class SidebarHeadingCell: NSTableCellView {
     /// R161: the room above a heading, apart from the last row of the section before it.
     static let room: CGFloat = 14
 
+    /// The font of a heading: that of the task list, at the size of the sidebar (R161).
+    static var font: NSFont {
+        NSFontManager.shared.convert(AppFont.sidebar(.subheadline), toHaveTrait: .boldFontMask)
+    }
+
     private let title = NSTextField(labelWithString: "")
     /// The whole heading as a button: it collapses and expands the section.
     private let fold = NSButton()
@@ -434,10 +439,10 @@ final class SidebarHeadingCell: NSTableCellView {
     func configure(_ text: String, add: (() -> Void)?, folded: Bool?, toggle: (() -> Void)?) {
         self.add = add
         self.toggle = toggle
-        title.font = TaskTableMetrics.headingFont
+        title.font = SidebarHeadingCell.font
         title.stringValue = text
         plus.isHidden = add == nil
-        plus.image = .symbol("plus", AppFont.native(.body))
+        plus.image = .symbol("plus", AppFont.sidebar(.body))
         let help = switch text {
         case L("Lists"): L("New list")
         case L("Projects"): L("New project")
@@ -448,7 +453,7 @@ final class SidebarHeadingCell: NSTableCellView {
         fold.isHidden = folded == nil
         chevron.isHidden = folded == nil
         if let folded {
-            chevron.image = .symbol(folded ? "chevron.right" : "chevron.down", TaskTableMetrics.headingFont, weight: .semibold)
+            chevron.image = .symbol(folded ? "chevron.right" : "chevron.down", SidebarHeadingCell.font, weight: .semibold)
             fold.setAccessibilityLabel(text)
             fold.setAccessibilityValue(folded ? L("Collapsed") : L("Expanded"))
         }
@@ -462,7 +467,7 @@ final class SidebarHeadingCell: NSTableCellView {
     override func layout() {
         super.layout()
         // The title, the plus and the chevron stand at the bottom, next to the rows they head; the room is above.
-        let line = TaskTableMetrics.lineHeight(TaskTableMetrics.headingFont)
+        let line = TaskTableMetrics.lineHeight(SidebarHeadingCell.font)
         let band = bounds.height - Self.room
         func centered(_ size: NSSize, x: CGFloat) -> NSRect {
             NSRect(x: x, y: ((band - size.height) / 2).rounded(), width: size.width, height: size.height)
@@ -506,7 +511,7 @@ final class SidebarItemCell: NSTableCellView {
     required init?(coder: NSCoder) { fatalError("not used") }
 
     func configure(_ item: SidebarItem, model: AppModel) {
-        let font = AppFont.native(.body)
+        let font = AppFont.sidebar(.body)
         if case .project(let done, let total) = item.kind, case .project(let id) = item.scope {
             icon.isHidden = true
             mark.isHidden = false
@@ -544,7 +549,7 @@ final class SidebarItemCell: NSTableCellView {
 
     override func layout() {
         super.layout()
-        let line = TaskTableMetrics.lineHeight(AppFont.native(.body))
+        let line = TaskTableMetrics.lineHeight(AppFont.sidebar(.body))
         let height = bounds.height
         func centered(_ size: NSSize, x: CGFloat) -> NSRect { NSRect(x: x, y: ((height - size.height) / 2).rounded(), width: size.width, height: size.height) }
         let lead: CGFloat = 4
