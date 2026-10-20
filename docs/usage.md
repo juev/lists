@@ -366,3 +366,7 @@ Neither holds the content of the attachments or the trash. A backup (above) is t
 Import from File → Import… on macOS, from Settings on Android, from the sidebar in the web interface. Importing the same file again updates what is already there. What each importer carries over, and what it cannot, is in [specs/import.md](specs/import.md).
 
 Things has no export file; Lists reads its database. It lies in `~/Library/Group Containers/JLMPQHK86H.com.culturedcode.ThingsMac/ThingsData-…/`: the folder `Things Database.thingsdatabase` is the live database, and `Backups` holds the copies Things makes on its own. In the open panel press ⇧⌘G to type the path, then choose a `.thingsdatabase` item: macOS shows it as one file. Lists reads a copy and never changes the database of Things. On Android and in the web interface, upload a `main.sqlite` from `Backups`: the live one may keep its latest changes in a separate log file next to it.
+
+## Version and author
+
+The version of the app and its author, with a link to https://denis.evsyukov.org, are in Lists → About Lists on macOS, at the bottom of Settings on Android and at the bottom of the sidebar in the web interface. Give the version when reporting a problem.
