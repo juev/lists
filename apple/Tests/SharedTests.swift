@@ -72,7 +72,24 @@ final class PriorityTests: XCTestCase {
     }
 }
 
-/// The bindings reach the Rust core: the static library is linked and a store opens and takes a task.
+/// R161: the sections of the sidebar collapse, and the row of the open view stays.
+final class SidebarFoldingTests: XCTestCase {
+    func testACollapsedSectionKeepsOnlyTheRowOfTheOpenView() {
+        let lists = ["Work", "Home", "Trip"]
+        XCTAssertEqual(SidebarFolding.shown(lists, folded: true) { $0 == "Home" }, ["Home"])
+        XCTAssertEqual(SidebarFolding.shown(lists, folded: true) { _ in false }, [])
+        XCTAssertEqual(SidebarFolding.shown(lists, folded: false) { $0 == "Home" }, lists)
+    }
+
+    func testTheCollapsedSectionsAreKeptByName() {
+        XCTAssertEqual(SidebarFolding.stored([.filters, .lists]), ["lists", "filters"])
+        XCTAssertEqual(SidebarFolding.folded(["filters", "lists"]), [.lists, .filters])
+        XCTAssertEqual(SidebarFolding.folded(["archive", "tags"]), [.tags], "a name of no section is left out")
+        XCTAssertEqual(SidebarFolding.folded(nil), [])
+    }
+}
+
+/// The bindings reach the Rust core:the static library is linked and a store opens and takes a task.
 final class CoreTests: XCTestCase {
     func testAStoreOpensThroughTheBindingsAndTakesATask() throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("lists-tests-\(UUID().uuidString)")

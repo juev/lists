@@ -58,7 +58,7 @@ import UserNotifications
 /// a hidden app shows no popovers; key presses then go to the open popover first, as they do when it has the keyboard),
 /// `wont` (closes the selected task as "won't do"; `task` prints the state of the selected task), `go:completed`, `go:wontdo`, `go:today`, `go:all`, `go:trash`, `go:#tag`, `go:List name` and `go:Project title` (switch to those views),
 /// `hideinbox:List name=move` (hides Inbox the way the dialog of R121 does, `=keep` without moving, `hideinbox:show` shows it; alone it prints the setting and the default list),
-/// `completedview:on` and `completedview:off` (show the Completed and Won't do views always or never), `sidebarshow:wontDo=filled` (sets when a built-in view has a row in the sidebar: `always`, `filled` or `never`; `sidebarshow` alone prints the built-in rows there are), `scope` (prints the current view), `quit` (quits the app the way ⌘Q does), `search` (prints whether search is open as a field and its text),
+/// `completedview:on` and `completedview:off` (show the Completed and Won't do views always or never), `sidebarshow:wontDo=filled` (sets when a built-in view has a row in the sidebar: `always`, `filled` or `never`; `sidebarshow` alone prints the built-in rows there are), `fold:lists` (collapses that section of the sidebar or expands it, R161), `sidebarshot:/path/to.png` (draws the rows of the sidebar into a file from a window that is never shown), `scope` (prints the current view), `quit` (quits the app the way ⌘Q does), `search` (prints whether search is open as a field and its text),
 /// `calendarevents` (prints the setting of R78, the access the system gave, and how many calendars are listed and hidden; nothing is asked of the system),
 /// `events:14:30=Bank,-=Birthday,09:00=Standup,y=Trip` (puts those events through the order of the block in place of the calendars of the system:
 /// `-` is an all-day event, `y` one that began yesterday) and `events` alone print whether the block is on show and its lines,
@@ -477,6 +477,9 @@ enum DebugScript {
                     } else {
                         print("debug: sidebar shows \(AppModel.shared.shownBuiltins.compactMap(\.builtinName))")
                     }
+                case "fold":
+                    // R161: `fold:lists` collapses that section of the sidebar or expands it, as a click on its heading does.
+                    if let section = SidebarSection(rawValue: argument) { AppModel.shared.foldedSections.formSymmetricDifference([section]) }
                 case "hideinbox":
                     // `hideinbox:List name=move` hides Inbox the way the dialog of R121 does (`=keep` without moving);
                     // `hideinbox:show` shows it again; alone it prints the setting, the default lists and the Inbox counter.
@@ -861,6 +864,39 @@ enum DebugScript {
                             try? image.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: argument))
                             print("debug: row drawn, \(image.pixelsWide)x\(image.pixelsHigh) pixels, text scale \(model.textScale), design \(model.fontDesign)")
                         }
+                    }
+                case "sidebarshot":
+                    // The rows of the sidebar drawn into a file, four pixels to a point, from a window that is never shown:
+                    // a hidden window draws no rows. The selection is not drawn.
+                    let model = AppModel.shared
+                    let coordinator = SidebarTable.Coordinator(model: model)
+                    let rows = SidebarRow.rows(model)
+                    let table = NSTableView()
+                    let width: CGFloat = 240
+                    coordinator.use(rows)
+                    let heights = rows.indices.map { coordinator.tableView(table, heightOfRow: $0) }
+                    let size = NSSize(width: width, height: heights.reduce(0, +))
+                    let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.borderless], backing: .buffered, defer: true)
+                    window.isReleasedWhenClosed = false
+                    window.appearance = NSAppearance(named: .aqua)
+                    let page = FillView(frame: NSRect(origin: .zero, size: size))
+                    page.color = .white
+                    window.contentView = page
+                    var top = size.height
+                    for (index, height) in heights.enumerated() {
+                        top -= height
+                        guard let cell = coordinator.tableView(table, viewFor: nil, row: index) else { continue }
+                        cell.frame = NSRect(x: 10, y: top, width: width - 20, height: height)
+                        page.addSubview(cell)
+                        cell.layoutSubtreeIfNeeded()
+                    }
+                    if let image = NSBitmapImageRep(
+                        bitmapDataPlanes: nil, pixelsWide: Int(size.width) * 4, pixelsHigh: Int(size.height) * 4, bitsPerSample: 8,
+                        samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0) {
+                        image.size = size
+                        page.cacheDisplay(in: page.bounds, to: image)
+                        try? image.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: argument))
+                        print("debug: sidebar drawn, \(rows.count) rows: \(coordinator.titles)")
                     }
                 case "viewicons":
                     let scopes: [Scope] = [.inbox, .today, .upcoming, .all, .completed, .wontDo, .trash]

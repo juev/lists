@@ -24,7 +24,8 @@ struct SidebarItem: Equatable {
 
 /// A row of the sidebar (#308).
 enum SidebarRow: Equatable {
-    case heading(String, add: SidebarAdd?)
+    /// A heading; with a section it collapses and expands it (R161).
+    case heading(String, add: SidebarAdd?, section: SidebarSection? = nil, folded: Bool = false)
     case item(SidebarItem)
 
     var item: SidebarItem? {
@@ -51,27 +52,35 @@ enum SidebarRow: Equatable {
         builtin(.wontDo, count: 0)
         builtin(.trash, count: model.counts.trash)
 
-        rows.append(.heading(L("Lists"), add: .list))
-        for list in model.lists where list.id != "inbox" && !list.archived {
+        // R161: a collapsed section keeps only the row of the open view.
+        func heading(_ title: String, add: SidebarAdd?, _ section: SidebarSection) {
+            rows.append(.heading(title, add: add, section: section, folded: model.foldedSections.contains(section)))
+        }
+        func shown<T>(_ items: [T], _ section: SidebarSection, scope: (T) -> Scope) -> [T] {
+            SidebarFolding.shown(items, folded: model.foldedSections.contains(section)) { scope($0) == model.scope }
+        }
+
+        heading(L("Lists"), add: .list, .lists)
+        for list in shown(model.lists.filter({ $0.id != "inbox" && !$0.archived }), .lists, scope: { .list(id: $0.id) }) {
             rows.append(.item(SidebarItem(
                 scope: .list(id: list.id), title: list.name, symbol: list.symbol, tint: list.tint,
                 count: list.openCount > 0 ? "\(list.openCount)" : nil, kind: .list)))
         }
         if !model.tags.isEmpty {
-            rows.append(.heading(L("Tags"), add: nil))
-            for tag in model.tags {
+            heading(L("Tags"), add: nil, .tags)
+            for tag in shown(model.tags, .tags, scope: { .tag(name: $0.name) }) {
                 rows.append(.item(SidebarItem(scope: .tag(name: tag.name), title: tag.name, symbol: "number", count: "\(tag.openCount)", kind: .tag)))
             }
         }
         // Shown even when empty, as Filters is: the heading is where a project is made (R127).
-        rows.append(.heading(L("Projects"), add: .project))
-        for project in model.projects {
+        heading(L("Projects"), add: .project, .projects)
+        for project in shown(model.projects, .projects, scope: { .project(id: $0.id) }) {
             rows.append(.item(SidebarItem(
                 scope: .project(id: project.id), title: project.title, tint: model.list(project.listId)?.tint,
                 count: "\(project.subtasksDone)/\(project.subtasksTotal)", kind: .project(done: project.subtasksDone, total: project.subtasksTotal))))
         }
-        rows.append(.heading(L("Filters"), add: .filter))
-        for filter in model.filters {
+        heading(L("Filters"), add: .filter, .filters)
+        for filter in shown(model.filters, .filters, scope: { .filter(id: $0.id) }) {
             rows.append(.item(SidebarItem(
                 scope: .filter(id: filter.id), title: filter.name, symbol: "line.3.horizontal.decrease.circle",
                 count: filter.openCount > 0 ? "\(filter.openCount)" : nil, kind: .filter)))
@@ -150,7 +159,7 @@ struct SidebarTable: NSViewRepresentable {
         var titles: [String] {
             rows.map { row in
                 switch row {
-                case .heading(let title, _): "[\(title)]"
+                case .heading(let title, _, _, let folded): "[\(title)\(folded ? " ▸" : "")]"
                 case .item(let item): item.title + (item.count.map { " \($0)" } ?? "")
                 }
             }
@@ -181,6 +190,11 @@ struct SidebarTable: NSViewRepresentable {
             syncing = false
         }
 
+        #if DEBUG
+        /// The rows without a table, for `sidebarshot` of the debug script.
+        func use(_ rows: [SidebarRow]) { self.rows = rows }
+        #endif
+
         func row(_ index: Int) -> SidebarRow? { rows.indices.contains(index) ? rows[index] : nil }
 
         // MARK: Data source and delegate
@@ -189,9 +203,12 @@ struct SidebarTable: NSViewRepresentable {
 
         func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
             switch rows[row] {
-            case .heading(let title, let add):
+            case .heading(let title, let add, let section, let folded):
                 let cell = tableView.makeView(withIdentifier: SidebarHeadingCell.identifier, owner: nil) as? SidebarHeadingCell ?? SidebarHeadingCell()
-                cell.configure(title, add: add.map { add in { [weak self] in self?.create(add) } })
+                cell.configure(
+                    title, add: add.map { add in { [weak self] in self?.create(add) } },
+                    folded: section.map { _ in folded },
+                    toggle: section.map { section in { [weak self] in self?.toggle(section) } })
                 return cell
             case .item(let item):
                 let cell = tableView.makeView(withIdentifier: SidebarItemCell.identifier, owner: nil) as? SidebarItemCell ?? SidebarItemCell()
@@ -205,8 +222,9 @@ struct SidebarTable: NSViewRepresentable {
         func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
             let line = TaskTableMetrics.lineHeight(AppFont.native(.body))
             switch rows[row] {
-            // As the sidebar of SwiftUI had them at the usual size of text: 32 points a view, 19 a heading.
-            case .heading: return TaskTableMetrics.lineHeight(TaskTableMetrics.headingFont) + 5
+            // As the sidebar of SwiftUI had them at the usual size of text: 32 points a view, 19 a heading;
+            // a heading has room above it, so that the sections read as groups (R161).
+            case .heading: return TaskTableMetrics.lineHeight(TaskTableMetrics.headingFont) + 5 + SidebarHeadingCell.room
             case .item: return line + 16
             }
         }
@@ -218,6 +236,11 @@ struct SidebarTable: NSViewRepresentable {
             model.search = ""
             model.searchOpen = false
             if model.scope != item.scope { model.scope = item.scope }
+        }
+
+        /// R161: collapses the section or expands it again.
+        func toggle(_ section: SidebarSection) {
+            model.foldedSections.formSymmetricDifference([section])
         }
 
         private func create(_ add: SidebarAdd) {
@@ -272,9 +295,9 @@ struct SidebarTable: NSViewRepresentable {
 
         // MARK: Dragging (R123)
 
-        /// The lists are put in order by dragging them within their section.
+        /// The lists are put in order by dragging them within their section; a collapsed one is not (R161).
         func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> (any NSPasteboardWriting)? {
-            guard let item = rows[row].item, item.kind == .list, case .list(let id) = item.scope else { return nil }
+            guard !model.foldedSections.contains(.lists), let item = rows[row].item, item.kind == .list, case .list(let id) = item.scope else { return nil }
             let pasteboard = NSPasteboardItem()
             pasteboard.setString(id, forType: Self.listType)
             return pasteboard
@@ -372,31 +395,44 @@ final class SidebarRowView: NSTableRowView {
     }
 }
 
-/// A heading of the sidebar with the plus that adds to its section.
+/// A heading of the sidebar with the plus that adds to its section; a click on it collapses the section (R161).
 @MainActor
 final class SidebarHeadingCell: NSTableCellView {
     static let identifier = NSUserInterfaceItemIdentifier("sidebarHeading")
+    /// R161: the room above a heading, apart from the last row of the section before it.
+    static let room: CGFloat = 14
 
     private let title = NSTextField(labelWithString: "")
+    /// The whole heading as a button: it collapses and expands the section.
+    private let fold = NSButton()
+    private let chevron = NSImageView()
     private let plus = NSButton()
     private var add: (() -> Void)?
+    private var toggle: (() -> Void)?
 
     override init(frame: NSRect) {
         super.init(frame: frame)
         identifier = Self.identifier
         title.textColor = .secondaryLabelColor
+        fold.isBordered = false
+        fold.title = ""
+        fold.target = self
+        fold.action = #selector(folded)
+        chevron.contentTintColor = .tertiaryLabelColor
         plus.isBordered = false
         plus.target = self
         plus.action = #selector(clicked)
         plus.contentTintColor = .secondaryLabelColor
-        addSubview(title)
-        addSubview(plus)
+        // The plus is above the button of the heading, so a click on it creates and does not collapse.
+        for view in [fold, title, chevron, plus] as [NSView] { addSubview(view) }
     }
 
     required init?(coder: NSCoder) { fatalError("not used") }
 
-    func configure(_ text: String, add: (() -> Void)?) {
+    /// `folded` is nil for a heading that does not collapse.
+    func configure(_ text: String, add: (() -> Void)?, folded: Bool?, toggle: (() -> Void)?) {
         self.add = add
+        self.toggle = toggle
         title.font = TaskTableMetrics.headingFont
         title.stringValue = text
         plus.isHidden = add == nil
@@ -408,18 +444,41 @@ final class SidebarHeadingCell: NSTableCellView {
         }
         plus.toolTip = help
         plus.setAccessibilityLabel(help)
+        fold.isHidden = folded == nil
+        chevron.isHidden = folded == nil
+        if let folded {
+            chevron.image = .symbol(folded ? "chevron.right" : "chevron.down", TaskTableMetrics.headingFont, weight: .semibold)
+            fold.setAccessibilityLabel(text)
+            fold.setAccessibilityValue(folded ? L("Collapsed") : L("Expanded"))
+        }
         needsLayout = true
     }
 
     @objc private func clicked() { add?() }
 
+    @objc private func folded() { toggle?() }
+
     override func layout() {
         super.layout()
+        // The title, the plus and the chevron stand at the bottom, next to the rows they head; the room is above.
         let line = TaskTableMetrics.lineHeight(TaskTableMetrics.headingFont)
-        let size = plus.image?.size ?? .zero
-        let y = ((bounds.height - line) / 2).rounded()
-        plus.frame = NSRect(x: bounds.width - size.width - 4, y: ((bounds.height - size.height) / 2).rounded(), width: size.width, height: size.height)
-        title.frame = NSRect(x: 4, y: y, width: max(plus.frame.minX - 8, 0), height: line)
+        let band = bounds.height - Self.room
+        func centered(_ size: NSSize, x: CGFloat) -> NSRect {
+            NSRect(x: x, y: ((band - size.height) / 2).rounded(), width: size.width, height: size.height)
+        }
+        var right = bounds.width - 4
+        if !chevron.isHidden {
+            let size = chevron.image?.size ?? .zero
+            chevron.frame = centered(NSSize(width: max(size.width, 12), height: size.height), x: right - max(size.width, 12))
+            right = chevron.frame.minX - 6
+        }
+        if !plus.isHidden {
+            let size = plus.image?.size ?? .zero
+            plus.frame = centered(size, x: right - size.width)
+            right = plus.frame.minX - 4
+        }
+        title.frame = centered(NSSize(width: max(right - 8, 0), height: line), x: 4)
+        fold.frame = bounds
     }
 }
 

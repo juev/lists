@@ -100,6 +100,10 @@ final class AppModel {
     var rowSpacing: String = RowSpacing.from(Storage.defaults.string(forKey: RowSpacing.key)) {
         didSet { Storage.defaults.set(rowSpacing, forKey: RowSpacing.key) }
     }
+    /// R161: the sections of the sidebar that are collapsed; belongs to this Mac.
+    var foldedSections: Set<SidebarSection> = SidebarFolding.folded(Storage.defaults.stringArray(forKey: SidebarFolding.key)) {
+        didSet { Storage.defaults.set(SidebarFolding.stored(foldedSections), forKey: SidebarFolding.key) }
+    }
     /// "system", "light" or "dark" (R61); belongs to this Mac.
     var appearance: String = Storage.defaults.string(forKey: "appearance") ?? "system" {
         didSet {
