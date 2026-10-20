@@ -2,6 +2,7 @@
 name = "lists-core"
 version = "0.7.0"
 edition = "2021"
+authors = ["Denis Evsyukov <https://denis.evsyukov.org>"]
 license = "MIT"
 publish = false
 description = "Shared core of the Lists to-do app: storage, merge, sync, recurrence"
