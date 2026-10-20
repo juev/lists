@@ -15,7 +15,7 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
 pub use oidc::OidcConfig;
@@ -29,7 +29,9 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use tiny_http::{Header, Method, Request, Response, ResponseBox, Server};
 
-const INDEX: &str = include_str!("index.html");
+/// R160: the page names the version of the server.
+static INDEX: LazyLock<String> =
+    LazyLock::new(|| include_str!("index.html").replace("{{version}}", env!("CARGO_PKG_VERSION")));
 const MANIFEST: &str = include_str!("manifest.json");
 /// R146, R149: shows the notifications and keeps the page for when the server cannot be reached.
 const SERVICE_WORKER: &str = include_str!("sw.js");
@@ -839,7 +841,7 @@ impl App {
         let method = request.method().clone();
         match (&method, path.as_str()) {
             (Method::Get, "/") => {
-                return reply(200, "text/html; charset=utf-8", INDEX).with_header(header(
+                return reply(200, "text/html; charset=utf-8", INDEX.as_str()).with_header(header(
                     "Content-Security-Policy",
                     "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; frame-ancestors 'none'",
                 ))

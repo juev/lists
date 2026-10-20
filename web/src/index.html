@@ -50,6 +50,8 @@ header input { border: 1px solid var(--line); border-radius: 8px; padding: 6px 1
 .pmark { width: 16px; height: 16px; margin-left: 10px; flex: none; border: 1.5px solid; border-radius: 50%; padding: 2px; background-clip: content-box; }
 .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); flex: none; }
 .side-title { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; padding: 14px 10px 4px; }
+.about { color: var(--muted); font-size: 12px; padding: 14px 10px; }
+.about a { color: inherit; }
 .section { color: var(--accent); font-size: 13px; font-weight: 600; padding: 14px 10px 4px; }
 .section.bad { color: var(--danger); }
 .task { border-radius: 10px; padding: 2px 0; }
@@ -134,6 +136,8 @@ try { const look = localStorage.getItem("appearance"); if (look === "light" || l
 <div id="toast"></div>
 <script>
 "use strict";
+// R160: the server puts its version here when it serves the page.
+const VERSION = "{{version}}";
 const RU = {
   "Inbox": "Входящие", "Today": "Сегодня", "Upcoming": "Предстоящие", "All": "Все", "Completed": "Выполненные", "Won't do": "Не буду делать", "Trash": "Корзина",
   "Lists": "Списки", "Tags": "Теги", "New list": "Новый список", "List name": "Название списка", "New project": "Новый проект", "Project name": "Название проекта", "Search": "Поиск", "New task": "Новая задача",
@@ -768,7 +772,8 @@ function render() {
       $("button", { class: "nav", style: "color:var(--muted)", onclick: () => importer.click() }, t("Import…")), importer,
       $("button", { class: "nav", style: "color:var(--muted)", onclick: () => { Object.assign(state, { exportEdit: true, notifyEdit: false, tokensEdit: false, filterEdit: null, drawer: false, sel: null }); render(); } }, t("Export…")),
       // R148: a browser that signs out stops getting notifications first.
-      $("button", { class: "nav", style: "color:var(--muted)", onclick: async () => { await pushOff().catch(() => {}); api("/api/logout", { method: "POST", headers: { "X-Lists": "1" } }).then(showLogin); } }, t("Sign out"))),
+      $("button", { class: "nav", style: "color:var(--muted)", onclick: async () => { await pushOff().catch(() => {}); api("/api/logout", { method: "POST", headers: { "X-Lists": "1" } }).then(showLogin); } }, t("Sign out")),
+      $("div", { class: "about" }, "Lists " + VERSION + " · ", $("a", { href: "https://denis.evsyukov.org", target: "_blank", rel: "noopener noreferrer" }, "Denis Evsyukov"))),
     $("div", { id: "shade", onclick: () => { state.drawer = false; render(); } }),
     $("div", { id: "main" },
       // R118: in the selection mode the header counts the selected tasks, and the cross and "Done" close the mode.
