@@ -81,7 +81,7 @@ docker run -d --name lists \
   -v lists-data:/data \
   -e LISTS_WEB_PASSWORD='choose a password' \
   -e LISTS_TRUST_PROXY=1 \
-  ghcr.io/juev/lists:0.7.1
+  ghcr.io/juev/lists:0.7.2
 ```
 
 Open `http://127.0.0.1:8080` on the same machine and sign in with the password. The reverse proxy, sync, OpenID Connect and a Compose file are covered in [docs/self-hosting.md](docs/self-hosting.md). Run the version of the latest [release](https://github.com/juev/lists/releases), the same as the apps: a server older than 0.5.1 stops syncing with a storage the current apps write, as [Sync](#sync) explains. Attachments are streamed to and from the disk and served with byte ranges; the server takes files up to 512 MiB and 2 GiB per task by default, which `LISTS_MAX_FILE_MB` and `LISTS_MAX_TASK_MB` change. Scripts reach it with API tokens made in the web interface; the API is described in [docs/api.md](docs/api.md).
@@ -186,7 +186,7 @@ LISTS_CALDAV_URL=https://example.org/dav/calendars/me/ LISTS_CALDAV_USER=me LIST
 
 ## Status
 
-Version 0.7.1. What is implemented and how each part was checked is listed at the end of [docs/specs/product.md](docs/specs/product.md).
+Version 0.7.2. What is implemented and how each part was checked is listed at the end of [docs/specs/product.md](docs/specs/product.md).
 
 Known gaps:
 
