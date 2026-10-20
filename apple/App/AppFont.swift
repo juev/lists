@@ -26,9 +26,7 @@ enum RowSpacing {
 /// macOS has no system-wide text size for apps to follow, so the app keeps its
 /// own: every text style is the system size for that style times a factor.
 enum AppFont {
-    static let scales: [(String, Double)] = [("Small", 0.9), ("Regular", 1.0), ("Large", 1.15), ("Larger", 1.3), ("Largest", 1.5)]
-    /// The size of a Mac on which none was chosen: the system one reads small in the window of Lists (R35, #397).
-    static let defaultScale = 1.15
+    static let scales = TextSize.steps
     static let designs: [(String, String)] = [("System", "default"), ("Rounded", "rounded"), ("Serif", "serif"), ("Monospaced", "monospaced")]
 
     static let scaleKey = "textScale"
