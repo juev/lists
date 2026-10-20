@@ -27,6 +27,8 @@
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; }
 body { background: var(--bg); color: var(--text); font: 16px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+/* R162: a wide window has the text of the apps; a phone keeps 16 pixels, below which it zooms in on a field. */
+@media (min-width: 721px) { body { font-size: 14px; } }
 button, input, select, textarea { font: inherit; color: inherit; }
 button { background: none; border: 0; cursor: pointer; padding: 0; }
 #app { display: flex; height: 100%; }
