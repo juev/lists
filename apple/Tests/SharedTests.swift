@@ -99,6 +99,22 @@ final class SidebarTextTests: XCTestCase {
     }
 }
 
+/// R35: the steps of the text size start from a "Regular" larger than the system size.
+final class TextSizeTests: XCTestCase {
+    func testASavedStepStaysAndNothingSavedIsRegular() {
+        XCTAssertEqual(TextSize.step(nil), 1.15)
+        XCTAssertEqual(TextSize.step(1.15), 1.15, "the old Large is the new Regular")
+        XCTAssertEqual(TextSize.step(1.3), 1.3)
+        XCTAssertEqual(TextSize.step(1.7), 1.7)
+    }
+
+    func testAFactorOfAnEarlierVersionIsTheNearestStep() {
+        XCTAssertEqual(TextSize.step(0.9), 1.0)
+        XCTAssertEqual(TextSize.step(1.05), 1.0)
+        XCTAssertEqual(TextSize.step(2), 1.7)
+    }
+}
+
 /// The bindings reach the Rust core: the static library is linked and a store opens and takes a task.
 final class CoreTests: XCTestCase {
     func testAStoreOpensThroughTheBindingsAndTakesATask() throws {

@@ -89,8 +89,8 @@ final class AppModel {
     var syncing = false
     /// Text size factor and font design chosen in Settings.
     /// A launch argument (`-textScale 1.5`) arrives as a string.
-    var textScale: Double = Storage.defaults.object(forKey: AppFont.scaleKey)
-        .flatMap({ ($0 as? Double) ?? ($0 as? String).flatMap(Double.init) }) ?? AppFont.defaultScale {
+    var textScale: Double = TextSize.step(Storage.defaults.object(forKey: AppFont.scaleKey)
+        .flatMap({ ($0 as? Double) ?? ($0 as? String).flatMap(Double.init) })) {
         didSet { Storage.defaults.set(textScale, forKey: AppFont.scaleKey) }
     }
     var fontDesign: String = Storage.defaults.string(forKey: AppFont.designKey) ?? "default" {
@@ -163,7 +163,7 @@ final class AppModel {
         let defaults = Storage.defaults
         // What is assigned below is written back: it must be what Lists wrote last, not what this program remembers.
         defaults.synchronize()
-        textScale = defaults.object(forKey: AppFont.scaleKey).flatMap { ($0 as? Double) ?? ($0 as? String).flatMap(Double.init) } ?? AppFont.defaultScale
+        textScale = TextSize.step(defaults.object(forKey: AppFont.scaleKey).flatMap { ($0 as? Double) ?? ($0 as? String).flatMap(Double.init) })
         fontDesign = defaults.string(forKey: AppFont.designKey) ?? "default"
         appearance = defaults.string(forKey: "appearance") ?? "system"
         returnAddsLine = defaults.object(forKey: "returnAddsLine") == nil || defaults.bool(forKey: "returnAddsLine")
