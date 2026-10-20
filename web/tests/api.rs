@@ -1903,3 +1903,17 @@ fn r155_r156_the_export_downloads_as_a_file() {
     );
     assert_eq!(status(ureq::get(&format!("{}/api/export", web.base)).call()), 401);
 }
+
+#[test]
+fn r160_the_page_names_the_version_and_the_author() {
+    let web = web(Some("secret"));
+    let page = ureq::get(&format!("{}/", web.base))
+        .call()
+        .unwrap()
+        .into_string()
+        .unwrap();
+    assert!(page.contains(&format!("const VERSION = \"{}\";", env!("CARGO_PKG_VERSION"))));
+    assert!(!page.contains("{{version}}"));
+    assert!(page.contains("https://denis.evsyukov.org"));
+    assert!(page.contains("Denis Evsyukov"));
+}
