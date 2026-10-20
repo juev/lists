@@ -423,8 +423,9 @@ final class SidebarHeadingCell: NSTableCellView {
         plus.target = self
         plus.action = #selector(clicked)
         plus.contentTintColor = .secondaryLabelColor
-        // The plus is above the button of the heading, so a click on it creates and does not collapse.
-        for view in [fold, title, chevron, plus] as [NSView] { addSubview(view) }
+        // The button lies over the title, which would take a click on the text for the table; the plus is above
+        // the button, so a click on it creates and does not collapse.
+        for view in [title, fold, chevron, plus] as [NSView] { addSubview(view) }
     }
 
     required init?(coder: NSCoder) { fatalError("not used") }
