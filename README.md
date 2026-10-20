@@ -194,6 +194,10 @@ Known gaps:
 - a CalDAV storage is not encrypted, and neither is a WebDAV or folder storage until a passphrase is set ([Sync](#sync));
 - the macOS app is built for Apple silicon only, the released APK for arm64 only.
 
+## Author
+
+[Denis Evsyukov](https://denis.evsyukov.org).
+
 ## License
 
 [MIT](LICENSE).
