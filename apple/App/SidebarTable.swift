@@ -217,8 +217,6 @@ struct SidebarTable: NSViewRepresentable {
             }
         }
 
-        func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? { SidebarRowView() }
-
         func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
             let line = TaskTableMetrics.lineHeight(AppFont.sidebar(.body))
             switch rows[row] {
@@ -384,14 +382,6 @@ final class SidebarTableView: NSTableView {
             return cancelOperation(nil)
         }
         super.keyDown(with: event)
-    }
-}
-
-/// A row of the sidebar that draws its selection the same way wherever the keyboard is, as Things does.
-final class SidebarRowView: NSTableRowView {
-    override var isEmphasized: Bool {
-        get { true }
-        set {}
     }
 }
 
