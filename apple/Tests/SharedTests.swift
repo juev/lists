@@ -126,3 +126,34 @@ final class CoreTests: XCTestCase {
         XCTAssertTrue(try store.tasks(view: .inbox).contains { $0.id == task.id })
     }
 }
+
+/// R123: several tasks dragged to another place of a list sorted by hand.
+final class ReorderTests: XCTestCase {
+    private func apply(_ order: [String], _ moves: [(id: String, after: String?)]) -> [String] {
+        var order = order
+        for move in moves {
+            order.removeAll { $0 == move.id }
+            order.insert(move.id, at: move.after.flatMap { order.firstIndex(of: $0).map { $0 + 1 } } ?? 0)
+        }
+        return order
+    }
+
+    func testOneTaskGoesToThePlace() {
+        let order = ["a", "b", "c", "d"]
+        XCTAssertEqual(apply(order, Reorder.moves(order, moving: ["d"], to: 1)), ["a", "d", "b", "c"])
+        XCTAssertEqual(apply(order, Reorder.moves(order, moving: ["a"], to: 4)), ["b", "c", "d", "a"])
+    }
+
+    func testSeveralTasksStandTogetherInTheirOrder() {
+        let order = ["a", "b", "c", "d", "e"]
+        XCTAssertEqual(apply(order, Reorder.moves(order, moving: ["d", "b"], to: 0)), ["b", "d", "a", "c", "e"])
+        XCTAssertEqual(apply(order, Reorder.moves(order, moving: ["a", "c"], to: 4)), ["b", "d", "a", "c", "e"])
+        XCTAssertEqual(apply(order, Reorder.moves(order, moving: ["a", "e"], to: 2)), ["b", "a", "e", "c", "d"])
+    }
+
+    func testADropWhereTheTasksStandMovesNothing() {
+        let order = ["a", "b", "c", "d"]
+        XCTAssertTrue(Reorder.moves(order, moving: ["b", "c"], to: 1).isEmpty)
+        XCTAssertTrue(Reorder.moves(order, moving: ["b", "c"], to: 3).isEmpty)
+    }
+}

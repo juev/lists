@@ -495,30 +495,35 @@ struct TaskTable: NSViewRepresentable {
             }
         }
 
-        /// A drop between rows moves a task in a list sorted by hand; anywhere else the table takes nothing.
+        /// A drop between rows moves the dragged tasks in a list sorted by hand, when all of them are tasks of the list
+        /// rather than subtasks or tasks of a project; anywhere else the table takes nothing.
         func tableView(_ tableView: NSTableView, validateDrop info: any NSDraggingInfo, proposedRow row: Int, proposedDropOperation operation: NSTableView.DropOperation) -> NSDragOperation {
-            guard model.canReorder, info.draggingSource as AnyObject === tableView, operation == .above, dragged(info).count == 1 else { return [] }
+            guard model.canReorder, info.draggingSource as AnyObject === tableView, operation == .above, ordered(dragged(info)) else { return [] }
             return .move
         }
 
         func tableView(_ tableView: NSTableView, acceptDrop info: any NSDraggingInfo, row: Int, dropOperation: NSTableView.DropOperation) -> Bool {
-            guard let id = dragged(info).first else { return false }
-            return move(id, toRow: row)
+            move(dragged(info), toRow: row)
         }
 
         private func dragged(_ info: any NSDraggingInfo) -> [String] {
             (info.draggingPasteboard.string(forType: .string) ?? "").split(separator: "\n").map(String.init)
         }
 
-        /// Moves the task to the place before the row with that index, the way a drop between rows does.
+        /// Whether all of the tasks stand in the order of the list sorted by hand.
+        private func ordered(_ ids: [String]) -> Bool {
+            let tasks = Set((model.visibleSections.first?.tasks ?? []).map(\.id))
+            return !ids.isEmpty && ids.allSatisfy(tasks.contains)
+        }
+
+        /// Moves the tasks to the place before the row with that index, the way a drop between rows does.
         @discardableResult
-        func move(_ id: String, toRow row: Int) -> Bool {
+        func move(_ ids: [String], toRow row: Int) -> Bool {
+            guard ordered(ids) else { return false }
             // The order of the list counts its tasks alone: the rows of the view above the place that are its tasks.
             let tasks = model.visibleSections.first?.tasks ?? []
-            guard let from = tasks.firstIndex(where: { $0.id == id }) else { return false }
             let above = Set(rows.prefix(max(row, 0)).compactMap(\.taskId))
-            let to = tasks.filter { above.contains($0.id) }.count
-            model.move(from: [from], to: to)
+            model.move(ids, to: tasks.filter { above.contains($0.id) }.count)
             return true
         }
 

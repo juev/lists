@@ -327,7 +327,7 @@ enum DebugScript {
                         print("debug: drag writes \(ids.map(taskTitle)), picture \(Int(image.size.width))x\(Int(image.size.height))")
                     } else {
                         let before = parts.count > 1 && parts[1] != "end" ? taskId(titled: parts[1]).flatMap { b in coordinator.rows.firstIndex { $0.taskId == b } } : coordinator.rows.count
-                        print("debug: reorder \(before.map { coordinator.move(id, toRow: $0) } ?? false), can reorder \(AppModel.shared.canReorder)")
+                        print("debug: reorder \(before.map { coordinator.move(AppModel.shared.dragIds(id), toRow: $0) } ?? false), can reorder \(AppModel.shared.canReorder)")
                     }
                 case "batchmenu":
                     // The menu a right click on the selected row builds while several rows are selected.

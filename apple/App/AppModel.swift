@@ -1293,14 +1293,14 @@ final class AppModel {
     }
 
     /// Reorders within the single section of a manually sorted list.
-    func move(from source: IndexSet, to destination: Int) {
-        guard canReorder, let tasks = visibleSections.first?.tasks, let from = source.first else { return }
-        var order = tasks
-        order.move(fromOffsets: source, toOffset: destination)
-        let moved = tasks[from]
-        guard let index = order.firstIndex(where: { $0.id == moved.id }) else { return }
-        let after = index > 0 ? order[index - 1].id : nil
-        perform { try $0.moveTask(id: moved.id, listId: nil, parentId: nil, after: after) }
+    /// R123: the tasks put together before the task at `destination` of the list, in the order of the view; one undo.
+    func move(_ ids: [String], to destination: Int) {
+        guard canReorder, let tasks = visibleSections.first?.tasks else { return }
+        let moves = Reorder.moves(tasks.map(\.id), moving: ids, to: destination)
+        guard !moves.isEmpty else { return }
+        perform { store in
+            for move in moves { try store.moveTask(id: move.id, listId: nil, parentId: nil, after: move.after) }
+        }
     }
 
     // MARK: Import
