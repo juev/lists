@@ -418,9 +418,9 @@ fn payload(n: &PlannedNotification) -> Value {
 mod tests {
     use super::*;
     use lists_core::NewTask;
-    use p256::elliptic_curve::sec1::ToEncodedPoint;
+    use p256::elliptic_curve::sec1::ToSec1Point;
+    use p256::elliptic_curve::Generate;
     use p256::SecretKey;
-    use rand_core::OsRng;
     use std::sync::Arc;
 
     /// One request the push service got: the path, the body and the headers.
@@ -464,7 +464,7 @@ mod tests {
     impl Client {
         fn new() -> Client {
             Client {
-                key: SecretKey::random(&mut OsRng),
+                key: SecretKey::generate(),
                 auth: [9; 16],
             }
         }
@@ -472,7 +472,7 @@ mod tests {
         fn subscription(&self, endpoint: &str, zone: &str, offset: i32) -> Value {
             json!({
                 "endpoint": endpoint,
-                "keys": { "p256dh": b64(self.key.public_key().to_encoded_point(false).as_bytes()), "auth": b64(&self.auth) },
+                "keys": { "p256dh": b64(self.key.public_key().to_sec1_point(false).as_bytes()), "auth": b64(&self.auth) },
                 "zone": zone, "offset": offset,
             })
         }
@@ -688,7 +688,7 @@ mod tests {
         };
         let plain = payload(&n).to_string();
         let browser = Client::new();
-        let public = browser.key.public_key().to_encoded_point(false);
+        let public = browser.key.public_key().to_sec1_point(false);
         let body = encrypt(public.as_bytes(), &browser.auth, plain.as_bytes()).unwrap();
         assert!(body.len() <= 4096, "{}", body.len());
         assert!(browser.read(&body)["title"].as_str().unwrap().starts_with("\"😀"));

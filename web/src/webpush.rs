@@ -10,7 +10,8 @@ use base64::Engine;
 use hkdf::Hkdf;
 use p256::ecdsa::signature::Signer;
 use p256::ecdsa::{Signature, SigningKey};
-use p256::elliptic_curve::sec1::ToEncodedPoint;
+use p256::elliptic_curve::sec1::ToSec1Point;
+use p256::elliptic_curve::Generate;
 use p256::{PublicKey, SecretKey};
 use rand_core::{OsRng, RngCore};
 use serde_json::json;
@@ -36,7 +37,7 @@ pub fn unb64(text: &str) -> Option<Vec<u8>> {
 pub fn encrypt(ua_public: &[u8], auth: &[u8], plain: &[u8]) -> Result<Vec<u8>, String> {
     let mut salt = [0u8; 16];
     OsRng.fill_bytes(&mut salt);
-    encrypt_with(ua_public, auth, plain, &SecretKey::random(&mut OsRng), salt)
+    encrypt_with(ua_public, auth, plain, &SecretKey::generate(), salt)
 }
 
 /// `encrypt` with the sender's key and the salt given, as the test vector of RFC 8291 needs.
@@ -55,12 +56,12 @@ fn encrypt_with(
     if 86 + plain.len() + 1 + 16 > RECORD_SIZE as usize {
         return Err("the message does not fit one record".into());
     }
-    let as_public = sender.public_key().to_encoded_point(false);
+    let as_public = sender.public_key().to_sec1_point(false);
     let as_public = as_public.as_bytes();
     let shared = p256::ecdh::diffie_hellman(sender.to_nonzero_scalar(), ua.as_affine());
 
     let mut key_info = b"WebPush: info\0".to_vec();
-    key_info.extend_from_slice(ua.to_encoded_point(false).as_bytes());
+    key_info.extend_from_slice(ua.to_sec1_point(false).as_bytes());
     key_info.extend_from_slice(as_public);
     let mut ikm = [0u8; 32];
     Hkdf::<Sha256>::new(Some(auth), shared.raw_secret_bytes())
@@ -106,7 +107,7 @@ impl Vapid {
                     .map_err(|_| "the VAPID key file does not hold a P-256 key".to_string())?
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                let key = SigningKey::random(&mut OsRng);
+                let key = SigningKey::generate();
                 write_private(path, &b64(&key.to_bytes()))?;
                 key
             }
@@ -117,7 +118,7 @@ impl Vapid {
 
     /// The `applicationServerKey` a browser subscribes with: the public key, uncompressed, base64url.
     pub fn public_key(&self) -> String {
-        b64(self.key.verifying_key().to_encoded_point(false).as_bytes())
+        b64(self.key.verifying_key().to_sec1_point(false).as_bytes())
     }
 
     /// The `Authorization` header for a request to the origin `audience` at `now` (seconds since 1970).
@@ -170,7 +171,7 @@ pub fn decrypt(ua_private: &SecretKey, auth: &[u8], body: &[u8]) -> Result<Vec<u
     let as_public = PublicKey::from_sec1_bytes(&body[21..21 + id_len]).map_err(|e| e.to_string())?;
     let shared = p256::ecdh::diffie_hellman(ua_private.to_nonzero_scalar(), as_public.as_affine());
     let mut key_info = b"WebPush: info\0".to_vec();
-    key_info.extend_from_slice(ua_private.public_key().to_encoded_point(false).as_bytes());
+    key_info.extend_from_slice(ua_private.public_key().to_sec1_point(false).as_bytes());
     key_info.extend_from_slice(&body[21..21 + id_len]);
     let mut ikm = [0u8; 32];
     Hkdf::<Sha256>::new(Some(auth), shared.raw_secret_bytes())
@@ -230,8 +231,8 @@ mod tests {
 
     #[test]
     fn r147_each_message_has_its_own_key_and_salt() {
-        let browser = SecretKey::random(&mut OsRng);
-        let public = browser.public_key().to_encoded_point(false);
+        let browser = SecretKey::generate();
+        let public = browser.public_key().to_sec1_point(false);
         let (a, b) = (
             encrypt(public.as_bytes(), &[7; 16], b"x").unwrap(),
             encrypt(public.as_bytes(), &[7; 16], b"x").unwrap(),
