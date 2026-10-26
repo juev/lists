@@ -162,7 +162,7 @@ struct TaskTable: NSViewRepresentable {
         table.backgroundColor = .clear
         table.allowsMultipleSelection = true
         table.allowsEmptySelection = true
-        table.allowsTypeSelect = false
+        table.allowsTypeSelect = true
         table.focusRingType = .none
         table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
         table.dataSource = context.coordinator
@@ -531,6 +531,23 @@ struct TaskTable: NSViewRepresentable {
         /// The table chooses no rows by itself: a click and the keys go to the model, which hands the selection back.
         func tableView(_ tableView: NSTableView, selectionIndexesForProposedSelection proposed: IndexSet) -> IndexSet {
             tableView.selectedRowIndexes
+        }
+
+        /// Typing the start of a title selects the next task with it, as in the tables of the system (R117).
+        func tableView(_ tableView: NSTableView, typeSelectStringFor tableColumn: NSTableColumn?, row: Int) -> String? {
+            self.row(row)?.taskId == nil ? nil : self.row(row)?.task?.title
+        }
+
+        /// The table looks for the row as usual; the row found is selected through the model, which hands the selection back.
+        func tableView(_ tableView: NSTableView, nextTypeSelectMatchFromRow startRow: Int, toRow endRow: Int, for searchString: String) -> Int {
+            let order = startRow < endRow ? Array(startRow..<endRow) : Array(startRow..<rows.count) + Array(0..<max(endRow, 0))
+            let match = order.first { index in
+                guard rows.indices.contains(index), rows[index].taskId != nil, let title = rows[index].task?.title else { return false }
+                return title.range(of: searchString, options: [.anchored, .caseInsensitive, .diacriticInsensitive]) != nil
+            }
+            guard let match, let id = rows[match].taskId else { return -1 }
+            model.click(id)
+            return match
         }
 
         /// The double click of the table acts as Return on the row (R44); its first click has left the row alone selected.
