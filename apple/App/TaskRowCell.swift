@@ -22,6 +22,11 @@ enum TaskTableMetrics {
     /// How far a task of an open project stands to the right of the project (R30).
     static let depthIndent: CGFloat = 22
 
+    /// R72: the space after the mark and after the bar of the priority, shared by the row and the open card, so the
+    /// title stays close to the mark (#427).
+    static let markGap: CGFloat = 3
+    static let barGap: CGFloat = 4
+
     /// The field for a new task of an open project.
     static func newChildRow() -> CGFloat { lineHeight(AppFont.native(.callout)) + 8 + 2 * rowInset }
 
@@ -78,7 +83,7 @@ extension NSImage {
     }
 }
 
-/// The square mark of a task or of a subtask: a click completes it or takes it back into work.
+/// The round mark of a task or of a subtask (#427): a click completes it or takes it back into work.
 @MainActor
 final class TaskMarkButton: NSButton {
     private var task: TaskItem?
@@ -96,7 +101,7 @@ final class TaskMarkButton: NSButton {
         self.task = task
         // The mark of a record of a repeat takes its completion back while it can (R128, R133); after that it is a repeat icon.
         let history = task.isLog && !task.undoable
-        let symbol = history ? "repeat" : task.wont ? "xmark.square.fill" : task.done != nil ? "checkmark.square.fill" : "square"
+        let symbol = history ? "repeat" : task.wont ? "xmark.circle.fill" : task.done != nil ? "checkmark.circle.fill" : "circle"
         // R94: the mark is as quiet as the icons of the fields; R72: a little smaller than the text.
         image = .symbol(symbol, AppFont.native(.callout), weight: .light)
         contentTintColor = task.done != nil ? .secondaryLabelColor : .tertiaryLabelColor
@@ -254,17 +259,27 @@ final class TaskRowCell: NSTableCellView {
         let inset: CGFloat = 6
         let gap: CGFloat = 8
         var x = inset + CGFloat(depth) * TaskTableMetrics.depthIndent
-        func center(_ view: NSView, width: CGFloat, height viewHeight: CGFloat) {
-            view.frame = NSRect(x: x, y: ((height - viewHeight) / 2).rounded(), width: width, height: viewHeight)
-            x += width + gap
-        }
-        let markSize = mark.fittingSize
-        center(mark, width: markSize.width, height: markSize.height)
+
+        // The title and the list under it stand as one block in the middle of the row; the mark, the project icon and
+        // the date stand at the middle of the title line, so in a row of two lines they go with the title (#427).
+        let titleHeight = TaskTableMetrics.lineHeight(AppFont.native(.body))
+        let originHeight = TaskTableMetrics.lineHeight(AppFont.native(.caption))
         let twoLines = !origin.isHidden
-        center(bar, width: 3, height: twoLines ? 28 : 16)
+        let block = twoLines ? titleHeight + 2 + originHeight : titleHeight
+        let top = ((height + block) / 2).rounded()
+        let titleY = top - titleHeight
+        func onTitle(_ viewHeight: CGFloat) -> CGFloat { (titleY + (titleHeight - viewHeight) / 2).rounded() }
+
+        let markSize = mark.fittingSize
+        mark.frame = NSRect(x: x, y: onTitle(markSize.height), width: markSize.width, height: markSize.height)
+        x += markSize.width + TaskTableMetrics.markGap
+        let barHeight: CGFloat = twoLines ? 28 : 16
+        bar.frame = NSRect(x: x, y: ((height - barHeight) / 2).rounded(), width: 3, height: barHeight)
+        x += 3 + TaskTableMetrics.barGap
         if !folder.isHidden {
             let size = folder.image?.size ?? .zero
-            center(folder, width: size.width, height: size.height)
+            folder.frame = NSRect(x: x, y: onTitle(size.height), width: size.width, height: size.height)
+            x += size.width + gap
         }
 
         // From the right edge: the chevron, then the date.
@@ -274,25 +289,20 @@ final class TaskRowCell: NSTableCellView {
         if !date.isHidden {
             right -= gap
             let size = date.fittingSize
-            date.frame = NSRect(x: right - size.width, y: ((height - size.height) / 2).rounded(), width: size.width, height: size.height)
+            date.frame = NSRect(x: right - size.width, y: onTitle(size.height), width: size.width, height: size.height)
             right -= size.width
             if !dateIcon.isHidden {
                 let icon = dateIcon.image?.size ?? .zero
                 right -= 3 + icon.width
-                dateIcon.frame = NSRect(x: right, y: ((height - icon.height) / 2).rounded(), width: icon.width, height: icon.height)
+                dateIcon.frame = NSRect(x: right, y: onTitle(icon.height), width: icon.width, height: icon.height)
             }
         }
         right -= gap
 
         // The title and its marks, and under them the list; each is cut at its own width.
-        let titleHeight = TaskTableMetrics.lineHeight(AppFont.native(.body))
-        let originHeight = TaskTableMetrics.lineHeight(AppFont.native(.caption))
-        let block = twoLines ? titleHeight + 2 + originHeight : titleHeight
-        let top = ((height + block) / 2).rounded()
         let marksWidth = marks.arrangedSubviews.isEmpty ? 0 : marks.fittingSize.width
         let room = max(right - x, 0)
         let titleWidth = min(title.fittingSize.width, max(room - (marksWidth > 0 ? marksWidth + gap : 0), 0))
-        let titleY = top - titleHeight
         title.frame = NSRect(x: x, y: titleY, width: titleWidth, height: titleHeight)
         marks.frame = NSRect(x: x + titleWidth + gap, y: titleY, width: min(marksWidth, max(room - titleWidth - gap, 0)), height: titleHeight)
         origin.frame = NSRect(x: x, y: titleY - 2 - originHeight, width: room, height: originHeight)

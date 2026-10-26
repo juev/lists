@@ -217,7 +217,7 @@ final class DraftCard: NSView, NSTextViewDelegate, NSTextFieldDelegate {
     private func refresh() {
         let body = AppFont.native(.body)
         // A task that does not exist yet has nothing to complete: the mark only says what the card is.
-        mark.image = .symbol("square", body)
+        mark.image = .symbol("circle", body)
         title.font = body
         titlePlaceholder.font = body
         titlePlaceholder.isHidden = !title.string.isEmpty
@@ -487,7 +487,7 @@ final class DraftCard: NSView, NSTextViewDelegate, NSTextFieldDelegate {
             subtaskLines.append((mark, field, remove))
         }
         for (index, line) in subtaskLines.enumerated() {
-            line.mark.image = .symbol("square", font, weight: .light)
+            line.mark.image = .symbol("circle", font, weight: .light)
             line.field.font = font
             if !editing(line.field), line.field.stringValue != draft.subtasks[index] { line.field.stringValue = draft.subtasks[index] }
             line.remove.image = .symbol("xmark.circle.fill", font)
