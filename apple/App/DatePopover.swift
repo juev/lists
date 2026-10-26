@@ -1,18 +1,23 @@
 import AppKit
 
-/// A popover of a card with an AppKit view in it (#308). Esc closes the popover alone and the keyboard goes back to
-/// where it was in the window of the card: on a chip or in a field (R62).
+/// A popover of a card with an AppKit view in it (#308). Esc closes the popover and then does what Esc does in the
+/// card (R62).
 @MainActor
 final class CardPopover: NSObject, NSPopoverDelegate {
     private let popover = NSPopover()
     /// Called once the popover is gone, however it closed.
     var onClose: () -> Void = {}
+    /// Esc in the popover, once the popover is closed.
+    var onCancel: () -> Void = {}
 
     init(_ view: NSView) {
         super.init()
         let controller = NSViewController()
         let box = PopoverBox(frame: NSRect(origin: .zero, size: view.frame.size))
-        box.onCancel = { [weak self] in self?.close() }
+        box.onCancel = { [weak self] in
+            self?.close()
+            self?.onCancel()
+        }
         view.autoresizingMask = [.width, .height]
         box.addSubview(view)
         controller.view = box
@@ -43,7 +48,7 @@ final class CardPopover: NSObject, NSPopoverDelegate {
     func popoverDidClose(_ notification: Notification) { onClose() }
 }
 
-/// The content of a popover of a card: Esc anywhere in it closes the popover alone (R62).
+/// The content of a popover of a card: Esc anywhere in it closes the popover (R62).
 private final class PopoverBox: NSView {
     var onCancel: () -> Void = {}
 

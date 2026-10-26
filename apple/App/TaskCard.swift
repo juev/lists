@@ -174,10 +174,9 @@ final class TaskCard: NSView, NSTextViewDelegate {
         notes.setSelectedRange(NSRange(location: notes.string.utf16.count, length: 0))
     }
 
-    /// Esc: the card closes and the list has the keyboard again, with the row selected (R44).
+    /// Esc: the card closes together with its popover, and the list has the keyboard again, with the row selected (R44, R62).
     private func close() {
-        // Esc with a popover open is for the popover (R62).
-        if let popover, popover.isShown { return popover.close() }
+        if let popover, popover.isShown { popover.close() }
         commit(leaving: true)
         model.closeCard(task.id)
     }
@@ -357,6 +356,7 @@ final class TaskCard: NSView, NSTextViewDelegate {
         (view as? DatePopoverView)?.dismiss = dismiss
         (view as? RepeatPopoverView)?.dismiss = dismiss
         (view as? TagPopoverView)?.dismiss = dismiss
+        shown.onCancel = { [weak self] in self?.close() }
         shown.onClose = { [weak self] in
             guard let self else { return }
             self.held = nil
