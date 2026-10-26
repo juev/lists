@@ -494,6 +494,23 @@ mod tests {
         assert_eq!(unwrap("correct horse", "vault-2", &wrapped).unwrap(), None);
     }
 
+    /// S54, S55: bytes sealed by argon2 0.5 and chacha20poly1305 0.10 still open,
+    /// so a storage written before an update of these crates stays readable.
+    #[test]
+    fn a_storage_sealed_by_an_earlier_release_opens() {
+        let wrapped = Wrapped {
+            salt: "twtGQyiD105Yaq3g3B5Phw==".into(),
+            nonce: "obn7Cn5iigKS1jiv47F+uwOETC7W1AK7".into(),
+            key: "rzWYUxzZPr/g4OUd4IMoPZdaFIjrORQ3R763niMM4D21+rXO+htW02f9e0i0IQeE".into(),
+        };
+        assert_eq!(unwrap("correct horse", "vault-1", &wrapped).unwrap(), Some([5u8; 32]));
+        let sealed = b64()
+            .decode("TFNFMRNpKks1CrpKdMwoBoeg0ytb63pE6ZgEn/wFQw11N15Kb6gG1Za+LbAapcJRYHsuBYiPSUUGSpkl")
+            .unwrap();
+        let opened = Keys::new(&[7u8; 32]).open("lists/log/a", &sealed);
+        assert_eq!(opened.as_deref(), Some(&b"the first sealed file"[..]));
+    }
+
     #[test]
     fn blob_names_hide_the_hash() {
         let sha = "ab".repeat(32);
