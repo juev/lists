@@ -642,6 +642,11 @@ final class TaskTableView: NSTableView {
 
     // MARK: Keys (R117)
 
+    /// When a letter was last typed to find a task by its title.
+    var typedAt: Date?
+    /// How long after the last typed letter Space and Delete still belong to the typing.
+    static let typingPause: TimeInterval = 1
+
     override func keyDown(with event: NSEvent) {
         let flags = event.modifierFlags.intersection([.command, .shift, .option, .control])
         if (event.keyCode == 125 || event.keyCode == 126) && flags.isSubset(of: [.shift, .option]) {
@@ -653,6 +658,12 @@ final class TaskTableView: NSTableView {
             return
         }
         guard flags.isEmpty else { return super.keyDown(with: event) }
+        // While a title is being typed to find a task, Space is part of it and Delete changes nothing: neither
+        // completes or deletes the task the typing has just selected.
+        if let typedAt, Date().timeIntervalSince(typedAt) < Self.typingPause {
+            if event.keyCode == 49 { return super.keyDown(with: event) }
+            if event.keyCode == 51 || event.keyCode == 117 { return }
+        }
         switch event.keyCode {
         case 36, 76:
             guard let id = model.selection else { return super.keyDown(with: event) }
@@ -667,6 +678,8 @@ final class TaskTableView: NSTableView {
         case 51, 117:
             deleteSelected()
         default:
+            // A letter goes to the search by title (R117); Space and Delete right after it belong to the typing.
+            if event.characters?.unicodeScalars.contains(where: CharacterSet.alphanumerics.contains) == true { typedAt = Date() }
             super.keyDown(with: event)
         }
     }

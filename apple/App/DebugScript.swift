@@ -124,7 +124,7 @@ enum DebugScript {
 
     private static let codes: [String: (UInt16, String)] = [
         "return": (36, "\r"), "esc": (53, "\u{1b}"), "space": (49, " "), "down": (125, "\u{F701}"), "up": (126, "\u{F700}"),
-        "tab": (48, "\t"), "backtab": (48, "\u{19}"),
+        "tab": (48, "\t"), "backtab": (48, "\u{19}"), "delete": (51, "\u{7f}"),
     ]
 
     static func runIfAsked() {
