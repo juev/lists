@@ -10,8 +10,8 @@ updates:
     directory: /
     schedule:
       interval: weekly
-  # The Rust workspaces: patch and minor releases of the crates come as one pull
-  # request per workspace, a major release on its own.
+  # The Rust workspaces: patch and minor releases of the crates in both come as
+  # one pull request, a major release on its own for each workspace.
   - package-ecosystem: cargo
     directories:
       - /core
