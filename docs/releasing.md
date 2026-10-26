@@ -41,7 +41,7 @@ What the release jobs run, with the signing secrets in their environment, is pin
 | Gradle | `android/gradle/wrapper/gradle-wrapper.properties` | `distributionSha256Sum` of the distribution |
 | Swift packages | `apple/project.yml`, `apple/Package.resolved` | an exact version, and the revision in `Package.resolved`; `scripts/build-apple-app.sh` puts the file into the generated project and builds with `-onlyUsePackageVersionsFromResolvedFile`, so a pin that does not match stops the build |
 
-Dependabot (`.github/dependabot.yml`) proposes new pins of the actions and the image every week. A new Gradle version needs a new checksum, from `https://services.gradle.org/distributions/gradle-<version>-bin.zip.sha256`. A new version of a Swift package is set in `apple/project.yml`; then, in `apple/`, run `xcodegen generate` and `xcodebuild -resolvePackageDependencies -project Lists.xcodeproj -scheme Lists` and copy `Lists.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved` to `apple/Package.resolved`.
+Dependabot (`.github/dependabot.yml`) proposes new pins of the actions and the image every week, and new versions of the crates of `core` and `web`: patch and minor releases as one pull request per workspace, a major release on its own. A new Gradle version needs a new checksum, from `https://services.gradle.org/distributions/gradle-<version>-bin.zip.sha256`. A new version of a Swift package is set in `apple/project.yml`; then, in `apple/`, run `xcodegen generate` and `xcodebuild -resolvePackageDependencies -project Lists.xcodeproj -scheme Lists` and copy `Lists.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved` to `apple/Package.resolved`.
 
 ## Android signing key
 
