@@ -83,11 +83,8 @@ final class SubtaskLineView: NSView, NSTextFieldDelegate {
 
     // MARK: Pointer
 
+    /// ⌃click does not come here: the window opens the menu of the line, as for a right click.
     override func mouseDown(with event: NSEvent) {
-        if event.modifierFlags.contains(.control) {
-            NSMenu.popUpContextMenu(subtaskMenu(), with: event, for: self)
-            return
-        }
         // The keys go on from the list: the arrows, Return and Space are for the selected line.
         var table = superview
         while let view = table, !(view is TaskTableView) { table = view.superview }

@@ -593,11 +593,8 @@ final class TaskTableView: NSTableView {
     // MARK: Clicks (R117)
 
     override func mouseDown(with event: NSEvent) {
-        // ⌃click opens the menu of the row.
-        if event.modifierFlags.contains(.control) {
-            if let menu = menu(for: event) { NSMenu.popUpContextMenu(menu, with: event, for: self) }
-            return
-        }
+        // ⌃click: the table opens the menu of the row itself.
+        if event.modifierFlags.contains(.control) { return super.mouseDown(with: event) }
         let index = row(at: convert(event.locationInWindow, from: nil))
         let id = coordinator?.row(index)?.taskId
         window?.makeFirstResponder(self)
@@ -666,9 +663,13 @@ final class TaskTableView: NSTableView {
 
     private let rowMenu = RowMenu()
 
+    /// The menu of the table is built for the row it opens on, and the table outlines that row meanwhile, as tables of
+    /// the system do.
     override func menu(for event: NSEvent) -> NSMenu? {
         guard let row = coordinator?.row(row(at: convert(event.locationInWindow, from: nil))), let task = row.task else { return nil }
-        if case .found = row { return rowMenu.menu(TaskMenus.subtaskItems(task, model)) }
-        return rowMenu.menu(TaskMenus.taskItems(for: task, model))
+        if case .found = row { menu = rowMenu.menu(TaskMenus.subtaskItems(task, model)) } else {
+            menu = rowMenu.menu(TaskMenus.taskItems(for: task, model))
+        }
+        return super.menu(for: event)
     }
 }
