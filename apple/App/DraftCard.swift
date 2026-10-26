@@ -440,6 +440,7 @@ final class DraftCard: NSView, NSTextViewDelegate, NSTextFieldDelegate {
         (view as? DatePopoverView)?.dismiss = dismiss
         (view as? RepeatPopoverView)?.dismiss = dismiss
         (view as? TagPopoverView)?.dismiss = dismiss
+        shown.onCancel = { [weak self] in if self?.escSaves == true { self?.cancel() } }
         shown.onClose = { [weak self] in
             guard let self else { return }
             self.held = nil
@@ -643,7 +644,12 @@ final class DraftCard: NSView, NSTextViewDelegate, NSTextFieldDelegate {
     /// Esc: in the list the card goes and its task is kept (R37); in the panel and the menu bar window what was typed
     /// is thrown away (R114). With a popover open Esc is for the popover (R62).
     private func cancel() {
-        if let popover, popover.isShown { return popover.close() }
+        // In the list Esc saves the card together with its popover (R62); in the quick entry window, where it throws the
+        // card away, a popover open takes the Esc alone.
+        if let popover, popover.isShown {
+            if !escSaves { return popover.close() }
+            popover.close()
+        }
         if escSaves { save() } else { discard() }
     }
 
