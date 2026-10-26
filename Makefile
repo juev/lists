@@ -17,9 +17,12 @@ lint:
 	cd web && cargo fmt --check && cargo clippy --locked --all-targets --all-features -- -D warnings
 
 # Advisories, licenses and sources of the dependencies (deny.toml).
+# Both workspaces are checked even when the first fails, so one run shows every finding.
 deny:
-	cargo deny --manifest-path core/Cargo.toml --config deny.toml check
-	cargo deny --manifest-path web/Cargo.toml --config deny.toml check
+	@status=0; \
+	cargo deny --manifest-path core/Cargo.toml --config deny.toml check || status=1; \
+	cargo deny --manifest-path web/Cargo.toml --config deny.toml check || status=1; \
+	exit $$status
 
 fmt:
 	cd core && cargo fmt
