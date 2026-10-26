@@ -15,8 +15,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use base64::Engine;
-use chacha20poly1305::aead::rand_core::RngCore;
-use chacha20poly1305::aead::{Aead, KeyInit, OsRng, Payload};
+use chacha20poly1305::aead::{Aead, Generate, KeyInit, Payload};
 use chacha20poly1305::{XChaCha20Poly1305, XNonce};
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
@@ -45,9 +44,7 @@ pub(crate) fn sealed_len(plain: u64) -> u64 {
 }
 
 pub(crate) fn random<const N: usize>() -> [u8; N] {
-    let mut bytes = [0u8; N];
-    OsRng.fill_bytes(&mut bytes);
-    bytes
+    <[u8; N]>::generate()
 }
 
 fn b64() -> base64::engine::GeneralPurpose {
@@ -87,7 +84,7 @@ pub(crate) fn wrap(passphrase: &str, vault: &str, data_key: &[u8; 32]) -> Result
     let kek = derive(passphrase, &salt)?;
     let sealed = XChaCha20Poly1305::new(&kek.into())
         .encrypt(
-            XNonce::from_slice(&nonce),
+            &XNonce::from(nonce),
             Payload {
                 msg: data_key,
                 aad: &wrap_aad(vault),
@@ -107,12 +104,13 @@ pub(crate) fn unwrap(passphrase: &str, vault: &str, wrapped: &Wrapped) -> Result
     let salt = b64().decode(&wrapped.salt).map_err(|_| unreadable())?;
     let nonce = b64().decode(&wrapped.nonce).map_err(|_| unreadable())?;
     let key = b64().decode(&wrapped.key).map_err(|_| unreadable())?;
-    if salt.len() < 8 || nonce.len() != 24 {
+    let nonce = XNonce::try_from(&nonce[..]).map_err(|_| unreadable())?;
+    if salt.len() < 8 {
         return Err(unreadable());
     }
     let kek = derive(passphrase, &salt)?;
     let opened = XChaCha20Poly1305::new(&kek.into()).decrypt(
-        XNonce::from_slice(&nonce),
+        &nonce,
         Payload {
             msg: &key,
             aad: &wrap_aad(vault),
