@@ -172,6 +172,8 @@ struct TaskTable: NSViewRepresentable {
         table.setDraggingSourceOperationMask(.copy, forLocal: false)
         table.verticalMotionCanBeginDrag = true
         table.delegate = context.coordinator
+        table.target = context.coordinator
+        table.doubleAction = #selector(Coordinator.openClicked(_:))
         context.coordinator.table = table
         let scroll = NSScrollView()
         scroll.documentView = table
@@ -530,6 +532,13 @@ struct TaskTable: NSViewRepresentable {
         func tableView(_ tableView: NSTableView, selectionIndexesForProposedSelection proposed: IndexSet) -> IndexSet {
             tableView.selectedRowIndexes
         }
+
+        /// The double click of the table acts as Return on the row (R44); its first click has left the row alone selected.
+        @objc func openClicked(_ sender: NSTableView) {
+            guard let id = row(sender.clickedRow)?.taskId else { return }
+            model.click(id)
+            model.toggleEditing(id)
+        }
     }
 }
 
@@ -591,29 +600,35 @@ final class TaskTableView: NSTableView {
         }
         let index = row(at: convert(event.locationInWindow, from: nil))
         let id = coordinator?.row(index)?.taskId
-        let down = NSEvent.mouseLocation
         window?.makeFirstResponder(self)
         // R44: a click on the empty space of the list closes the open card; one on another row selects it, which closes the card.
         if index < 0 {
             for open in model.expanded { model.closeCardByClick(open, keyboardToList: true) }
         }
-        // The table follows the mouse until the button goes up; a drag starts from here (R123).
+        let flags = event.modifierFlags
+        let command = flags.contains(.command)
+        let shift = flags.contains(.shift)
+        // As in the tables of the system, the row is selected when the button goes down. A plain click on one of several
+        // selected rows waits for the button to go up, since it may start a drag of all of them (R123).
+        let waits = id.map { !command && !shift && model.picked.contains($0) } ?? false
+        if let id, !waits { model.click(id, command: command, shift: shift) }
+        let down = NSEvent.mouseLocation
+        // The table follows the mouse until the button goes up; a drag and a double click start from here (R123, R44).
         super.mouseDown(with: event)
-        guard let id else { return }
-        // A click counts only when the button went up where it went down: a drag changes no selection.
+        guard let id, waits else { return }
         let up = NSEvent.mouseLocation
         guard NSEvent.pressedMouseButtons & 1 == 0, hypot(up.x - down.x, up.y - down.y) < 4 else { return }
-        let flags = event.modifierFlags
-        model.click(id, command: flags.contains(.command), shift: flags.contains(.shift))
-        if event.clickCount == 2 { model.toggleEditing(id) }
+        model.click(id)
     }
 
     // MARK: Keys (R117)
 
     override func keyDown(with event: NSEvent) {
         let flags = event.modifierFlags.intersection([.command, .shift, .option, .control])
-        if (event.keyCode == 125 || event.keyCode == 126) && flags.isSubset(of: [.shift]) {
-            let step = event.keyCode == 126 ? -1 : 1
+        if (event.keyCode == 125 || event.keyCode == 126) && flags.isSubset(of: [.shift, .option]) {
+            var step = event.keyCode == 126 ? -1 : 1
+            // With Option the arrows go to the first or the last row, as in the tables of the system.
+            if flags.contains(.option) { step *= max(model.visibleIds.count, 1) }
             // R117: with Shift the arrows grow and shrink the selection.
             if flags.contains(.shift) { model.extendSelection(step) } else { model.moveSelection(step) }
             return
