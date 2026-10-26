@@ -620,9 +620,11 @@ final class TaskTableView: NSTableView {
         let index = row(at: convert(event.locationInWindow, from: nil))
         let id = coordinator?.row(index)?.taskId
         window?.makeFirstResponder(self)
-        // R44: a click on the empty space of the list closes the open card; one on another row selects it, which closes the card.
+        // R44: a click on the empty space of the list closes the open card and leaves no row selected, as in the tables of
+        // the system; one on another row selects it, which closes the card.
         if index < 0 {
             for open in model.expanded { model.closeCardByClick(open, keyboardToList: true) }
+            model.selection = nil
         }
         let flags = event.modifierFlags
         let command = flags.contains(.command)
