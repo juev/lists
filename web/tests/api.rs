@@ -1636,7 +1636,8 @@ fn s58_the_server_opens_an_encrypted_storage_with_the_passphrase_it_is_given() {
 fn r147_r148_notifications_over_the_api() {
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
     use base64::Engine;
-    use p256::elliptic_curve::sec1::ToEncodedPoint;
+    use p256::elliptic_curve::sec1::ToSec1Point;
+    use p256::elliptic_curve::Generate;
 
     let web = web(Some("secret"));
     let sw = ureq::get(&format!("{}/sw.js", web.base)).call().unwrap();
@@ -1656,12 +1657,12 @@ fn r147_r148_notifications_over_the_api() {
     let key = URL_SAFE_NO_PAD.decode(key).unwrap();
     assert!(p256::PublicKey::from_sec1_bytes(&key).is_ok() && key.len() == 65);
 
-    let browser = p256::SecretKey::random(&mut rand_core::OsRng);
+    let browser = p256::SecretKey::generate();
     let subscription = |endpoint: &str| {
         json!({
             "endpoint": endpoint,
             "keys": {
-                "p256dh": URL_SAFE_NO_PAD.encode(browser.public_key().to_encoded_point(false).as_bytes()),
+                "p256dh": URL_SAFE_NO_PAD.encode(browser.public_key().to_sec1_point(false).as_bytes()),
                 "auth": URL_SAFE_NO_PAD.encode([1u8; 16]),
             },
             "zone": "Europe/Moscow", "offset": 180,
