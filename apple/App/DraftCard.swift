@@ -896,6 +896,8 @@ private final class PasteBlock: NSView {
         body.lineBreakMode = .byTruncatingTail
         addSubview(caption)
         addSubview(body)
+        // A click counts the way the system counts it: the button goes up over the block.
+        addGestureRecognizer(NSClickGestureRecognizer(target: self, action: #selector(clicked)))
     }
 
     required init?(coder: NSCoder) { fatalError("not used") }
@@ -923,8 +925,10 @@ private final class PasteBlock: NSView {
         body.frame = NSRect(x: 8, y: 8 + captionHeight + 2, width: bounds.width - 16 - textInset, height: bounds.height - captionHeight - 18)
     }
 
+    /// The press is the click's alone: the table does not follow it as the press on a row.
     override func mouseDown(with event: NSEvent) {}
-    override func mouseUp(with event: NSEvent) { onClick() }
+
+    @objc private func clicked() { onClick() }
 }
 
 /// A button of the strip of the quick-entry panel: a capsule with bold white text (R82).

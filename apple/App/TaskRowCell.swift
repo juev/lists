@@ -392,6 +392,8 @@ final class EventsCell: NSTableCellView {
         background.radius = 8
         background.color = NSColor.labelColor.withAlphaComponent(0.05)
         addSubview(background)
+        // A click opens Calendar, counted the way the system counts a click: the button goes up over the block.
+        addGestureRecognizer(NSClickGestureRecognizer(target: self, action: #selector(clicked)))
     }
 
     required init?(coder: NSCoder) { fatalError("not used") }
@@ -438,11 +440,10 @@ final class EventsCell: NSTableCellView {
         }
     }
 
+    /// The press is the click's alone: the table does not follow it as the press on a row.
     override func mouseDown(with event: NSEvent) {}
 
-    override func mouseUp(with event: NSEvent) {
-        if bounds.contains(convert(event.locationInWindow, from: nil)) { SystemCalendars.shared.openCalendar() }
-    }
+    @objc private func clicked() { SystemCalendars.shared.openCalendar() }
 }
 
 /// The field for a new task of an open project, under its tasks (R30): Return adds the task and the field stays for the next one.
