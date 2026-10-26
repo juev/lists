@@ -629,9 +629,9 @@ final class TaskCard: NSView, NSTextViewDelegate {
         let headerTop = Self.margin + Self.padding.top + 6
         let markSize = mark.fittingSize
         frames.mark = NSRect(x: x, y: headerTop + (line - markSize.height) / 2, width: markSize.width, height: markSize.height)
-        x += markSize.width + 8
+        x += markSize.width + TaskTableMetrics.markGap
         frames.bar = NSRect(x: x, y: headerTop + (line - 16) / 2, width: 3, height: 16)
-        x += 3 + 8
+        x += 3 + TaskTableMetrics.barGap
         if !folder.isHidden {
             let size = folder.image?.size ?? .zero
             frames.folder = NSRect(x: x, y: headerTop + (line - size.height) / 2, width: size.width, height: size.height)

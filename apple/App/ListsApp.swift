@@ -267,7 +267,7 @@ struct MenuBarView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     ForEach(today.prefix(12), id: \.id) { task in
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            Button { model.toggleDone(task) } label: { Image(systemName: "square") }
+                            Button { model.toggleDone(task) } label: { Image(systemName: "circle") }
                                 .buttonStyle(.plain)
                                 .accessibilityLabel(L("Complete"))
                             Text(task.title).lineLimit(1)
