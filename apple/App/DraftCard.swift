@@ -770,7 +770,7 @@ final class DraftCard: NSView, NSTextViewDelegate, NSTextFieldDelegate {
         let markSize = mark.image?.size ?? .zero
         f.mark = NSRect(x: insets.left, y: y + (line - markSize.height) / 2, width: markSize.width, height: markSize.height)
         // In the list the title keeps the place a row gives it after the bar of the priority.
-        let titleX = f.mark.maxX + 8 + (footer ? 0 : 3 + 8)
+        let titleX = f.mark.maxX + (footer ? 8 : TaskTableMetrics.markGap + 3 + TaskTableMetrics.barGap)
         let parsedWidth = parsed.stops.isEmpty ? 0 : min(parsed.stops.reduce(0) { $0 + $1.intrinsicContentSize.width + 6 }, (right - titleX) / 2)
         let titleWidth = max(right - titleX - (parsedWidth > 0 ? parsedWidth + 8 : 0), 1)
         let titleHeight = textHeight(title, width: titleWidth)
