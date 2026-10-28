@@ -6,7 +6,7 @@ The server is meant for one person: everyone who signs in sees the same data.
 
 ## Docker
 
-The image is `ghcr.io/juev/lists`, built for amd64 and arm64. Tags: the version (`0.8.1`), the minor line (`0.8`) and `latest`. Pre-releases get the version tag only; every version is listed on the [releases page](https://github.com/juev/lists/releases). Run the same release as the apps: 0.5.0 and 0.5.1 changed how a WebDAV or folder storage is kept, and a server older than the apps stops syncing with it.
+The image is `ghcr.io/juev/lists`, built for amd64 and arm64. Tags: the version (`0.8.2`), the minor line (`0.8`) and `latest`. Pre-releases get the version tag only; every version is listed on the [releases page](https://github.com/juev/lists/releases). Run the same release as the apps: 0.5.0 and 0.5.1 changed how a WebDAV or folder storage is kept, and a server older than the apps stops syncing with it.
 
 The server speaks plain HTTP, and the password and the session cookie travel in clear text. Publish the port on a loopback address only and put a [reverse proxy](#reverse-proxy) with TLS in front:
 
@@ -16,7 +16,7 @@ docker run -d --name lists \
   -v lists-data:/data \
   -e LISTS_WEB_PASSWORD='choose a password' \
   -e LISTS_TRUST_PROXY=1 \
-  ghcr.io/juev/lists:0.8.1
+  ghcr.io/juev/lists:0.8.2
 ```
 
 The container listens on port 8080, keeps its data in `/data` and runs as user 10001. A directory mounted over `/data` must be writable by that user. Uploads and imports are written to `/data/tmp` first (`TMPDIR`), so the server needs nothing outside `/data` and runs with a read-only root filesystem.
@@ -30,7 +30,7 @@ The repository carries a ready [`compose.yaml`](../compose.yaml) that reads its 
 ```yaml
 services:
   lists:
-    image: ghcr.io/juev/lists:0.8.1
+    image: ghcr.io/juev/lists:0.8.2
     restart: unless-stopped
     read_only: true
     cap_drop: [ALL]
