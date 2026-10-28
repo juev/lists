@@ -1,13 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
-    <shortcut
-        android:enabled="true"
-        android:icon="@drawable/ic_check"
-        android:shortcutId="quick_add"
-        android:shortcutShortLabel="@string/quick_add">
-        <intent
-            android:action="android.intent.action.VIEW"
-            android:targetClass="org.evsyukov.lists.QuickAddActivity"
-            android:targetPackage="org.evsyukov.lists" />
-    </shortcut>
+    <!-- R163: a shortcut published with this category (DirectShare) puts Lists in the Direct Share
+         row; the types are those of the "Share" intent filters of QuickAddActivity. The "New task"
+         item of the icon menu is that shortcut, not a static one. -->
+    <share-target android:targetClass="org.evsyukov.lists.QuickAddActivity">
+        <data android:mimeType="text/plain" />
+        <data android:mimeType="image/*" />
+        <data android:mimeType="application/*" />
+        <category android:name="org.evsyukov.lists.category.NEW_TASK" />
+    </share-target>
 </shortcuts>
