@@ -82,6 +82,7 @@ open class ListsApp : Application() {
             Reminders.refresh(this@ListsApp)
             TodayNotice.refresh(this@ListsApp)
             TaskWidgets.refresh(this@ListsApp)
+            DirectShare.publish(this@ListsApp)
         }
     }
 

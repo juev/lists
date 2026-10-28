@@ -31,7 +31,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.dp
+import androidx.core.content.pm.ShortcutInfoCompat
+import androidx.core.content.pm.ShortcutManagerCompat
+import androidx.core.graphics.drawable.IconCompat
 import kotlinx.coroutines.async
+import kotlinx.coroutines.launch
 import org.evsyukov.lists.ui.CardHandle
 import org.evsyukov.lists.ui.NewTaskCard
 import org.evsyukov.lists.ui.NewTaskEntry
@@ -158,8 +162,36 @@ class QuickAddActivity : ComponentActivity() {
             ::describe,
         )
         Toast.makeText(applicationContext, message, Toast.LENGTH_SHORT).show()
-        if (result.isSuccess) finish()
+        if (result.isSuccess) {
+            Repo.scope.launch { DirectShare.publish(applicationContext) }
+            finish()
+        }
         return result.isSuccess
+    }
+}
+
+/**
+ * R163: the Direct Share target, one long-lived shortcut that the share sheet shows above the list of apps.
+ * The `share-target` in res/xml/shortcuts.xml ties its category to this activity.
+ */
+internal object DirectShare {
+    const val CATEGORY = "org.evsyukov.lists.category.NEW_TASK"
+    const val ID = "new_task"
+
+    /**
+     * Publishing again after a save tells Android the target was used, which keeps it ranked. The shortcut is also
+     * the "New task" item of the launcher menu: one excluded from the launcher is not kept as a dynamic shortcut.
+     */
+    fun publish(context: Context) {
+        val shortcut = ShortcutInfoCompat.Builder(context, ID)
+            .setShortLabel(context.getString(R.string.quick_add))
+            .setIcon(IconCompat.createWithResource(context, R.mipmap.ic_launcher))
+            .setIntent(Intent(context, QuickAddActivity::class.java).setAction(Intent.ACTION_VIEW))
+            .setLongLived(true)
+            .setCategories(setOf(CATEGORY))
+            .build()
+        runCatching { ShortcutManagerCompat.pushDynamicShortcut(context, shortcut) }
+            .onFailure { logError("app", "the Direct Share target was not published: ${logged(it)}") }
     }
 }
 

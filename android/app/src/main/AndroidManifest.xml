@@ -37,8 +37,9 @@
         </activity>
 
         <!-- Quick entry: a small window over whatever is on screen. It is the
-             target of "Share", of the text-selection menu, of the launcher
-             shortcut and of the quick settings tile. -->
+             target of "Share" (also from its Direct Share row, R163), of the
+             text-selection menu, of the launcher shortcut and of the quick
+             settings tile. -->
         <activity
             android:name=".QuickAddActivity"
             android:exported="true"
