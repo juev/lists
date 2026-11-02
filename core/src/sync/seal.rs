@@ -517,4 +517,25 @@ mod tests {
         assert_ne!(name, sha);
         assert_ne!(name, Keys::new(&[8u8; 32]).blob_name(&sha));
     }
+
+    /// S55: the subkeys and the name of attachment content are the bytes 0.8.2 computed,
+    /// so an update of hmac or sha2 that changed them fails here instead of leaving
+    /// devices of two releases unable to find each other's attachments (#448).
+    /// The file subkey is also pinned by `a_storage_sealed_by_an_earlier_release_opens`.
+    #[test]
+    fn subkeys_and_blob_names_are_those_of_earlier_releases() {
+        let data_key = [7u8; 32];
+        assert_eq!(
+            hex(&subkey(&data_key, "lists file")),
+            "4ebcafbac569ee80c111a47f806df95b72b48eaa6348f52488b06f2070bbc8af"
+        );
+        assert_eq!(
+            hex(&subkey(&data_key, "lists blob name")),
+            "166b0831dda21c4f213bc9a1e393f12fc16d02adfcc27cdb47e4005134533c3a"
+        );
+        assert_eq!(
+            Keys::new(&data_key).blob_name("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"),
+            "58caa1869c1a4eef80fc9168172864da3a1ae2672ead63f6a35a70d082dd68d9"
+        );
+    }
 }
