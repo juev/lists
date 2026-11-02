@@ -79,7 +79,7 @@ fn encrypt_with(
     let mut record = plain.to_vec();
     record.push(2);
     let sealed = Aes128Gcm::new(&cek.into())
-        .encrypt(Nonce::from_slice(&nonce), record.as_slice())
+        .encrypt(&Nonce::from(nonce), record.as_slice())
         .map_err(|e| e.to_string())?;
 
     let mut out = salt.to_vec();
@@ -185,7 +185,7 @@ pub fn decrypt(ua_private: &SecretKey, auth: &[u8], body: &[u8]) -> Result<Vec<u
     prk.expand(b"Content-Encoding: nonce\0", &mut nonce)
         .map_err(|e| e.to_string())?;
     let mut plain = Aes128Gcm::new(&cek.into())
-        .decrypt(Nonce::from_slice(&nonce), &body[21 + id_len..])
+        .decrypt(&Nonce::from(nonce), &body[21 + id_len..])
         .map_err(|e| e.to_string())?;
     if plain.pop() != Some(2) {
         return Err("no delimiter".into());
