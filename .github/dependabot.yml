@@ -11,7 +11,10 @@ updates:
     schedule:
       interval: weekly
   # The Rust workspaces: patch and minor releases of the crates in both come as
-  # one pull request, a major release on its own for each workspace.
+  # one pull request, major releases as a second one. A group spans both
+  # directories, so it also moves web/Cargo.lock when only core lists the
+  # crate (web depends on core by path), and crates that must change together,
+  # such as sha2 and hmac, arrive in the same pull request.
   - package-ecosystem: cargo
     directories:
       - /core
@@ -23,3 +26,6 @@ updates:
         update-types:
           - patch
           - minor
+      crates-major:
+        update-types:
+          - major
