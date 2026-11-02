@@ -169,7 +169,10 @@ fn r140_a_large_file_survives_a_backup_and_a_restore() {
         }
         hasher.update(&buffer[..read]);
     }
-    assert_eq!(got.sha256, format!("{:x}", hasher.finalize()));
+    assert_eq!(
+        got.sha256,
+        hasher.finalize().iter().map(|b| format!("{b:02x}")).collect::<String>()
+    );
 }
 
 #[test]

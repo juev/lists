@@ -126,7 +126,7 @@ pub(crate) struct Keys {
 }
 
 fn subkey(data_key: &[u8; 32], label: &str) -> [u8; 32] {
-    let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(data_key).expect("any key length");
+    let mut mac = <Hmac<Sha256> as KeyInit>::new_from_slice(data_key).expect("any key length");
     mac.update(label.as_bytes());
     mac.finalize().into_bytes().into()
 }
@@ -142,7 +142,7 @@ impl Keys {
     /// S55: attachment content lies under an HMAC of its hash, so the storage
     /// cannot tell whether it holds a file it knows.
     pub(crate) fn blob_name(&self, sha256: &str) -> String {
-        let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(&self.name).expect("any key length");
+        let mut mac = <Hmac<Sha256> as KeyInit>::new_from_slice(&self.name).expect("any key length");
         mac.update(sha256.as_bytes());
         hex(&mac.finalize().into_bytes())
     }
