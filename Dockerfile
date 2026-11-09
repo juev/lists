@@ -4,7 +4,7 @@
 # but it and a minimal init.
 
 # Pinned by digest as well: a tag can be pushed again. Dependabot raises both.
-FROM rust:1.99.1-alpine@sha256:b1d5dd5a22a09404d3e798c0cf051b689077360374eb505fa5bb93c479693d87 AS build
+FROM rust:1.99.1-alpine@sha256:44819b27be4c97b0e4d7203bd2e02c4820f97700211b6a37fb4c246a2de59383 AS build
 # tini forwards SIGTERM: lists-web installs no signal handlers and would
 # otherwise ignore `docker stop` as PID 1.
 RUN apk add --no-cache musl-dev tini-static
