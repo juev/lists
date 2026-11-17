@@ -588,6 +588,31 @@ fn new_task_list(conn: &Connection) -> Result<String> {
         .unwrap_or_else(|| INBOX_ID.to_string()))
 }
 
+/// R164: the most days the start of a new task can be put off.
+pub const NEW_TASK_START_MAX_DAYS: u32 = 365;
+
+/// R164: days from the day a task is created to its start; none is "Never". What is not a number
+/// from 0 to the most reads as "Never" (S32).
+fn new_task_start(conn: &Connection) -> Result<Option<u32>> {
+    Ok(setting(conn, "new_task_start")?
+        .and_then(|v| v.as_u64())
+        .filter(|days| *days <= u64::from(NEW_TASK_START_MAX_DAYS))
+        .map(|days| days as u32))
+}
+
+/// R164: the start the setting gives a new task created on `today`: `days` later, but not after
+/// the day of `due`. A day without a time.
+fn preset_start(days: u32, today: NaiveDate, due: Option<&str>) -> String {
+    let start = today + chrono::Days::new(u64::from(days));
+    let due_day = due.and_then(recur::split).map(|(day, _)| day);
+    match due_day {
+        Some(day) if day < start => day,
+        _ => start,
+    }
+    .format(DATE_FMT)
+    .to_string()
+}
+
 /// The list a task without a list goes to (R40, R121). `last_used` is what this device used last.
 pub(crate) fn default_list_id(conn: &Connection, last_used: Option<&str>) -> Result<String> {
     let hidden = inbox_hidden(conn)?;
@@ -1325,6 +1350,21 @@ impl Store {
     /// The choice is one for all devices and travels with sync (R40, S32).
     pub fn set_new_task_list(&self, choice: String) -> Result<()> {
         self.write(|w| w.set(KIND_SETTINGS, SETTINGS_ID, "new_task_list", json!(choice)))
+    }
+
+    /// R164: the days from creation to the start of a new task; none is "Never".
+    pub fn new_task_start(&self) -> Result<Option<u32>> {
+        new_task_start(&self.lock().conn)
+    }
+
+    /// R164: one choice for all devices, synced like the default list (S32). None is "Never".
+    pub fn set_new_task_start(&self, days: Option<u32>) -> Result<()> {
+        if days.is_some_and(|d| d > NEW_TASK_START_MAX_DAYS) {
+            return Err(AppError::invalid(format!(
+                "the start of a new task is at most {NEW_TASK_START_MAX_DAYS} days away"
+            )));
+        }
+        self.write(|w| w.set(KIND_SETTINGS, SETTINGS_ID, "new_task_start", json!(days)))
     }
 
     /// The choice a version before #255 kept on the device: written only while the shared
@@ -2688,6 +2728,12 @@ fn find_list_by_name(conn: &Connection, name: &str) -> Result<Option<String>> {
 }
 
 fn create_task(w: &mut Writer, new: NewTask) -> Result<TaskItem> {
+    create_task_with(w, new, true)
+}
+
+/// `start_preset`: whether a top-level task without a start gets the one of the settings (R164);
+/// a copy of a project does not.
+fn create_task_with(w: &mut Writer, new: NewTask, start_preset: bool) -> Result<TaskItem> {
     let title = new.title.trim().to_string();
     if title.is_empty() {
         return Err(AppError::invalid("title is empty"));
@@ -2698,6 +2744,7 @@ fn create_task(w: &mut Writer, new: NewTask) -> Result<TaskItem> {
     let place = (new.first, new.after.clone());
     let mut priority = new.priority;
     let mut due = new.due.filter(|d| !d.is_empty());
+    let mut start = new.start.clone().filter(|s| !s.is_empty());
     match &new.parent_id {
         Some(parent) => {
             let parent_task = get_task(w.tx, parent)?;
@@ -2738,6 +2785,12 @@ fn create_task(w: &mut Writer, new: NewTask) -> Result<TaskItem> {
             if due.is_none() && new.start.is_none() && list.default_due_today {
                 due = Some(w.today().format(DATE_FMT).to_string());
             }
+            // R164: after the list, so that its "due today" stays and the start does not pass it.
+            if start.is_none() && start_preset {
+                if let Some(days) = new_task_start(w.tx)? {
+                    start = Some(preset_start(days, w.today(), due.as_deref()));
+                }
+            }
             w.task(&id, "list", json!(list_id))?;
             let pos = match placed(w, &place, None, &list_id, &id)? {
                 Some(pos) => pos,
@@ -2750,7 +2803,7 @@ fn create_task(w: &mut Writer, new: NewTask) -> Result<TaskItem> {
     if !new.notes.is_empty() {
         w.task(&id, "notes", json!(new.notes))?;
     }
-    if let Some(start) = new.start.filter(|s| !s.is_empty()) {
+    if let Some(start) = start {
         w.task(&id, "start", json!(start))?;
     }
     if let Some(due) = due {
@@ -2804,7 +2857,7 @@ fn placed(
 }
 
 fn duplicate(w: &mut Writer, original: &TaskItem, parent: Option<String>) -> Result<String> {
-    let copy = create_task(
+    let copy = create_task_with(
         w,
         NewTask {
             title: original.title.clone(),
@@ -2817,6 +2870,7 @@ fn duplicate(w: &mut Writer, original: &TaskItem, parent: Option<String>) -> Res
             tags: original.tags.clone(),
             ..NewTask::default()
         },
+        !original.is_project,
     )?;
     if original.is_project {
         // Before its tasks are copied: under a project they keep their fields (R10).

@@ -1981,6 +1981,22 @@ fn s32_hidden_inbox_and_the_default_list_reach_the_other_device() {
 }
 
 #[test]
+fn s32_the_start_of_a_new_task_reaches_the_other_device() {
+    let storage = tempfile::tempdir().unwrap();
+    let (a, b) = (device(), device());
+    a.set_new_task_start(Some(3)).unwrap();
+    settle(&a, &b, &storage);
+    assert_eq!(b.new_task_start().unwrap(), Some(3));
+    assert_eq!(add(&b, "б").start.as_deref(), Some("2026-10-08"));
+
+    b.set_now_for_tests("2026-10-05T10:01");
+    b.set_new_task_start(None).unwrap();
+    settle(&b, &a, &storage);
+    assert_eq!((a.new_task_start().unwrap(), b.new_task_start().unwrap()), (None, None));
+    assert_eq!(add(&a, "а").start, None);
+}
+
+#[test]
 fn s32_the_shared_setting_merges_like_any_field_and_reaches_a_new_device() {
     let storage = tempfile::tempdir().unwrap();
     let (a, b) = (device(), device());

@@ -82,6 +82,123 @@ fn r2_list_settings_are_stored_and_applied() {
 }
 
 #[test]
+fn r164_a_new_task_gets_the_start_of_the_settings() {
+    let d = device();
+    assert_eq!(d.new_task_start().unwrap(), None, "Never until a choice is made");
+    assert_eq!(add(&d, "до").start, None);
+
+    d.set_new_task_start(Some(3)).unwrap();
+    assert_eq!(d.new_task_start().unwrap(), Some(3));
+    let a = add(&d, "а");
+    assert_eq!(
+        a.start.as_deref(),
+        Some("2026-10-08"),
+        "three days from the day of creation"
+    );
+    assert_eq!(a.due, None, "the due date is not touched");
+
+    let b = d
+        .create_task(NewTask {
+            title: "б".into(),
+            start: Some("2026-10-06T09:00".into()),
+            ..NewTask::default()
+        })
+        .unwrap();
+    assert_eq!(b.start.as_deref(), Some("2026-10-06T09:00"), "an explicit start wins");
+
+    let c = d.quick_add("купить завтра".into(), None, false, None).unwrap();
+    assert_eq!(c.due.as_deref(), Some("2026-10-06"));
+    assert_eq!(
+        c.start.as_deref(),
+        Some("2026-10-06"),
+        "not after the day of the due date"
+    );
+
+    let e = d
+        .create_task(NewTask {
+            title: "г".into(),
+            due: Some("2026-10-20T18:00".into()),
+            ..NewTask::default()
+        })
+        .unwrap();
+    assert_eq!(
+        e.start.as_deref(),
+        Some("2026-10-08"),
+        "a later due date leaves the start as it is"
+    );
+
+    d.set_new_task_start(Some(0)).unwrap();
+    let today = add(&d, "сегодня");
+    assert_eq!(today.start.as_deref(), Some("2026-10-05"));
+    assert!(
+        view(&d, Scope::Today).contains(&"сегодня".to_string()),
+        "R5: its start has come"
+    );
+
+    d.set_new_task_start(None).unwrap();
+    assert_eq!(add(&d, "после").start, None);
+}
+
+#[test]
+fn r164_the_due_today_of_the_list_stays() {
+    let d = device();
+    let work = d.create_list("Работа".into()).unwrap();
+    d.set_list_defaults(work.id.clone(), Priority::None, true).unwrap();
+    d.set_new_task_start(Some(1)).unwrap();
+    let a = d
+        .create_task(NewTask {
+            title: "а".into(),
+            list_id: Some(work.id.clone()),
+            ..NewTask::default()
+        })
+        .unwrap();
+    assert_eq!(a.due.as_deref(), Some("2026-10-05"), "the list gives its date");
+    assert_eq!(a.start.as_deref(), Some("2026-10-05"), "the start does not pass it");
+}
+
+#[test]
+fn r164_subtasks_tasks_of_a_project_and_projects_get_no_start() {
+    let d = device();
+    d.set_new_task_start(Some(2)).unwrap();
+    let task = add(&d, "задача");
+    assert_eq!(add_sub(&d, &task, "строка").start, None);
+
+    let project = d.create_project("Проект".into(), None).unwrap();
+    assert_eq!(project.start, None);
+    let inside = d
+        .quick_add_under("внутри".into(), project.id.clone(), false, None)
+        .unwrap();
+    assert_eq!(inside.start, None, "R125 decides the dates of a task of a project");
+
+    let copy = d.duplicate_task(project.id).unwrap();
+    assert!(copy.is_project);
+    assert_eq!(copy.start, None, "a copy of a project gets none");
+
+    d.set_new_task_start(None).unwrap();
+    let bare = add(&d, "без дат");
+    d.set_new_task_start(Some(2)).unwrap();
+    let twin = d.duplicate_task(bare.id).unwrap();
+    assert_eq!(
+        twin.start.as_deref(),
+        Some("2026-10-07"),
+        "a copy without a start is a new task"
+    );
+}
+
+#[test]
+fn r164_a_stored_value_out_of_range_reads_as_never() {
+    let d = device();
+    assert!(d.set_new_task_start(Some(366)).is_err());
+    d.set_new_task_start(Some(365)).unwrap();
+    assert_eq!(add(&d, "год").start.as_deref(), Some("2027-10-05"));
+    for value in [json!(366), json!(-1), json!("3"), json!(1.5), json!(null)] {
+        d.set_setting_for_tests("new_task_start", value.clone());
+        assert_eq!(d.new_task_start().unwrap(), None, "{value}");
+        assert_eq!(add(&d, "x").start, None, "{value}");
+    }
+}
+
+#[test]
 fn r3_lists_are_reordered_archived_and_deleted() {
     let d = device();
     let a = d.create_list("A".into()).unwrap();
