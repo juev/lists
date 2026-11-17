@@ -1367,6 +1367,8 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
                                     else -> listChoices.firstOrNull { it.id == newTaskList }?.name ?: str(R.string.inbox)
                                 },
                             ) { choosing = "newTaskList" }
+                            SettingRow(str(R.string.new_task_start), newTaskStartLabel(state.newTaskStart)) { choosing = "newTaskStart" }
+                            Text(str(R.string.new_task_start_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             SwitchRow(str(R.string.parse_title), parse) { parse = it; EntryPrefs.setParse(context, it) }
                             SwitchRow(str(R.string.clipboard_note), clipboard) { clipboard = it; EntryPrefs.setClipboard(context, it) }
                             HorizontalDivider(Modifier.padding(vertical = 8.dp))
@@ -1669,6 +1671,39 @@ fun SettingsDialog(model: MainViewModel, onNotifications: () -> Unit, onDismiss:
                 model.act { store -> store.setNewTaskList(values[it]) }
             }
         }
+        "newTaskStart" -> {
+            // R164: "Never", "Today", "Tomorrow", or a number of days asked for next.
+            val values = listOf<UInt?>(null, 0u, 1u)
+            val labels = listOf(str(R.string.new_task_start_never), str(R.string.today), str(R.string.tomorrow), str(R.string.new_task_start_in_n_days))
+            val current = state.newTaskStart
+            val selected = if (current != null && current >= 2u) 3 else values.indexOf(current)
+            // The dialog closes after a pick; the choice of "In N days" opens the next one instead.
+            ChoiceDialog(str(R.string.new_task_start), labels, selected, { if (choosing == "newTaskStart") choosing = null }) { index ->
+                if (index < values.size) model.act { store -> store.setNewTaskStart(values[index]) } else choosing = "newTaskStartDays"
+            }
+        }
+        "newTaskStartDays" -> {
+            var typed by remember { mutableStateOf(state.newTaskStart?.takeIf { it >= 2u }?.toString() ?: "7") }
+            val days = typed.toUIntOrNull()?.takeIf { it in 2u..365u }
+            FormDialog(
+                title = str(R.string.new_task_start),
+                onDismiss = { choosing = null },
+                content = {
+                    OutlinedTextField(
+                        typed, { typed = it.filter(Char::isDigit).take(3) }, singleLine = true,
+                        label = { Text(str(R.string.new_task_start_days)) },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    )
+                },
+                confirmButton = {
+                    TextButton(enabled = days != null, onClick = {
+                        choosing = null
+                        model.act { store -> store.setNewTaskStart(days) }
+                    }) { Text(str(R.string.ok)) }
+                },
+                dismissButton = { TextButton(onClick = { choosing = null }) { Text(str(R.string.cancel)) } },
+            )
+        }
         // The notice that takes hiding back is shown on the main screen: settings close for it.
         "hideInbox" -> HideInboxDialog(state, onDismiss = { choosing = null }) { listId, move ->
             model.hideInbox(listId, move)
@@ -1722,6 +1757,14 @@ private fun HideInboxDialog(state: UiState, onDismiss: () -> Unit, onHide: (Stri
 internal fun keepDoneChoices(current: KeepDone): List<KeepDone> {
     val seconds = (listOf(0u, 5u, 15u) + listOfNotNull((current as? KeepDone.Seconds)?.seconds)).distinct().sorted()
     return seconds.map { KeepDone.Seconds(it) } + KeepDone.EndOfDay
+}
+
+/** R164: how the row of the start of a new task names the choice. */
+private fun newTaskStartLabel(days: UInt?): String = when (days) {
+    null -> str(R.string.new_task_start_never)
+    0u -> str(R.string.today)
+    1u -> str(R.string.tomorrow)
+    else -> str(R.string.new_task_start_in_days, days.toInt())
 }
 
 /** A whole number of minutes is what an earlier version offered. */

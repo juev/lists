@@ -71,6 +71,8 @@ data class UiState(
     val newTaskList: String = "inbox",
     /** Inbox has no row while it holds no open tasks (R121); synced. */
     val inboxHidden: Boolean = false,
+    /** Days from creation to the start of a new task; null is "Never" (R164); synced. */
+    val newTaskStart: UInt? = null,
     val loaded: Boolean = false,
     /** The list a task entered where no list is implied goes to (R40, R121); read with the rest, off the main thread. */
     val defaultListId: String = "inbox",
@@ -203,6 +205,7 @@ class MainViewModel : ViewModel() {
                     keepDone = store.keepDone(),
                     newTaskList = store.newTaskList(),
                     inboxHidden = store.inboxHidden(),
+                    newTaskStart = store.newTaskStart(),
                     defaultListId = EntryPrefs.defaultListId(ListsApp.instance),
                     canUndo = store.canUndo(),
                     loaded = true,

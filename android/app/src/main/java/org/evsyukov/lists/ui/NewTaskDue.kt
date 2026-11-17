@@ -1,6 +1,7 @@
 package org.evsyukov.lists.ui
 
 import uniffi.lists_core.Priority
+import java.time.LocalDate
 
 /**
  * The due date a new task gets without the person picking one (R75): today in
@@ -9,6 +10,17 @@ import uniffi.lists_core.Priority
  */
 internal fun presetDue(listDueToday: Boolean, start: String?, today: String): String? =
     today.takeIf { listDueToday && start == null }
+
+/**
+ * The start the settings give a new task (R164): `days` after `today`, but not
+ * after the day of `due`. Null `days` is "Never".
+ */
+internal fun presetStart(days: UInt?, today: String, due: String?): String? {
+    if (days == null) return null
+    val start = LocalDate.parse(today).plusDays(days.toLong()).toString()
+    val dueDay = due?.take(10)
+    return if (dueDay != null && dueDay < start) dueDay else start
+}
 
 /**
  * The due date a task just created is to end up with (R41, R75).

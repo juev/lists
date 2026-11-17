@@ -334,6 +334,12 @@
     <string name="new_tasks_setting">Новые задачи</string>
     <string name="default_list">Список по умолчанию</string>
     <string name="last_used_list">Последний использованный</string>
+    <string name="new_task_start">Начало новой задачи</string>
+    <string name="new_task_start_never">Никогда</string>
+    <string name="new_task_start_in_n_days">Через N дней…</string>
+    <string name="new_task_start_in_days">Через %1$d дн.</string>
+    <string name="new_task_start_days">Число дней, от 2 до 365</string>
+    <string name="new_task_start_hint">Новая задача без своей даты начала получает её, но не позже срока. С «Сегодня» каждая новая задача попадает в «Сегодня».</string>
     <string name="calendar_events">События календаря</string>
     <string name="show_calendar_events">Показывать события календаря в «Сегодня»</string>
     <string name="calendar_events_hint">События читаются из календарей этого устройства и показаны над задачами. Они не синхронизируются, и настройка действует только на этом устройстве.</string>

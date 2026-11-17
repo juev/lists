@@ -16,6 +16,22 @@ class NewTaskDueTest {
     }
 
     @Test
+    fun r164_the_start_of_the_settings_is_counted_from_today() {
+        assertEquals("2026-10-11", presetStart(days = 3u, today = today, due = null))
+        assertEquals(today, presetStart(days = 0u, today = today, due = null))
+        assertEquals(tomorrow, presetStart(days = 1u, today = today, due = null))
+        assertNull(presetStart(days = null, today = today, due = tomorrow))
+    }
+
+    @Test
+    fun r164_the_start_of_the_settings_does_not_pass_the_due_day() {
+        assertEquals(tomorrow, presetStart(days = 3u, today = today, due = "2026-10-09T18:00"))
+        assertEquals("2026-10-11", presetStart(days = 3u, today = today, due = "2026-10-11"))
+        assertEquals("2026-10-11", presetStart(days = 3u, today = today, due = "2026-10-20"))
+        assertEquals(today, presetStart(days = 1u, today = today, due = today))
+    }
+
+    @Test
     fun r75_no_preset_without_a_list_default() {
         assertNull(presetDue(listDueToday = false, start = null, today = today))
     }

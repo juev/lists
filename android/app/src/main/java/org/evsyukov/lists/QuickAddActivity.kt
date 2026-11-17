@@ -42,6 +42,8 @@ import org.evsyukov.lists.ui.NewTaskEntry
 import org.evsyukov.lists.ui.TaskDraft
 import org.evsyukov.lists.ui.describe
 import org.evsyukov.lists.ui.saveDraft
+import uniffi.lists_core.TaskItem
+import uniffi.lists_core.TaskList
 
 /** What another app handed over, reduced to what a task can hold. */
 private data class Shared(val title: String = "", val notes: String = "", val files: List<Uri> = emptyList())
@@ -69,7 +71,7 @@ class QuickAddActivity : ComponentActivity() {
         setContent {
             // #320: read off the main thread; the card comes when they have.
             val start = fromStore { store ->
-                Triple(store.lists().filter { !it.archived }, store.projects(), EntryPrefs.defaultListId(this@QuickAddActivity))
+                CardStart(store.lists().filter { !it.archived }, store.projects(), EntryPrefs.defaultListId(this@QuickAddActivity), store.newTaskStart())
             }
             AppTheme {
                 // Tapping outside the card closes the window, as with any dialog.
@@ -84,7 +86,7 @@ class QuickAddActivity : ComponentActivity() {
                         modifier = Modifier.fillMaxWidth().padding(12.dp)
                             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {},
                     ) {
-                        val (lists, projects, listId) = start ?: return@Surface
+                        val (lists, projects, listId, newTaskStart) = start ?: return@Surface
                         val entry = rememberSaveable(saver = NewTaskEntry.Saver) { NewTaskEntry(shared.title, shared.notes, listId) }
                         val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
                         Column {
@@ -102,6 +104,7 @@ class QuickAddActivity : ComponentActivity() {
                                 notes = shared.notes,
                                 files = shared.files,
                                 pastedNotes = pasted,
+                                newTaskStart = newTaskStart,
                                 entry = entry,
                             )
                         }
@@ -207,3 +210,6 @@ class QuickTileService : TileService() {
         }
     }
 }
+
+/** What the card of the quick-entry window opens with, read off the main thread (#320). */
+private data class CardStart(val lists: List<TaskList>, val projects: List<TaskItem>, val listId: String, val newTaskStart: UInt?)

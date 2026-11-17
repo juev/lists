@@ -97,6 +97,7 @@ import uniffi.lists_core.TaskList
 data class TaskDraft(
     val title: String,
     val notes: String,
+    /** The start chosen in the card; null while the settings decide (R164). */
     val start: String?,
     /** What stood next to the due icon. */
     val due: String?,
@@ -116,6 +117,8 @@ data class TaskDraft(
     val subtasks: List<String> = emptyList(),
     /** The project the task goes into (R129), chosen in the card or given by the view. */
     val parentId: String? = null,
+    /** The person took the start away in the card: the task gets none from the settings (R164). */
+    val startRemoved: Boolean = false,
 )
 
 /**
@@ -164,12 +167,15 @@ private fun Store.createFrom(context: Context, draft: TaskDraft): SavedDraft {
     }
     val notes = draft.notes.trim()
     if (notes.isNotEmpty()) setNotes(task.id, notes)
-    draft.start?.let { setStart(task.id, it) }
     // The list gives its date only to a task without a start date, and this one was created before its start was written.
     val bare = draft.dueRemoved || draft.start != null
     val typed = if (bare && draft.parse) parseQuick(line).due else null
     val due = finalDue(draft.due, draft.dueIsPreset, bare, task.due, typed)
     if (due != task.due) setDue(task.id, due)
+    // R164: the core counted the start of the settings from the due date it gave; the card may have changed both.
+    val preset = newTaskStart().takeIf { !draft.startRemoved && parentId == null }
+    val start = draft.start ?: presetStart(preset, today(), due)
+    if (start != task.start) setStart(task.id, start)
     // After the dates: the rule is counted from them.
     draft.repeat?.let { setRepeat(task.id, it) }
     val typedPriority = if (draft.priority == Priority.NONE && draft.parse) parseQuick(line).priority else Priority.NONE
@@ -228,6 +234,8 @@ class NewTaskEntry(title: String = "", notes: String = "", listId: String? = nul
     /** The note as taken from the clipboard (R58), to tell it from one the person typed. */
     var taken by mutableStateOf<String?>(null)
     var start by mutableStateOf<String?>(null)
+    /** The start was taken away in the card: the settings give none (R164). */
+    var startRemoved by mutableStateOf(false)
     var due by mutableStateOf<String?>(null)
     var dueRemoved by mutableStateOf(false)
     var repeat by mutableStateOf<Repeat?>(null)
@@ -261,7 +269,7 @@ class NewTaskEntry(title: String = "", notes: String = "", listId: String? = nul
 
     internal fun toSaved(): ArrayList<Any?> = arrayListOf(
         text, note, taken, start, due, dueRemoved, repeat?.toSaved(), priority?.name, listId,
-        ArrayList(picked.map(Uri::toString)), expanded, ArrayList(subtasks), subtask, subtasksShown, projectId,
+        ArrayList(picked.map(Uri::toString)), expanded, ArrayList(subtasks), subtask, subtasksShown, projectId, startRemoved,
     )
 
     companion object {
@@ -279,6 +287,7 @@ class NewTaskEntry(title: String = "", notes: String = "", listId: String? = nul
             subtask = saved[12] as String
             subtasksShown = saved[13] as Boolean
             projectId = saved[14] as String?
+            startRemoved = saved.getOrNull(15) as Boolean? ?: false
         }
 
         /** Saved, not just remembered: the card keeps what was entered when the screen is turned (R63). */
@@ -320,6 +329,8 @@ fun NewTaskCard(
     keepOpen: Boolean = false,
     /** The note taken from the clipboard (R58); it may arrive after the card is shown. */
     pastedNotes: String? = null,
+    /** R164: days from creation to the start the settings give; null is "Never". */
+    newTaskStart: UInt? = null,
     /** What is entered. Given from outside where the card can be closed and brought back (R97). */
     entry: NewTaskEntry = rememberSaveable(saver = NewTaskEntry.Saver) { NewTaskEntry(title, notes, listId) },
 ) {
@@ -334,6 +345,7 @@ fun NewTaskCard(
         }
     }
     var start by entry::start
+    var startRemoved by entry::startRemoved
     var due by entry::due
     var dueRemoved by entry::dueRemoved
     var repeat by entry::repeat
@@ -371,6 +383,8 @@ fun NewTaskCard(
     // Shown as the value of the field, whichever of the three it comes from: the card, the title, the list.
     val shownDue = shownDue(due, typed?.due, preset)
     val shownPriority = shownPriority(priority, typed?.priority ?: Priority.NONE, presetPriority)
+    // R164: the start the settings give, counted against the due date the card shows; not for a task of a project.
+    val shownStart = start ?: presetStart(newTaskStart, today(), shownDue).takeIf { !startRemoved && chosenProject == null }
 
     // R139: Save waits for the task that is being saved.
     var saving by remember { mutableStateOf(false) }
@@ -380,6 +394,7 @@ fun NewTaskCard(
         text = ""
         note = ""
         start = null
+        startRemoved = false
         due = null
         dueRemoved = false
         repeat = null
@@ -396,7 +411,7 @@ fun NewTaskCard(
         if (text.isBlank() || saving) return
         val draft = TaskDraft(
             text, note, start, due ?: preset, due == null && preset != null, dueRemoved, repeat, priority, chosenList, parse, attached,
-            typedSubtasks(entry.subtasks, entry.subtask), chosenProject,
+            typedSubtasks(entry.subtasks, entry.subtask), chosenProject, startRemoved,
         )
         saving = true
         scope.launch {
@@ -454,7 +469,7 @@ fun NewTaskCard(
                 modifier = Modifier.fillMaxWidth().padding(start = if (full) 0.dp else AFTER_MARK),
             )
             // The same fields as in the editor, so that nothing has to be typed as text.
-            val startText = start?.let { dateLabel(it).lowercase() }
+            val startText = shownStart?.let { dateLabel(it).lowercase() }
             val dueText = shownDue?.let { dateLabel(it).lowercase() }
             val filesText = attached.size.takeIf { it > 0 }?.toString()
             if (full) {
@@ -470,7 +485,7 @@ fun NewTaskCard(
                 FieldsRow(
                     Modifier.fillMaxWidth().padding(start = AFTER_MARK + Space.xl, end = Space.m),
                     chips = {
-                        start?.let { ValueChip(dateLabel(it), Icons.Outlined.PlayArrow, str(R.string.start)) { dialog = "start" } }
+                        shownStart?.let { ValueChip(dateLabel(it), Icons.Outlined.PlayArrow, str(R.string.start)) { dialog = "start" } }
                         shownDue?.let { ValueChip(dateLabel(it), Icons.Outlined.Event, str(R.string.due), tonal = true) { dialog = "due" } }
                         repeat?.let { ValueChip(it.summary(), Icons.Outlined.Repeat, str(R.string.repeat)) { dialog = "repeat" } }
                         if (shownPriority != Priority.NONE) {
@@ -524,7 +539,7 @@ fun NewTaskCard(
         }
     }
     when (dialog) {
-        "start" -> MomentDialog(str(R.string.start_title), start, onPick = { start = it }) { dialog = null }
+        "start" -> MomentDialog(str(R.string.start_title), shownStart, onPick = { start = it; startRemoved = it == null }) { dialog = null }
         "due" -> MomentDialog(str(R.string.due), shownDue, onPick = { due = it; dueRemoved = it == null }) { dialog = null }
         "repeat" -> RepeatDialog(repeat, onPick = { repeat = it }) { dialog = null }
         "priority" -> ChoiceDialog(str(R.string.priority), priorities.map { it.title() }, priorities.indexOf(shownPriority), { dialog = null }) { priority = priorities[it] }

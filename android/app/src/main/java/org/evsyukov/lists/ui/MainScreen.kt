@@ -756,6 +756,7 @@ private fun NewTaskSheet(state: UiState, restored: NewTaskEntry?, onAdd: suspend
             onSubmit = onAdd,
             modifier = Modifier.navigationBarsPadding().padding(start = 8.dp, end = 8.dp, bottom = 8.dp),
             keepOpen = true,
+            newTaskStart = state.newTaskStart,
             entry = entry,
         )
     }
