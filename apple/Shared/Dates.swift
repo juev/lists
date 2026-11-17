@@ -31,6 +31,13 @@ enum Moment {
 
     static func day(_ value: String) -> String { String(value.prefix(10)) }
 
+    /// The start the settings give a new task (R164): `days` after `today`, but not after the day of `due`.
+    static func presetStart(days: UInt32, today: String, due: String?) -> String {
+        let start = shiftDate(date: today, days: Int64(days)) ?? today
+        guard let due, day(due) < start else { return start }
+        return day(due)
+    }
+
     static func isOverdue(_ value: String) -> Bool {
         guard let date = date(value) else { return false }
         return hasTime(value) ? date < Date() : day(value) < today()

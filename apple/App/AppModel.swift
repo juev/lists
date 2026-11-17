@@ -290,6 +290,13 @@ final class AppModel {
         perform { try $0.setNewTaskList(choice: choice) }
     }
 
+    /// Days from the creation of a new task to its start; nil is "Never" (R164); synced.
+    private(set) var newTaskStart: UInt32?
+
+    func setNewTaskStart(_ days: UInt32?) {
+        perform { try $0.setNewTaskStart(days: days) }
+    }
+
     // Editing habits of this Mac; not synced.
     /// Return in the notes starts a new line (Esc finishes); otherwise it finishes editing and ⌥Return starts a line.
     var returnAddsLine: Bool = Storage.defaults.object(forKey: "returnAddsLine") == nil || Storage.defaults.bool(forKey: "returnAddsLine") {
@@ -690,6 +697,7 @@ final class AppModel {
             syncStatus = try store.syncStatus()
             keepDone = try store.keepDone()
             newTaskList = try store.newTaskList()
+            newTaskStart = try store.newTaskStart()
             inboxHidden = try store.inboxHidden()
             // Kept rows leave by the clock, not by a change: look again when the first one is due.
             keptTimer?.invalidate()
@@ -844,6 +852,14 @@ final class AppModel {
         draft.parentId == nil ? list(draft.listId) : nil
     }
 
+    /// The start next to the icon of a new task (R164): the chosen one, or the one the settings are going to
+    /// give a top-level task, not after the day of the due date shown. A removed start stays removed.
+    func shownStart(_ draft: TaskDraft) -> String? {
+        if let start = draft.start { return start }
+        guard !draft.startRemoved, draft.parentId == nil, let days = newTaskStart else { return nil }
+        return Moment.presetStart(days: days, today: Moment.today(), due: shownDue(draft))
+    }
+
     /// The due date next to the icon of a new task (R75): the chosen one, or
     /// the one the list is going to give. The list gives its date only to a
     /// task without a start date, and a date in the title wins over it (R41).
@@ -895,12 +911,15 @@ final class AppModel {
             case (nil, false): created = try store.createTask(new: NewTask(title: title, listId: draft.listId, first: true, after: after))
             }
             if !draft.notes.isEmpty { try store.setNotes(id: created.id, notes: draft.notes) }
-            if let start = draft.start { try store.setStart(id: created.id, start: start) }
             // The list gives its date only to a task without a start date, and this one was created before its start was written.
             let bare = draft.dueRemoved || draft.start != nil
             let named = (bare || (draft.priorityChosen && draft.priority == .none)) && parse ? store.parseQuick(text: title) : nil
             let due = draft.due ?? (bare ? named?.due : created.due)
             if due != created.due { try store.setDue(id: created.id, due: due) }
+            // R164: the core counted the start of the settings from the due date it gave; the card may have changed both.
+            let preset = try store.newTaskStart().flatMap { draft.startRemoved || draft.parentId != nil ? nil : $0 }
+            let start = draft.start ?? preset.map { Moment.presetStart(days: $0, today: Moment.today(), due: due) }
+            if start != created.start { try store.setStart(id: created.id, start: start) }
             // After the dates: the rule is counted from them.
             if let rule = draft.repeat { try store.setRepeat(id: created.id, repeat: rule) }
             // Untouched, the field leaves what the core set; "none" takes the default of the list away.

@@ -348,6 +348,10 @@
 "Default list" = "Список по умолчанию";
 "Last used list" = "Последний использованный";
 "Used by quick entry and by views that show several lists, such as Today." = "Действует в быстром вводе и в представлениях с несколькими списками, например «Сегодня».";
+"Start of a new task" = "Начало новой задачи";
+"In N days" = "Через N дней";
+"Number of days" = "Число дней";
+"A new task without a start date of its own gets one, not later than its due date. With Today every new task is in Today." = "Новая задача без своей даты начала получает её, но не позже срока. С «Сегодня» каждая новая задача попадает в «Сегодня».";
 "Return in the notes" = "Return в заметке";
 "Starts a new line" = "Начинает новую строку";
 "Finishes editing" = "Завершает правку";

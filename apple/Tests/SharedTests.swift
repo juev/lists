@@ -3,6 +3,15 @@ import XCTest
 /// The code in Shared/, which the app, its helper and the share extension compile in. The bundle
 /// has no host app, so nothing here starts Lists; strings come back as their English keys.
 final class MomentTests: XCTestCase {
+    func testThePresetStartIsCountedFromTodayAndStopsAtTheDueDay() {
+        // R164
+        XCTAssertEqual(Moment.presetStart(days: 3, today: "2026-10-05", due: nil), "2026-10-08")
+        XCTAssertEqual(Moment.presetStart(days: 0, today: "2026-10-05", due: nil), "2026-10-05")
+        XCTAssertEqual(Moment.presetStart(days: 3, today: "2026-10-05", due: "2026-10-06T18:00"), "2026-10-06")
+        XCTAssertEqual(Moment.presetStart(days: 3, today: "2026-10-05", due: "2026-10-08"), "2026-10-08")
+        XCTAssertEqual(Moment.presetStart(days: 3, today: "2026-10-05", due: "2026-10-20"), "2026-10-08")
+    }
+
     func testADayIsNamedAsSeenFromToday() {
         XCTAssertEqual(Moment.label("2026-10-17", today: "2026-10-17"), "Today")
         XCTAssertEqual(Moment.label("2026-10-18", today: "2026-10-17"), "Tomorrow")

@@ -186,7 +186,7 @@ enum DebugScript {
                     print("debug: draft files \(draft?.files.map(\.lastPathComponent) ?? []), start \(draft?.start ?? "none"), due \(draft?.due ?? "none")")
                     if let draft {
                         let model = AppModel.shared
-                        print("debug: draft shows due \(model.shownDue(draft) ?? "none"), priority \(model.shownPriority(draft).title), tags \(draft.tags), list \(model.list(draft.listId).map(model.listName) ?? "none"), project \(draft.parentId.flatMap { id in model.projects.first { $0.id == id }?.title } ?? "none")")
+                        print("debug: draft shows start \(model.shownStart(draft) ?? "none"), due \(model.shownDue(draft) ?? "none"), priority \(model.shownPriority(draft).title), tags \(draft.tags), list \(model.list(draft.listId).map(model.listName) ?? "none"), project \(draft.parentId.flatMap { id in model.projects.first { $0.id == id }?.title } ?? "none")")
                         print("debug: draft subtasks \(draft.subtasks), field \"\(draft.subtaskText)\", \(draft.subtasksShown ? "shown" : "not shown"), saves \(draft.typedSubtasks)")
                     }
                 case "code":
@@ -439,7 +439,9 @@ enum DebugScript {
                 case "alert":
                     print("debug: alert \(AppModel.shared.alert ?? "none"), draft \(AppModel.shared.draft.map { "\"\($0.title)\"" } ?? "none")")
                     AppModel.shared.alert = nil
-                case "start": AppModel.shared.draft?.start = argument.isEmpty ? nil : argument
+                case "start":
+                    AppModel.shared.draft?.start = argument.isEmpty ? nil : argument
+                    AppModel.shared.draft?.startRemoved = argument.isEmpty
                 case "repeat":
                     if let index = Int(argument), Repeat.presets.indices.contains(index) { AppModel.shared.draft?.repeat = Repeat.presets[index].1 }
                 case "project":
@@ -452,7 +454,7 @@ enum DebugScript {
                 case "wont": AppModel.shared.selectedTask.map(AppModel.shared.wontDo)
                 case "task":
                     let task = AppModel.shared.selectedTask
-                    print("debug: task \(task?.title ?? "none"), due \(task?.due ?? "none"), effective due \(task?.effectiveDue ?? "none"), priority \(task?.priority.title ?? "none"), tags \(task?.tags ?? []), repeat \(task?.repeat?.summary ?? "none"), state \(task.map { $0.wont ? "wont do" : $0.done != nil ? "completed" : "open" } ?? "none")")
+                    print("debug: task \(task?.title ?? "none"), start \(task?.start ?? "none"), due \(task?.due ?? "none"), effective due \(task?.effectiveDue ?? "none"), priority \(task?.priority.title ?? "none"), tags \(task?.tags ?? []), repeat \(task?.repeat?.summary ?? "none"), state \(task.map { $0.wont ? "wont do" : $0.done != nil ? "completed" : "open" } ?? "none")")
                 case "inbox": AppModel.shared.scope = .inbox
                 case "go":
                     let model = AppModel.shared
@@ -509,6 +511,10 @@ enum DebugScript {
                     }
                     let lines = model.dayEvents.map { [$0.time, $0.title].compactMap { $0 }.joined(separator: " ") }
                     print("debug: events \(model.eventsShown ? "shown" : "not shown") \(lines)")
+                case "newstart":
+                    // R164: a number of days, or nothing for "Never".
+                    if step.contains(":") { AppModel.shared.setNewTaskStart(UInt32(argument)) }
+                    print("debug: new task start \(AppModel.shared.newTaskStart.map(String.init) ?? "never")")
                 case "keepdone":
                     if argument == "day" { AppModel.shared.setKeepDone(.endOfDay) }
                     else if let seconds = UInt32(argument) { AppModel.shared.setKeepDone(.seconds(seconds: seconds)) }

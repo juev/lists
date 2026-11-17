@@ -444,6 +444,32 @@ struct SettingsView: View {
                     }
                     Text(L("Used by quick entry and by views that show several lists, such as Today."))
                         .font(AppFont.style(.caption)).foregroundStyle(.secondary)
+                    // R164: "Never", "Today", "Tomorrow" or a number of days from 2 to 365.
+                    Picker(L("Start of a new task"), selection: Binding(
+                        get: { model.newTaskStart.map { Int(min($0, 2)) } ?? -1 },
+                        set: { choice in
+                            let kept = model.newTaskStart.flatMap { $0 >= 2 ? $0 : nil } ?? 7
+                            model.setNewTaskStart(choice < 0 ? nil : choice < 2 ? UInt32(choice) : kept)
+                        }
+                    )) {
+                        Text(L("Never")).tag(-1)
+                        Text(L("Today")).tag(0)
+                        Text(L("Tomorrow")).tag(1)
+                        Text(L("In N days")).tag(2)
+                    }
+                    if let days = model.newTaskStart, days >= 2 {
+                        let count = Binding(get: { Int(days) }, set: { model.setNewTaskStart(UInt32(min(max($0, 2), 365))) })
+                        LabeledContent(L("Number of days")) {
+                            HStack {
+                                TextField("", value: count, format: .number)
+                                    .frame(width: 56)
+                                    .multilineTextAlignment(.trailing)
+                                Stepper("", value: count, in: 2...365).labelsHidden()
+                            }
+                        }
+                    }
+                    Text(L("A new task without a start date of its own gets one, not later than its due date. With Today every new task is in Today."))
+                        .font(AppFont.style(.caption)).foregroundStyle(.secondary)
                     Toggle(L("Recognize dates, priority, tags and lists in the title"), isOn: $model.parseQuickText)
                     Text(L("“report friday 10:00 !! #work @Projects” sets the due date, the priority, a tag and the list. Off: the title is kept as typed."))
                         .font(AppFont.style(.caption)).foregroundStyle(.secondary)

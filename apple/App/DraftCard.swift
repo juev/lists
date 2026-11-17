@@ -7,7 +7,10 @@ struct TaskDraft: Equatable {
     var notes = ""
     /// The note as it came from the clipboard (R58); nil when it was typed.
     var pastedNotes: String?
+    /// The start chosen in the card; nil while the settings decide (R164).
     var start: String?
+    /// The start was taken away in the card: the task gets none from the settings.
+    var startRemoved = false
     /// The due date chosen in the card; nil while the title or the list decides (R75).
     var due: String?
     /// The date was taken away in the card: the task gets none from its list.
@@ -205,6 +208,7 @@ final class DraftCard: NSView, NSTextViewDelegate, NSTextFieldDelegate {
 
     // MARK: Content
 
+    private var shownStart: String? { model.shownStart(draft) }
     private var shownDue: String? { model.shownDue(draft) }
     private var shownPriority: Priority { model.shownPriority(draft) }
 
@@ -269,7 +273,7 @@ final class DraftCard: NSView, NSTextViewDelegate, NSTextFieldDelegate {
     private var sides: (left: [CardChip], right: [CardChip]) {
         if let held { return held }
         let dated: [(CardChip, Bool)] = [
-            (.start, draft.start != nil), (.due, shownDue != nil), (.repeat, draft.repeat != nil), (.priority, shownPriority != .none),
+            (.start, shownStart != nil), (.due, shownDue != nil), (.repeat, draft.repeat != nil), (.priority, shownPriority != .none),
         ]
         return (
             dated.filter(\.1).map(\.0) + draft.tags.map(CardChip.tag) + (footer ? [] : [.list]),
@@ -310,7 +314,7 @@ final class DraftCard: NSView, NSTextViewDelegate, NSTextFieldDelegate {
         button.plain = !set
         switch button.chip {
         case .start:
-            (button.symbol, button.text, button.tint) = ("calendar.badge.clock", draft.start.map { L("Start: ") + Moment.label($0).lowercased() } ?? "", accent)
+            (button.symbol, button.text, button.tint) = ("calendar.badge.clock", shownStart.map { L("Start: ") + Moment.label($0).lowercased() } ?? "", accent)
             button.toolTip = L("Start date (⌘S)")
         case .due:
             (button.symbol, button.text, button.tint) = ("calendar", shownDue.map { L("Due: ") + Moment.label($0).lowercased() } ?? "", accent)
@@ -362,8 +366,11 @@ final class DraftCard: NSView, NSTextViewDelegate, NSTextFieldDelegate {
     private func openChip(_ chip: CardChip) {
         switch chip {
         case .start:
-            showPopover(chip, DatePopoverView(title: L("Start: hidden from Today until"), value: draft.start) { [weak self] value in
-                self?.change { $0.start = value }
+            showPopover(chip, DatePopoverView(title: L("Start: hidden from Today until"), value: shownStart) { [weak self] value in
+                self?.change {
+                    $0.start = value
+                    $0.startRemoved = value == nil
+                }
             })
         case .due:
             showPopover(chip, DatePopoverView(title: L("Due"), value: shownDue) { [weak self] value in
