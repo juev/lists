@@ -147,6 +147,7 @@ make apple        # apple/build/Build/Products/Debug/Lists.app
 make apple-run
 make apple-test   # the tests in apple/Tests; they do not start the app
 make apple-lint   # SwiftLint, settings in apple/.swiftlint.yml (brew install swiftlint)
+./scripts/check-card-dismissal.sh apple/build/Build/Products/Debug/Lists.app
 ```
 
 The share extension and the app share one database through an App Group, which needs a signing team. The build takes the team from `LISTS_TEAM_ID` or from the first "Apple Development" certificate in the keychain. Without a team the app is signed ad hoc and keeps its data in Application Support; the share extension then has no access to it and says so in its form instead of saving.

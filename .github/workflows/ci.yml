@@ -155,6 +155,8 @@ jobs:
       # A build that compiles can still stop at launch, as 0.3.1 did (#239, #240).
       - name: Start the app
         run: ./scripts/check-launch.sh apple/build/Build/Products/Debug/Lists.app debug
+      - name: Check card dismissal
+        run: ./scripts/check-card-dismissal.sh apple/build/Build/Products/Debug/Lists.app
       - name: Check that the build changed no tracked file
         run: ./scripts/check-clean-tree.sh
 

@@ -8,6 +8,7 @@ import UserNotifications
 /// outside process send them without the Accessibility permission. Debug
 /// builds only. `LISTS_DEBUG_SCRIPT` holds steps separated by `;`:
 /// `type:text`, `key:return`, `key:n+cmd`, `sleep:0.5`, `click:x,y` (`click:x,y,2` for a double click), `quick`, `settings`,
+/// `click:view-title`, `click:titlebar`, `click:sidebar-heading`, `click:sidebar-empty`, `click:task-empty`, `click:task:Title` and `click:card-title` use the current layout (R44),
 /// `state` (prints who has the keyboard, whether that is the sidebar, the text being typed into and the size of its field), `copyfiles:path,path` and `copyimage`
 /// (fill the pasteboard), `draft` (prints the files and the dates of the open new-task card),
 /// `code:17` (presses the key with that key code, whatever the layout, in the date editor: the open popover, or the one `dateeditor` made;
@@ -157,8 +158,8 @@ enum DebugScript {
                     // Points from the top left corner of the window the script types into.
                     // `click:x,y,2` is a double click: a press and a release, and the same again as the second of a pair.
                     let xy = argument.split(separator: ",").compactMap { Double($0) }
-                    if xy.count >= 2, let window = target {
-                        let point = NSPoint(x: xy[0], y: Double(window.frame.height) - xy[1])
+                    if let window = target,
+                       let point = xy.count >= 2 ? NSPoint(x: xy[0], y: Double(window.frame.height) - xy[1]) : clickPoint(argument, in: window) {
                         for count in 1...max(1, xy.count > 2 ? Int(xy[2]) : 1) {
                             for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
                                 if let event = NSEvent.mouseEvent(
@@ -169,6 +170,8 @@ enum DebugScript {
                                 }
                             }
                         }
+                    } else {
+                        print("debug: no click target \(argument)")
                     }
                 case "copyfiles":
                     NSPasteboard.general.clearContents()
@@ -999,6 +1002,44 @@ enum DebugScript {
     private static func tables(in view: NSView?) -> [NSTableView] {
         guard let view else { return [] }
         return ((view as? NSTableView).map { [$0] } ?? []) + view.subviews.flatMap(tables(in:))
+    }
+
+    /// Clicks on window chrome and blank space cannot be sent to a view by name.
+    private static func clickPoint(_ target: String, in window: NSWindow) -> NSPoint? {
+        let tables = tables(in: window.contentView)
+        let tasks = tables.first { $0 is TaskTableView } as? TaskTableView
+        let sidebar = tables.first { $0 is SidebarTableView } as? SidebarTableView
+        switch target {
+        case "view-title":
+            guard let scroll = tasks?.enclosingScrollView else { return nil }
+            let bounds = scroll.convert(scroll.bounds, to: nil)
+            return NSPoint(x: bounds.minX + 40, y: bounds.maxY + 18)
+        case "titlebar":
+            return NSPoint(x: window.frame.width / 2, y: (window.contentLayoutRect.maxY + window.frame.height) / 2)
+        case "card-title":
+            guard let title = window.firstResponder as? CardTitleView else { return nil }
+            return title.convert(NSPoint(x: title.bounds.midX, y: title.bounds.midY), to: nil)
+        case _ where target.hasPrefix("task:"):
+            guard let tasks, let id = taskId(titled: String(target.dropFirst("task:".count))),
+                  let index = tasks.coordinator?.rows.firstIndex(where: { $0.taskId == id }) else { return nil }
+            let row = tasks.rect(ofRow: index)
+            return tasks.convert(NSPoint(x: row.midX, y: row.midY), to: nil)
+        case "sidebar-heading":
+            guard let sidebar, let index = sidebar.coordinator?.rows.firstIndex(where: {
+                if case .heading(_, _, .lists, _) = $0 { return true }
+                return false
+            }) else { return nil }
+            let row = sidebar.rect(ofRow: index)
+            return sidebar.convert(NSPoint(x: row.minX + 28, y: row.maxY - 8), to: nil)
+        case "sidebar-empty", "task-empty":
+            guard let table = target == "sidebar-empty" ? sidebar : tasks, table.numberOfRows > 0 else { return nil }
+            let rowsEnd = table.rect(ofRow: table.numberOfRows - 1).maxY
+            let visible = table.visibleRect
+            guard rowsEnd < visible.maxY else { return nil }
+            return table.convert(NSPoint(x: visible.midX, y: (max(rowsEnd, visible.minY) + visible.maxY) / 2), to: nil)
+        default:
+            return nil
+        }
     }
 
     private static func geometry(_ panel: NSPanel) -> String {

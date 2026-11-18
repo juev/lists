@@ -564,8 +564,7 @@ struct TaskTable: NSViewRepresentable {
     }
 }
 
-/// The table of the task list. Clicks, keys and the menus of the rows are its own methods, so no event of the window is
-/// looked at on the way (#307).
+/// The table handles its own clicks, keys and row menus (#307). Clicks elsewhere in its window can close a card (R44).
 @MainActor
 final class TaskTableView: NSTableView {
     weak var coordinator: TaskTable.Coordinator?
@@ -575,11 +574,17 @@ final class TaskTableView: NSTableView {
     override var acceptsFirstResponder: Bool { true }
 
     private var keyboardWatch: NSKeyValueObservation?
+    private var clickWatch: Any?
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         keyboardWatch = window?.observe(\.firstResponder, options: [.new]) { [weak self] window, _ in
             MainActor.assumeIsolated { self?.keyboardMoved(to: window.firstResponder) }
+        }
+        if let clickWatch { NSEvent.removeMonitor(clickWatch) }
+        clickWatch = window == nil ? nil : NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
+            MainActor.assumeIsolated { self?.outsideMouseDown(event) }
+            return event
         }
         takeKeyboardIfWanted()
     }
@@ -613,6 +618,24 @@ final class TaskTableView: NSTableView {
     }
 
     // MARK: Clicks (R117)
+
+    private func outsideMouseDown(_ event: NSEvent) {
+        // Popovers, Quick Look and other windows handle their own clicks.
+        guard !model.expanded.isEmpty, let window, event.window === window,
+              let frame = window.contentView?.superview else { return }
+        var hit = frame.hitTest(event.locationInWindow)
+        var sidebar: SidebarTableView?
+        let scroll = enclosingScrollView
+        while let view = hit {
+            // The task table handles its own rows and empty space. Keep its geometry intact for a possible drag.
+            if view === self || view === scroll || view is NSScroller { return }
+            sidebar = sidebar ?? (view as? SidebarTableView) ?? ((view as? NSScrollView)?.documentView as? SidebarTableView)
+            hit = view.superview
+        }
+        for open in model.expanded { model.closeCardByClick(open, keyboardToList: false) }
+        // Restore focus before dispatching the click so the clicked control can take it as usual.
+        window.makeFirstResponder(sidebar ?? self)
+    }
 
     override func mouseDown(with event: NSEvent) {
         // ⌃click: the table opens the menu of the row itself.

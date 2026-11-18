@@ -24,6 +24,8 @@ Both Rust workspaces use Jiff for calendar arithmetic and time zone conversion. 
 
 The core is connected to both shells through UniFFI: it generates Swift and Kotlin bindings from annotations in the Rust code.
 
+On macOS, while the task table is attached to the window, it watches left mouse-down events in that window for clicks that close an open card (R44). The table handles its own clicks. Scrollbars and popovers keep their own event handling.
+
 Why not one language. Everything that defines the correctness of the data must exist in one copy: two independently written merges of changes sooner or later diverge in some detail, and the devices stop converging to one state. The interface, on the contrary, is better written in the language of the platform, because the points of quick entry (the "Share" extension, the menu bar, the global hotkey, the tile, the shortcuts) are system APIs, and cross-platform UI toolkits give access to them either late or through the same Swift and Kotlin.
 
 Alternatives considered:
