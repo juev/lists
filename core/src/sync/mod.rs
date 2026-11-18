@@ -396,6 +396,8 @@ impl BlobTrouble {
 }
 
 /// A failure that goes on is said again at the error level after this long.
+const TROUBLE_REPEAT: SignedDuration = SignedDuration::from_hours(1);
+
 /// How a file is named in the log: its folder and the start of the hash.
 fn blob_label(sha256: &str) -> String {
     format!("blobs/{}/{}", &sha256[..2], short_hash(sha256))
@@ -1109,7 +1111,7 @@ impl Store {
             Trouble::Failed(e) => format!("{target}: {}", hide_hash(e, sha256)),
             Trouble::Missing => format!("{target}: the storage does not have it"),
         };
-        let due = |since: DateTime| now < since || now.duration_since(since) >= SignedDuration::from_hours(1);
+        let due = |since: DateTime| now < since || now.duration_since(since) >= TROUBLE_REPEAT;
         let record = match before.filter(|b| b.message == message) {
             None => {
                 match trouble {
