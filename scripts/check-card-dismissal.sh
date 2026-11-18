@@ -30,8 +30,10 @@ steps+=';pick:beta;edit;sleep:0.4;click:sidebar-heading;sidebarrows;cards;state'
 steps+=';edit;sleep:0.4;click:card-title;cards;click:task:alpha revised;cards'
 steps+=';edit;sleep:0.4;click:task-empty;cards;state;quit'
 
+# Open the main window regardless of the installed app's saved window state.
 open -g -j -n --env "LISTS_DEBUG_DIR=$work/data" --env LISTS_DEBUG_QUIET=1 \
-    --env "LISTS_DEBUG_SCRIPT=$steps" --stdout "$work/out" --stderr "$work/err" "$app"
+    --env "LISTS_DEBUG_SCRIPT=$steps" --stdout "$work/out" --stderr "$work/err" "$app" \
+    --args -ApplePersistenceIgnoreState YES
 for (( waited = 0; waited < 45; waited++ )); do
     sleep 1
     if [[ $waited -ge 2 && -z "$(running)" ]]; then break; fi
