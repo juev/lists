@@ -23,9 +23,9 @@ cli = ["uniffi/cli"]
 argon2 = "0.6"
 base64 = "0.23"
 chacha20poly1305 = "0.11"
-chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 flate2 = "1"
 hmac = "0.13"
+jiff = "1"
 pulldown-cmark = { version = "0.13", default-features = false }
 roxmltree = "0.21"
 rusqlite = { version = "0.42", features = ["bundled", "fallible_uint"] }

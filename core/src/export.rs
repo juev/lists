@@ -98,7 +98,7 @@ impl Store {
         } else {
             vec![]
         };
-        let exported = self.lock().now().format("%Y-%m-%dT%H:%M").to_string();
+        let exported = self.lock().now().strftime("%Y-%m-%dT%H:%M").to_string();
         Ok(json!({
             "format": FORMAT, "version": VERSION, "exported": exported,
             "lists": lists, "tasks": tasks, "filters": filters,
@@ -109,7 +109,7 @@ impl Store {
     pub(crate) fn export_markdown_text(&self, list: Option<&str>) -> Result<String> {
         let lists = self.lists()?;
         let tasks = exported_tasks(self, list)?;
-        let exported = self.lock().now().format("%Y-%m-%d").to_string();
+        let exported = self.lock().now().strftime("%Y-%m-%d").to_string();
         let mut out = format!("# Lists, {exported}\n");
         for l in lists.iter().filter(|l| list.is_none_or(|id| l.id == id)) {
             let name = if l.id == INBOX_ID { "Inbox" } else { l.name.as_str() };

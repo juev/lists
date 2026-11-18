@@ -3,9 +3,13 @@
 //! in docs/specs/product.md.
 
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{LazyLock, Mutex};
 
-use chrono::{DateTime, Duration, Offset, TimeZone, Utc};
+use jiff::{
+    civil::Time,
+    tz::{Offset, TimeZone, TimeZoneDatabase},
+    SignedDuration, Timestamp,
+};
 use lists_core::{AppError, NotificationKind, NotifySettings, PlannedNotification, Store};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -24,7 +28,24 @@ const MAX_TITLE: usize = 1500;
 /// A notification that could not reach the browser within this time is of no use.
 const TTL_SECONDS: &str = "3600";
 /// After a long pause, as a machine that slept, only the last minutes are looked at again.
-const LONGEST_WINDOW: Duration = Duration::minutes(10);
+const LONGEST_WINDOW: SignedDuration = SignedDuration::from_mins(10);
+
+// Use the same IANA data on a host and in the scratch image.
+static BROWSER_ZONES: LazyLock<TimeZoneDatabase> = LazyLock::new(TimeZoneDatabase::bundled);
+
+fn browser_zone(name: &str) -> Option<TimeZone> {
+    let zone = BROWSER_ZONES.get(name).ok()?;
+    // Browser zone names are case-sensitive, including aliases.
+    (zone.iana_name() == Some(name)).then_some(zone)
+}
+
+fn local_time(at: Timestamp, minutes_east: i32) -> String {
+    Offset::UTC
+        .to_datetime(at)
+        .saturating_add(SignedDuration::from_mins(i64::from(minutes_east)))
+        .strftime("%Y-%m-%dT%H:%M:%S")
+        .to_string()
+}
 
 #[derive(Clone, Debug, PartialEq)]
 struct Browser {
@@ -76,11 +97,11 @@ impl Browser {
 
     /// Minutes east of UTC at `now`: by the name of the zone when it is known, so that a change of
     /// daylight saving time is followed without the page (R148).
-    fn minutes_east(&self, now: DateTime<Utc>) -> i32 {
+    fn minutes_east(&self, now: Timestamp) -> i32 {
         self.zone
             .as_deref()
-            .and_then(|name| name.parse::<chrono_tz::Tz>().ok())
-            .map(|tz| tz.offset_from_utc_datetime(&now.naive_utc()).fix().local_minus_utc() / 60)
+            .and_then(browser_zone)
+            .map(|tz| tz.to_offset(now).seconds() / 60)
             .unwrap_or(self.offset)
     }
 }
@@ -102,9 +123,9 @@ fn clock(v: &Value) -> Option<Option<String>> {
     match v {
         Value::Null => Some(None),
         Value::String(s) if s.is_empty() => Some(None),
-        Value::String(s) => chrono::NaiveTime::parse_from_str(s, "%H:%M")
+        Value::String(s) => Time::strptime("%H:%M", s)
             .ok()
-            .map(|t| Some(t.format("%H:%M").to_string())),
+            .map(|t| Some(t.strftime("%H:%M").to_string())),
         _ => None,
     }
 }
@@ -127,7 +148,7 @@ pub struct Notifier {
     vapid: Vapid,
     browsers: Mutex<Vec<Browser>>,
     /// The end of the previous window; `None` until the first look.
-    last: Mutex<Option<DateTime<Utc>>>,
+    last: Mutex<Option<Timestamp>>,
     agent: ureq::Agent,
     /// The unit tests deliver to a plain HTTP server on the loopback address.
     #[cfg(test)]
@@ -209,7 +230,7 @@ impl Notifier {
             .unwrap_or(0) as i32;
         let zone = args["zone"]
             .as_str()
-            .filter(|z| z.len() <= 64 && z.parse::<chrono_tz::Tz>().is_ok())
+            .filter(|z| z.len() <= 64 && browser_zone(z).is_some())
             .map(str::to_string);
         let settings = &args["settings"];
         let given = if settings.is_null() {
@@ -275,7 +296,7 @@ impl Notifier {
     }
 
     /// R147: one notification to this browser now, whatever is due.
-    pub fn test(&self, endpoint: &str, now: DateTime<Utc>) -> Option<Sent> {
+    pub fn test(&self, endpoint: &str, now: Timestamp) -> Option<Sent> {
         let browser = self.lock().iter().find(|b| b.endpoint == endpoint).cloned()?;
         let sent = self.send(&browser, &json!({ "key": "test", "kind": "test" }), now);
         if sent == Sent::Gone {
@@ -286,7 +307,7 @@ impl Notifier {
 
     /// R146: sends what came due since the previous look, to each browser in its own zone. The
     /// first look only marks the start: nothing that came due before it is sent.
-    pub fn tick(&self, store: &Store, now: DateTime<Utc>) {
+    pub fn tick(&self, store: &Store, now: Timestamp) {
         let since = {
             let mut last = self.last.lock().unwrap_or_else(|p| p.into_inner());
             let since = last.unwrap_or(now).max(now - LONGEST_WINDOW);
@@ -300,11 +321,7 @@ impl Notifier {
         let mut gone = Vec::new();
         for browser in &browsers {
             let minutes = browser.minutes_east(now);
-            let local = |at: DateTime<Utc>| (at + Duration::minutes(i64::from(minutes))).naive_utc();
-            let (from, until) = (
-                local(since).format("%Y-%m-%dT%H:%M:%S").to_string(),
-                local(now).format("%Y-%m-%dT%H:%M:%S").to_string(),
-            );
+            let (from, until) = (local_time(since, minutes), local_time(now, minutes));
             let due = store.in_zone(minutes, || store.due_notifications(browser.settings(), &from, &until));
             let due = match due {
                 Ok(due) => due,
@@ -341,7 +358,7 @@ impl Notifier {
         }
     }
 
-    fn send(&self, browser: &Browser, payload: &Value, now: DateTime<Utc>) -> Sent {
+    fn send(&self, browser: &Browser, payload: &Value, now: Timestamp) -> Sent {
         let Some(audience) = self.audience(&browser.endpoint) else {
             return Sent::Failed("the endpoint is not an https:// address".into());
         };
@@ -349,7 +366,7 @@ impl Notifier {
             Ok(body) => body,
             Err(e) => return Sent::Failed(e),
         };
-        let authorization = self.vapid.authorization(&audience, now.timestamp().max(0) as u64);
+        let authorization = self.vapid.authorization(&audience, now.as_second().max(0) as u64);
         // A later message of the same key replaces one the push service still holds.
         let key = payload["key"].as_str().unwrap_or_default();
         let topic = b64(&Sha256::digest(key.as_bytes()))[..32].to_string();
@@ -482,10 +499,12 @@ mod tests {
         }
     }
 
-    fn at(utc: &str) -> DateTime<Utc> {
-        chrono::NaiveDateTime::parse_from_str(utc, "%Y-%m-%dT%H:%M:%S")
+    fn at(utc: &str) -> Timestamp {
+        jiff::civil::DateTime::strptime("%Y-%m-%dT%H:%M:%S", utc)
             .unwrap()
-            .and_utc()
+            .to_zoned_datetime(TimeZone::UTC)
+            .unwrap()
+            .timestamp()
     }
 
     struct Setup {
@@ -634,6 +653,40 @@ mod tests {
         let got = push.got.lock().unwrap();
         assert_eq!(got.len(), 1, "10:00 in Berlin is 09:00 UTC in winter");
         assert_eq!(browser.read(&got[0].1)["title"], "после перевода");
+    }
+
+    #[test]
+    fn r148_zone_offsets_change_at_both_dst_transitions() {
+        let s = setup();
+        let push = service();
+        let browser = Client::new();
+        subscribe(&s, &browser, &push.url, "Europe/Berlin", 60);
+        let subscribed = s.notifier.lock()[0].clone();
+
+        assert_eq!(subscribed.minutes_east(at("2026-03-29T00:59:59")), 60);
+        assert_eq!(subscribed.minutes_east(at("2026-03-29T01:00:00")), 120);
+        assert_eq!(subscribed.minutes_east(at("2026-10-25T00:59:59")), 120);
+        assert_eq!(subscribed.minutes_east(at("2026-10-25T01:00:00")), 60);
+    }
+
+    #[test]
+    fn r148_unknown_zone_uses_the_saved_offset() {
+        let s = setup();
+        let push = service();
+        let browser = Client::new();
+        subscribe(&s, &browser, &push.url, "Unknown/Zone", 345);
+        let subscribed = s.notifier.lock()[0].clone();
+
+        assert_eq!(subscribed.zone, None);
+        assert_eq!(subscribed.minutes_east(at("2026-03-29T01:00:00")), 345);
+        assert!(browser_zone("europe/berlin").is_none());
+        assert!(browser_zone("US/Eastern").is_some());
+        assert!(browser_zone("UTC").is_some());
+    }
+
+    #[test]
+    fn r148_a_saved_offset_cannot_overflow_the_local_window() {
+        assert!(!local_time(at("2026-03-29T01:00:00"), i32::MAX).is_empty());
     }
 
     #[test]

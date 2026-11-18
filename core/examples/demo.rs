@@ -7,7 +7,7 @@
 //! The dates are counted from today, so the Today view always has something overdue and something due.
 //! A folder that holds tasks already is left alone.
 
-use chrono::{Datelike, Duration, Local, NaiveDate};
+use jiff::{civil::Date, ToSpan, ZonedDateTime};
 use lists_core::{DueWindow, FilterSpec, Freq, NewTask, Priority, Repeat, Scope, Store};
 
 fn repeat(freq: Freq, interval: u32) -> Repeat {
@@ -31,9 +31,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err("the folder holds tasks already".into());
     }
 
-    let today = Local::now().date_naive();
-    let day = |offset: i64| (today + Duration::days(offset)).format("%Y-%m-%d").to_string();
-    let monday = |after: NaiveDate| after + Duration::days(7 - i64::from(after.weekday().num_days_from_monday()));
+    let today = ZonedDateTime::now().date();
+    let day = |offset: i64| {
+        today
+            .checked_add(offset.days())
+            .expect("demo date is in range")
+            .strftime("%Y-%m-%d")
+            .to_string()
+    };
+    let monday = |after: Date| {
+        let days = 7 - i64::from(after.weekday().to_monday_zero_offset());
+        after.checked_add(days.days()).expect("demo date is in range")
+    };
     let add = |title: &str,
                list: Option<&str>,
                parent: Option<&str>,
@@ -100,7 +109,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "Планёрка",
         Some(&work.id),
         None,
-        Some(format!("{}T10:00", monday(today).format("%Y-%m-%d"))),
+        Some(format!("{}T10:00", monday(today).strftime("%Y-%m-%d"))),
         Priority::None,
         &["команда"],
     )?;

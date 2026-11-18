@@ -879,7 +879,7 @@ fn sync(store: &Store, client: &Client, calendars: Vec<Calendar>) -> Result<Sync
         let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
         rows.collect::<rusqlite::Result<_>>()?
     };
-    let now = chrono::Utc::now().naive_utc();
+    let now = jiff::tz::Offset::UTC.to_datetime(jiff::Timestamp::now());
     let blob = |sha: &str| std::fs::read(store.blob_path(sha)).ok();
     // Calendars this run removed objects from: what was known of them no longer holds.
     let mut emptied: BTreeSet<String> = BTreeSet::new();

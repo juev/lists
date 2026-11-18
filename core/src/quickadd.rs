@@ -1,6 +1,6 @@
 //! Turns one line of text into a task draft: `buy milk tomorrow 18:30 !! #home @Shopping`.
 
-use chrono::{Datelike, Duration, NaiveDate};
+use jiff::{civil::Date, ToSpan};
 
 use crate::model::{Priority, QuickParse};
 use crate::recur::DATE_FMT;
@@ -18,25 +18,25 @@ const WEEKDAYS: &[(&[&str], u32)] = &[
 /// Words that only introduce a date or a time and are dropped together with it.
 const PREPOSITIONS: &[&str] = &["в", "во", "на", "к", "at", "on", "by"];
 
-fn date_word(word: &str, today: NaiveDate) -> Option<NaiveDate> {
+fn date_word(word: &str, today: Date) -> Option<Date> {
     match word {
         "сегодня" | "today" => return Some(today),
-        "завтра" | "tomorrow" => return Some(today + Duration::days(1)),
-        "послезавтра" => return Some(today + Duration::days(2)),
+        "завтра" | "tomorrow" => return today.checked_add(1.day()).ok(),
+        "послезавтра" => return today.checked_add(2.days()).ok(),
         _ => {}
     }
     for (names, number) in WEEKDAYS {
         if names.contains(&word) {
-            let now = today.weekday().number_from_monday();
+            let now = today.weekday().to_monday_one_offset() as u32;
             let ahead = (*number + 7 - now - 1) % 7 + 1;
-            return Some(today + Duration::days(ahead as i64));
+            return today.checked_add(i64::from(ahead).days()).ok();
         }
     }
     numeric_date(word, today)
 }
 
 /// `DD.MM` or `DD.MM.YYYY`. A date without a year that has already passed means next year.
-fn numeric_date(word: &str, today: NaiveDate) -> Option<NaiveDate> {
+fn numeric_date(word: &str, today: Date) -> Option<Date> {
     let parts: Vec<&str> = word.split('.').collect();
     if !(2..=3).contains(&parts.len())
         || parts
@@ -52,12 +52,26 @@ fn numeric_date(word: &str, today: NaiveDate) -> Option<NaiveDate> {
     let month: u32 = parts[1].parse().ok()?;
     if parts.len() == 3 {
         let year: i32 = parts[2].parse().ok()?;
-        let year = if parts[2].len() == 2 { 2000 + year } else { year };
-        return NaiveDate::from_ymd_opt(year, month, day);
+        let year = if parts[2].len() == 2 {
+            year.checked_add(2000)?
+        } else {
+            year
+        };
+        return Date::new(
+            i16::try_from(year).ok()?,
+            i8::try_from(month).ok()?,
+            i8::try_from(day).ok()?,
+        )
+        .ok();
     }
-    let this_year = NaiveDate::from_ymd_opt(today.year(), month, day)?;
+    let this_year = Date::new(today.year(), i8::try_from(month).ok()?, i8::try_from(day).ok()?).ok()?;
     if this_year < today {
-        NaiveDate::from_ymd_opt(today.year() + 1, month, day)
+        Date::new(
+            today.year().checked_add(1)?,
+            i8::try_from(month).ok()?,
+            i8::try_from(day).ok()?,
+        )
+        .ok()
     } else {
         Some(this_year)
     }
@@ -72,9 +86,9 @@ fn time_word(word: &str) -> Option<String> {
     (h < 24 && m < 60).then(|| format!("{h:02}:{m:02}"))
 }
 
-pub fn parse(text: &str, today: NaiveDate) -> QuickParse {
+pub fn parse(text: &str, today: Date) -> QuickParse {
     let mut out = QuickParse::default();
-    let mut date: Option<NaiveDate> = None;
+    let mut date: Option<Date> = None;
     let mut time: Option<String> = None;
     let mut title: Vec<&str> = Vec::new();
 
@@ -118,9 +132,9 @@ pub fn parse(text: &str, today: NaiveDate) -> QuickParse {
 
     out.title = title.join(" ");
     out.due = match (date, time) {
-        (Some(d), Some(t)) => Some(format!("{}T{}", d.format(DATE_FMT), t)),
-        (Some(d), None) => Some(d.format(DATE_FMT).to_string()),
-        (None, Some(t)) => Some(format!("{}T{}", today.format(DATE_FMT), t)),
+        (Some(d), Some(t)) => Some(format!("{}T{}", d.strftime(DATE_FMT), t)),
+        (Some(d), None) => Some(d.strftime(DATE_FMT).to_string()),
+        (None, Some(t)) => Some(format!("{}T{}", today.strftime(DATE_FMT), t)),
         (None, None) => None,
     };
     out
@@ -131,8 +145,8 @@ mod tests {
     use super::*;
 
     // 2026-10-05 is a Monday.
-    fn today() -> NaiveDate {
-        NaiveDate::from_ymd_opt(2026, 10, 5).unwrap()
+    fn today() -> Date {
+        Date::new(2026, 10, 5).unwrap()
     }
 
     #[test]

@@ -5,7 +5,7 @@
 //! lists/backups/<device>/Lists_(2026-10-09-11_15_05).listsbackup   R87 without blobs/
 //! ```
 
-use chrono::NaiveDateTime;
+use jiff::{civil::DateTime, SignedDuration};
 
 use super::remote::Remote;
 use super::{private_create, ROOT};
@@ -74,10 +74,10 @@ impl Store {
             }
             let inner = self.lock();
             let now = inner.now();
-            let last =
-                db::meta_get(&inner.conn, LAST)?.and_then(|v| NaiveDateTime::parse_from_str(&v, SECONDS_FMT).ok());
+            let last = db::meta_get(&inner.conn, LAST)?.and_then(|v| DateTime::strptime(SECONDS_FMT, &v).ok());
             // A clock set back does not hold the copies off for good.
-            Ok(!last.is_some_and(|last| last <= now && now - last < chrono::Duration::hours(every.into())))
+            Ok(!last
+                .is_some_and(|last| last <= now && now.duration_since(last) < SignedDuration::from_hours(every.into())))
         })();
         match due {
             Ok(true) => {}
@@ -93,7 +93,7 @@ impl Store {
         let result = self.put_storage_backup(remote, me);
         let inner = self.lock();
         let kept = match &result {
-            Ok(_) => db::meta_set(&inner.conn, LAST, &now.format(SECONDS_FMT).to_string())
+            Ok(_) => db::meta_set(&inner.conn, LAST, &now.strftime(SECONDS_FMT).to_string())
                 .and_then(|()| db::meta_del(&inner.conn, ERROR)),
             Err(e) => db::meta_set(&inner.conn, ERROR, &e.to_string()),
         };
@@ -157,8 +157,8 @@ impl Store {
         );
         let inner = self.lock();
         let last = db::meta_get(&inner.conn, LAST)?
-            .and_then(|v| NaiveDateTime::parse_from_str(&v, SECONDS_FMT).ok())
-            .map(|t| t.format("%Y-%m-%dT%H:%M").to_string());
+            .and_then(|v| DateTime::strptime(SECONDS_FMT, &v).ok())
+            .map(|t| t.strftime("%Y-%m-%dT%H:%M").to_string());
         let error = db::meta_get(&inner.conn, ERROR)?;
         drop(inner);
         Ok(StorageBackupStatus {
@@ -194,7 +194,7 @@ impl Store {
                     found.push(StorageBackup {
                         this_device: device == me,
                         device: device.clone(),
-                        created: created.format("%Y-%m-%dT%H:%M").to_string(),
+                        created: created.strftime("%Y-%m-%dT%H:%M").to_string(),
                         name,
                     });
                 }

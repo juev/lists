@@ -1,6 +1,6 @@
 //! Recurrence arithmetic on calendar dates.
 
-use chrono::{Datelike, Duration, NaiveDate};
+use jiff::{civil::Date, Span, ToSpan};
 
 use crate::model::{Freq, Repeat};
 
@@ -8,43 +8,27 @@ pub const DATE_FMT: &str = "%Y-%m-%d";
 
 /// Splits `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM` into the date and the time suffix
 /// (including the `T`, empty when there is none).
-pub fn split(value: &str) -> Option<(NaiveDate, &str)> {
-    let date = NaiveDate::parse_from_str(value.get(..10)?, DATE_FMT).ok()?;
+pub fn split(value: &str) -> Option<(Date, &str)> {
+    let date = Date::strptime(DATE_FMT, value.get(..10)?).ok()?;
     Some((date, &value[10..]))
 }
 
 pub fn shift(value: &str, days: i64) -> Option<String> {
     let (date, time) = split(value)?;
-    Some(format!("{}{}", (date + Duration::days(days)).format(DATE_FMT), time))
-}
-
-fn days_in_month(year: i32, month: u32) -> u32 {
-    let (y, m) = if month == 12 { (year + 1, 1) } else { (year, month + 1) };
-    NaiveDate::from_ymd_opt(y, m, 1)
-        .and_then(|d| d.pred_opt())
-        .map_or(28, |d| d.day())
-}
-
-fn add_months(year: i32, month: u32, add: u32) -> (i32, u32) {
-    let total = year as i64 * 12 + (month as i64 - 1) + add as i64;
-    ((total.div_euclid(12)) as i32, (total.rem_euclid(12)) as u32 + 1)
-}
-
-fn clamped(year: i32, month: u32, day: u32) -> Option<NaiveDate> {
-    NaiveDate::from_ymd_opt(year, month, day.clamp(1, days_in_month(year, month)))
+    let shifted = date.checked_add(Span::new().try_days(days).ok()?).ok()?;
+    Some(format!("{}{}", shifted.strftime(DATE_FMT), time))
 }
 
 /// n-th (1..5) or last (-1) given weekday of a month; a missing fifth falls back to the last.
-fn nth_weekday(year: i32, month: u32, nth: i32, weekday: u32) -> Option<NaiveDate> {
-    let first = NaiveDate::from_ymd_opt(year, month, 1)?;
-    let offset = (weekday as i64 - first.weekday().number_from_monday() as i64).rem_euclid(7);
-    let first_hit = first + Duration::days(offset);
-    let last_day = days_in_month(year, month);
+fn nth_weekday(first: Date, nth: i32, weekday: u32) -> Option<Date> {
+    let offset = (i64::from(weekday) - i64::from(first.weekday().to_monday_one_offset())).rem_euclid(7);
+    let first_hit = first.checked_add(offset.days()).ok()?;
     let mut hits = Vec::new();
     let mut d = first_hit;
-    while d.month() == month && d.day() <= last_day {
+    while d.month() == first.month() {
         hits.push(d);
-        d += Duration::days(7);
+        let Ok(next) = d.checked_add(7.days()) else { break };
+        d = next;
     }
     if nth < 0 || nth as usize > hits.len() {
         hits.last().copied()
@@ -53,10 +37,10 @@ fn nth_weekday(year: i32, month: u32, nth: i32, weekday: u32) -> Option<NaiveDat
     }
 }
 
-fn step(rule: &Repeat, from: NaiveDate) -> Option<NaiveDate> {
+fn step(rule: &Repeat, from: Date) -> Option<Date> {
     let interval = rule.interval.max(1);
     match rule.freq {
-        Freq::Daily => Some(from + Duration::days(interval as i64)),
+        Freq::Daily => from.checked_add(Span::new().try_days(i64::from(interval)).ok()?).ok(),
         Freq::Weekly => {
             let mut days: Vec<i64> = rule
                 .weekdays
@@ -67,25 +51,38 @@ fn step(rule: &Repeat, from: NaiveDate) -> Option<NaiveDate> {
             days.sort_unstable();
             days.dedup();
             if days.is_empty() {
-                return Some(from + Duration::weeks(interval as i64));
+                return from.checked_add(Span::new().try_weeks(i64::from(interval)).ok()?).ok();
             }
-            let today = from.weekday().number_from_monday() as i64;
+            let today = from.weekday().to_monday_one_offset() as i64;
             match days.iter().find(|d| **d > today) {
-                Some(next) => Some(from + Duration::days(next - today)),
+                Some(next) => from.checked_add((next - today).days()).ok(),
                 None => {
-                    let monday = from - Duration::days(today - 1);
-                    Some(monday + Duration::weeks(interval as i64) + Duration::days(days[0] - 1))
+                    let monday = from.checked_sub((today - 1).days()).ok()?;
+                    let next_week = monday
+                        .checked_add(Span::new().try_weeks(i64::from(interval)).ok()?)
+                        .ok()?;
+                    next_week.checked_add((days[0] - 1).days()).ok()
                 }
             }
         }
         Freq::Monthly => {
-            let (y, m) = add_months(from.year(), from.month(), interval);
+            let target = from
+                .first_of_month()
+                .checked_add(Span::new().try_months(i64::from(interval)).ok()?)
+                .ok()?;
             match (rule.nth, rule.nth_weekday) {
-                (Some(nth), Some(wd)) if (1..=7).contains(&wd) => nth_weekday(y, m, nth, wd),
-                _ => clamped(y, m, rule.monthday.unwrap_or(from.day())),
+                (Some(nth), Some(wd)) if (1..=7).contains(&wd) => nth_weekday(target, nth, wd),
+                _ => {
+                    let day = rule.monthday.unwrap_or(from.day() as u32);
+                    target
+                        .with()
+                        .day(day.clamp(1, target.days_in_month() as u32) as i8)
+                        .build()
+                        .ok()
+                }
             }
         }
-        Freq::Yearly => clamped(from.year() + interval as i32, from.month(), from.day()),
+        Freq::Yearly => from.checked_add(Span::new().try_years(i64::from(interval)).ok()?).ok(),
     }
 }
 
@@ -94,7 +91,7 @@ fn step(rule: &Repeat, from: NaiveDate) -> Option<NaiveDate> {
 /// `current` is the date of the occurrence being completed (due date, else start
 /// date), `done` is the completion date. Occurrences already in the past are
 /// skipped, so an overdue task never lands on another overdue date.
-pub fn next_occurrence(rule: &Repeat, current: Option<NaiveDate>, done: NaiveDate) -> Option<NaiveDate> {
+pub fn next_occurrence(rule: &Repeat, current: Option<Date>, done: Date) -> Option<Date> {
     if rule.count == Some(0) || rule.count == Some(1) {
         return None;
     }
@@ -105,11 +102,7 @@ pub fn next_occurrence(rule: &Repeat, current: Option<NaiveDate>, done: NaiveDat
         next = step(rule, next)?;
         guard += 1;
     }
-    if let Some(until) = rule
-        .until
-        .as_deref()
-        .and_then(|u| NaiveDate::parse_from_str(u, DATE_FMT).ok())
-    {
+    if let Some(until) = rule.until.as_deref().and_then(|u| Date::strptime(DATE_FMT, u).ok()) {
         if next > until {
             return None;
         }
@@ -124,7 +117,7 @@ pub fn normalized(mut rule: Repeat, due: Option<&str>) -> Repeat {
     rule.interval = rule.interval.max(1);
     if rule.freq == Freq::Monthly && rule.monthday.is_none() && rule.nth.is_none() && !rule.from_done {
         if let Some((date, _)) = due.and_then(split) {
-            rule.monthday = Some(date.day());
+            rule.monthday = Some(u32::try_from(date.day()).expect("a date's day is positive"));
         }
     }
     rule
@@ -134,8 +127,8 @@ pub fn normalized(mut rule: Repeat, due: Option<&str>) -> Repeat {
 mod tests {
     use super::*;
 
-    fn d(s: &str) -> NaiveDate {
-        NaiveDate::parse_from_str(s, DATE_FMT).unwrap()
+    fn d(s: &str) -> Date {
+        Date::strptime(DATE_FMT, s).unwrap()
     }
 
     fn rule(freq: Freq, interval: u32) -> Repeat {
@@ -270,5 +263,14 @@ mod tests {
     fn shift_keeps_time() {
         assert_eq!(shift("2026-10-05T09:30", 7).as_deref(), Some("2026-10-12T09:30"));
         assert_eq!(shift("2026-12-31", 1).as_deref(), Some("2027-01-01"));
+    }
+
+    #[test]
+    fn date_arithmetic_returns_none_at_jiff_range_limits() {
+        assert_eq!(shift("9999-12-31", 1), None);
+        assert_eq!(
+            next_occurrence(&rule(Freq::Daily, u32::MAX), Some(d("2026-10-05")), d("2026-10-05")),
+            None
+        );
     }
 }

@@ -5,8 +5,11 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::{Duration, Instant};
 
-use chrono::{NaiveDate, NaiveDateTime};
+use jiff::civil::{time, Date, DateTime, Time};
+use jiff::tz::{AmbiguousOffset, Offset, TimeZone};
+use jiff::{SignedDuration, Timestamp, ToSpan};
 use rusqlite::{params, params_from_iter, Connection, OptionalExtension, Row};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -86,7 +89,7 @@ pub(crate) struct Inner {
     pub conn: Connection,
     pub clock: Clock,
     /// Fixed "now" for tests; the wall clock otherwise.
-    pub now: Option<NaiveDateTime>,
+    pub now: Option<DateTime>,
 }
 
 #[derive(uniffi::Object)]
@@ -138,7 +141,7 @@ pub(crate) struct Writer<'a> {
     pub tx: &'a Connection,
     clock: &'a mut Clock,
     now_ms: u64,
-    pub now: NaiveDateTime,
+    pub now: DateTime,
     touched: Touched,
     /// What an action that undo can take back has written so far (R131).
     noted: Option<Step>,
@@ -187,17 +190,17 @@ impl Writer<'_> {
         let (clock, now_ms) = (&mut *self.clock, self.now_ms);
         subtasks::tidy(self.tx, &mut || clock.tick(now_ms))
     }
-    fn today(&self) -> NaiveDate {
+    fn today(&self) -> Date {
         self.now.date()
     }
     pub(crate) fn moment(&self) -> String {
-        self.now.format(MOMENT_FMT).to_string()
+        self.now.strftime(MOMENT_FMT).to_string()
     }
 }
 
 thread_local! {
     /// The zone the calls of this thread read the time in (see `Store::in_zone`).
-    static ZONE: std::cell::Cell<Option<chrono::FixedOffset>> = const { std::cell::Cell::new(None) };
+    static ZONE: std::cell::Cell<Option<Offset>> = const { std::cell::Cell::new(None) };
 }
 
 impl Store {
@@ -212,8 +215,8 @@ impl Store {
         until: &str,
     ) -> Result<Vec<PlannedNotification>> {
         let read = |text: &str| {
-            NaiveDateTime::parse_from_str(text, "%Y-%m-%dT%H:%M:%S")
-                .or_else(|_| NaiveDateTime::parse_from_str(text, MOMENT_FMT))
+            DateTime::strptime("%Y-%m-%dT%H:%M:%S", text)
+                .or_else(|_| DateTime::strptime(MOMENT_FMT, text))
                 .ok()
         };
         let (Some(since), Some(until)) = (read(since), read(until)) else {
@@ -226,7 +229,7 @@ impl Store {
     fn notifications(
         &self,
         settings: NotifySettings,
-        window: Option<(NaiveDateTime, NaiveDateTime)>,
+        window: Option<(DateTime, DateTime)>,
     ) -> Result<Vec<PlannedNotification>> {
         let planned = (|| {
             if !settings.enabled {
@@ -234,13 +237,9 @@ impl Store {
             }
             let inner = self.lock();
             let now = inner.now();
-            let clock = |value: &Option<String>| {
-                value
-                    .as_deref()
-                    .and_then(|v| chrono::NaiveTime::parse_from_str(v, "%H:%M").ok())
-            };
+            let clock = |value: &Option<String>| value.as_deref().and_then(|v| Time::strptime("%H:%M", v).ok());
             let all_day = clock(&settings.all_day_at);
-            let moment = |value: &str| NaiveDateTime::parse_from_str(value, MOMENT_FMT).ok();
+            let moment = |value: &str| DateTime::strptime(MOMENT_FMT, value).ok();
             let tasks = query_tasks(
                 &inner.conn,
                 &format!(
@@ -249,23 +248,19 @@ impl Store {
                 &[],
             )?;
             // From now on for a plan; for a window, what fell into it.
-            let wanted = |at: &NaiveDateTime| match window {
+            let wanted = |at: &DateTime| match window {
                 None => *at > now,
                 Some((since, until)) => *at > since && *at <= until,
             };
             let mut out = Vec::new();
             for task in &tasks {
                 // (kind, moment, what tells notifications of one task apart)
-                let planned: Vec<(NotificationKind, NaiveDateTime, String)> = match (&task.remind, &task.effective_due)
-                {
+                let planned: Vec<(NotificationKind, DateTime, String)> = match (&task.remind, &task.effective_due) {
                     // A reminder without a time of day follows the all-day setting, nine o'clock failing that.
                     (Some(remind), _) => moment(remind)
                         .or_else(|| {
-                            recur::split(remind).map(|(d, _)| {
-                                d.and_time(
-                                    all_day.unwrap_or_else(|| chrono::NaiveTime::from_hms_opt(9, 0, 0).expect("valid")),
-                                )
-                            })
+                            recur::split(remind)
+                                .map(|(d, _)| d.to_datetime(all_day.unwrap_or(const { time(9, 0, 0, 0) })))
                         })
                         .map(|at| (NotificationKind::Reminder, at, String::new()))
                         .into_iter()
@@ -277,19 +272,19 @@ impl Store {
                             leads.dedup();
                             leads
                                 .into_iter()
-                                .map(|lead| {
-                                    (
+                                .filter_map(|lead| {
+                                    Some((
                                         NotificationKind::Due,
-                                        at - chrono::Duration::minutes(i64::from(lead)),
+                                        at.checked_sub(i64::from(lead).minutes()).ok()?,
                                         format!(":{lead}"),
-                                    )
+                                    ))
                                 })
                                 .collect()
                         })
                         .unwrap_or_default(),
                     (None, Some(due)) => all_day
                         .and_then(|time| {
-                            recur::split(due).map(|(d, _)| (NotificationKind::Due, d.and_time(time), String::new()))
+                            recur::split(due).map(|(d, _)| (NotificationKind::Due, d.to_datetime(time), String::new()))
                         })
                         .into_iter()
                         .collect(),
@@ -299,7 +294,7 @@ impl Store {
                     out.push(PlannedNotification {
                         key: format!("task:{}{suffix}", task.id),
                         kind,
-                        at: at.format(MOMENT_FMT).to_string(),
+                        at: at.strftime(MOMENT_FMT).to_string(),
                         task_id: Some(task.id.clone()),
                         title: task.title.clone(),
                         due: task.effective_due.clone(),
@@ -310,9 +305,11 @@ impl Store {
             if let Some(time) = clock(&settings.summary_at) {
                 let first = window.map_or(now.date(), |(since, _)| since.date().min(now.date()));
                 for offset in 0..7 {
-                    let day = first + chrono::Duration::days(offset);
-                    let at = day.and_time(time);
-                    let key = day.format(DATE_FMT).to_string();
+                    let Ok(day) = first.checked_add(offset.days()) else {
+                        break;
+                    };
+                    let at = day.to_datetime(time);
+                    let key = day.strftime(DATE_FMT).to_string();
                     // Everything due by that day, as things stand now; a project is counted in its tasks (R125).
                     let count = tasks
                         .iter()
@@ -323,7 +320,7 @@ impl Store {
                         out.push(PlannedNotification {
                             key: format!("summary:{key}"),
                             kind: NotificationKind::Summary,
-                            at: at.format(MOMENT_FMT).to_string(),
+                            at: at.strftime(MOMENT_FMT).to_string(),
                             task_id: None,
                             title: String::new(),
                             due: None,
@@ -349,7 +346,10 @@ impl Store {
     /// minutes east of UTC rather than on this device's. The web server answers each browser in the
     /// zone of the browser (R135). The stamps keep their clock: it has no time zone.
     pub fn in_zone<T>(&self, minutes_east: i32, f: impl FnOnce() -> T) -> T {
-        let offset = minutes_east.checked_mul(60).and_then(chrono::FixedOffset::east_opt);
+        let offset = minutes_east
+            .checked_mul(60)
+            .filter(|seconds| (-86_400..86_400).contains(seconds))
+            .and_then(|seconds| Offset::from_seconds(seconds).ok());
         let before = ZONE.with(|zone| zone.replace(offset));
         let out = f();
         ZONE.with(|zone| zone.set(before));
@@ -357,54 +357,79 @@ impl Store {
     }
 }
 
-fn zone() -> Option<chrono::FixedOffset> {
+fn zone() -> Option<Offset> {
     ZONE.with(|zone| zone.get())
 }
 
 /// A moment as the clock of the zone in force reads it: the one `in_zone` gives, or this device's.
-pub(crate) fn local_time(utc: chrono::DateTime<chrono::Utc>) -> NaiveDateTime {
+pub(crate) fn local_time(utc: Timestamp) -> DateTime {
     match zone() {
-        Some(offset) => utc.with_timezone(&offset).naive_local(),
-        None => utc.with_timezone(&chrono::Local).naive_local(),
+        Some(offset) => offset.to_datetime(utc),
+        None => system_time_zone().to_datetime(utc),
     }
 }
 
+pub(crate) fn system_time_zone() -> TimeZone {
+    // Keep device zone changes visible within a second. Jiff otherwise caches the zone for five minutes.
+    static LAST_REFRESH: Mutex<Option<Instant>> = Mutex::new(None);
+    let mut last = LAST_REFRESH.lock().unwrap_or_else(|err| err.into_inner());
+    if last.is_none_or(|at| at.elapsed() >= Duration::from_secs(1)) {
+        jiff::tz::reset_system_time_zone_cache();
+        *last = Some(Instant::now());
+    }
+    TimeZone::system()
+}
+
+/// The first instant with this reading of the clock, if the clocks did not skip it.
+pub(crate) fn local_timestamp(zone: &TimeZone, local: DateTime) -> Option<Timestamp> {
+    let instant = zone.to_ambiguous_timestamp(local);
+    match instant.offset() {
+        AmbiguousOffset::Gap { .. } => None,
+        _ => instant.earlier().ok(),
+    }
+}
+
+fn local_day_boundary(zone: &TimeZone, local: DateTime) -> Option<Timestamp> {
+    // When the clocks skip midnight, try the same reading an hour later.
+    local_timestamp(zone, local).or_else(|| local_timestamp(zone, local.checked_add(1.hour()).ok()?))
+}
+
+fn fixed_millis(local: DateTime, offset: Offset) -> u64 {
+    let epoch = Offset::UTC.to_datetime(Timestamp::UNIX_EPOCH);
+    let millis = local.duration_since(epoch).as_millis() - i128::from(offset.seconds()) * 1_000;
+    millis.max(0) as u64
+}
+
 impl Inner {
-    pub fn now(&self) -> NaiveDateTime {
+    pub fn now(&self) -> DateTime {
         match (self.now, zone()) {
             // The clock of the tests is read as UTC once a zone is given.
-            (Some(fixed), Some(offset)) => fixed + offset,
+            (Some(fixed), Some(offset)) => fixed.saturating_add(i64::from(offset.seconds()).seconds()),
             (Some(fixed), None) => fixed,
-            (None, _) => local_time(chrono::Utc::now()),
+            (None, _) => local_time(Timestamp::now()),
         }
     }
 
     /// The clock of the stamps: milliseconds, the same on every device whatever its time zone.
     pub fn now_ms(&self) -> u64 {
         match self.now {
-            Some(fixed) => fixed.and_utc().timestamp_millis().max(0) as u64,
-            None => chrono::Utc::now().timestamp_millis().max(0) as u64,
+            Some(fixed) => fixed_millis(fixed, Offset::UTC),
+            None => Timestamp::now().as_millisecond().max(0) as u64,
         }
     }
 
     /// A moment of this device's local time on the clock of the stamps.
-    fn ms_of(&self, local: NaiveDateTime) -> u64 {
-        use chrono::TimeZone;
-        let utc = match (self.now, zone()) {
+    fn ms_of(&self, local: DateTime) -> u64 {
+        match (self.now, zone()) {
             // A zone given by its offset has no hour that the clocks skip.
-            (_, Some(offset)) => (local - offset).and_utc().timestamp_millis(),
+            (_, Some(offset)) => fixed_millis(local, offset),
             // The clock of the tests has no time zone.
-            (Some(_), None) => local.and_utc().timestamp_millis(),
-            // An hour the clocks skip has no moment of its own: the day then starts where that hour ends.
-            (None, None) => [0, 1]
-                .into_iter()
-                .find_map(|hours| {
-                    let shifted = local + chrono::Duration::hours(hours);
-                    chrono::Local.from_local_datetime(&shifted).earliest()
-                })
-                .map_or_else(|| chrono::Utc::now().timestamp_millis(), |t| t.timestamp_millis()),
-        };
-        utc.max(0) as u64
+            (Some(_), None) => fixed_millis(local, Offset::UTC),
+            (None, None) => local_day_boundary(&system_time_zone(), local)
+                .unwrap_or_else(Timestamp::now)
+                .as_millisecond()
+                .max(0) as u64,
+        }
     }
 
     pub fn write<T>(&mut self, f: impl FnOnce(&mut Writer) -> Result<T>) -> Result<T> {
@@ -602,14 +627,14 @@ fn new_task_start(conn: &Connection) -> Result<Option<u32>> {
 
 /// R164: the start the setting gives a new task created on `today`: `days` later, but not after
 /// the day of `due`. A day without a time.
-fn preset_start(days: u32, today: NaiveDate, due: Option<&str>) -> String {
-    let start = today + chrono::Days::new(u64::from(days));
+fn preset_start(days: u32, today: Date, due: Option<&str>) -> String {
+    let start = today.saturating_add(i64::from(days).days());
     let due_day = due.and_then(recur::split).map(|(day, _)| day);
     match due_day {
         Some(day) if day < start => day,
         _ => start,
     }
-    .format(DATE_FMT)
+    .strftime(DATE_FMT)
     .to_string()
 }
 
@@ -706,37 +731,37 @@ struct Kept {
 /// recorded now (an import, a calendar read for the first time) are not taken for just completed.
 fn kept(inner: &Inner) -> Result<Option<Kept>> {
     let (now, now_ms) = (inner.now(), inner.now_ms());
-    let window = |stamps: (u64, u64), done: (NaiveDateTime, NaiveDateTime)| {
+    let window = |stamps: (u64, u64), done: (DateTime, DateTime)| {
         format!(
             "(substr(t.done_stamp, 1, 12) BETWEEN '{:012x}' AND '{:012x}' AND t.done BETWEEN '{}' AND '{}')",
             stamps.0,
             stamps.1,
-            done.0.format(MOMENT_FMT),
-            done.1.format(MOMENT_FMT)
+            done.0.strftime(MOMENT_FMT),
+            done.1.strftime(MOMENT_FMT)
         )
     };
     Ok(match keep_done(&inner.conn)? {
         KeepDone::Seconds { seconds: 0 } => None,
         KeepDone::Seconds { seconds } => {
             let span_ms = u64::from(seconds) * 1000;
-            let slack = chrono::Duration::milliseconds(span_ms as i64) + chrono::Duration::minutes(1);
+            let slack = SignedDuration::from_millis(span_ms as i64) + SignedDuration::from_mins(1);
             Some(Kept {
                 window: window(
                     (now_ms.saturating_sub(span_ms), now_ms + span_ms),
-                    (now - slack, now + slack),
+                    (now.saturating_sub(slack), now.saturating_add(slack)),
                 ),
                 leaves_ms: Box::new(move |done_ms| done_ms + span_ms),
             })
         }
         // The day is the one on the clock of this device: `done` is written in local time.
         KeepDone::EndOfDay => {
-            let midnight = now.date().and_time(chrono::NaiveTime::MIN);
-            let next = midnight + chrono::Duration::days(1);
+            let midnight = now.date().to_datetime(Time::MIN);
+            let next = midnight.saturating_add(1.day());
             let (from_ms, until_ms) = (inner.ms_of(midnight), inner.ms_of(next));
             Some(Kept {
                 window: window(
                     (from_ms, until_ms.saturating_sub(1)),
-                    (midnight, next - chrono::Duration::minutes(1)),
+                    (midnight, next.saturating_sub(1.minute())),
                 ),
                 leaves_ms: Box::new(move |_| until_ms.saturating_sub(1)),
             })
@@ -868,7 +893,7 @@ fn valid_moment(value: &Option<String>) -> Result<()> {
     match value.as_deref() {
         None | Some("") => Ok(()),
         Some(v) if v.len() == 10 && recur::split(v).is_some() => Ok(()),
-        Some(v) if NaiveDateTime::parse_from_str(v, MOMENT_FMT).is_ok() => Ok(()),
+        Some(v) if DateTime::strptime(MOMENT_FMT, v).is_ok() => Ok(()),
         Some(v) => Err(AppError::invalid(format!("bad date: {v}"))),
     }
 }
@@ -961,8 +986,8 @@ impl Store {
     #[doc(hidden)]
     pub fn set_now_for_tests(&self, now: &str) {
         // Seconds are optional: most tests reason in minutes.
-        self.lock().now = NaiveDateTime::parse_from_str(now, "%Y-%m-%dT%H:%M:%S")
-            .or_else(|_| NaiveDateTime::parse_from_str(now, MOMENT_FMT))
+        self.lock().now = DateTime::strptime("%Y-%m-%dT%H:%M:%S", now)
+            .or_else(|_| DateTime::strptime(MOMENT_FMT, now))
             .ok();
     }
 
@@ -1443,7 +1468,7 @@ impl Store {
 
     pub fn tasks(&self, view: Scope) -> Result<Vec<TaskItem>> {
         let inner = self.lock();
-        let today = inner.now().date().format(DATE_FMT).to_string();
+        let today = inner.now().date().strftime(DATE_FMT).to_string();
         let conn = &inner.conn;
         let recent = Recent::at(&inner)?;
         let (open, settled, live) = (&recent.open, &recent.settled, &recent.live);
@@ -1625,7 +1650,7 @@ impl Store {
 
     pub fn counts(&self) -> Result<Counts> {
         let inner = self.lock();
-        let today = inner.now().date().format(DATE_FMT).to_string();
+        let today = inner.now().date().strftime(DATE_FMT).to_string();
         let count = |sql: &str, args: &[&str]| -> Result<u32> {
             Ok(inner.conn.query_row(
                 &format!("SELECT count(*) FROM tasks t WHERE {sql}"),
@@ -1736,7 +1761,7 @@ impl Store {
 
     pub fn filters(&self) -> Result<Vec<SavedFilter>> {
         let inner = self.lock();
-        let today = inner.now().date().format(DATE_FMT).to_string();
+        let today = inner.now().date().strftime(DATE_FMT).to_string();
         let mut stmt = inner
             .conn
             .prepare_cached("SELECT id, name, spec FROM filters WHERE deleted = 0 ORDER BY pos, id")?;
@@ -1764,7 +1789,7 @@ impl Store {
     /// What a filter would show, without saving it.
     pub fn preview_filter(&self, spec: FilterSpec) -> Result<Vec<TaskItem>> {
         let inner = self.lock();
-        let today = inner.now().date().format(DATE_FMT).to_string();
+        let today = inner.now().date().strftime(DATE_FMT).to_string();
         filter_tasks(&inner.conn, &spec, &today, &Recent::at(&inner)?)
     }
 
@@ -2574,9 +2599,9 @@ pub(crate) fn complete_in(w: &mut Writer, id: &str, wont: bool) -> Result<TaskIt
                 }
             }
 
-            let delta = (next - from).num_days();
+            let delta = i64::from((next - from).get_days());
             match (&task.due, &task.start) {
-                (None, None) => w.task(id, "due", json!(next.format(DATE_FMT).to_string()))?,
+                (None, None) => w.task(id, "due", json!(next.strftime(DATE_FMT).to_string()))?,
                 (due, start) => {
                     if let Some(due) = due {
                         w.task(id, "due", opt(recur::shift(due, delta)))?;
@@ -2783,7 +2808,7 @@ fn create_task_with(w: &mut Writer, new: NewTask, start_preset: bool) -> Result<
                 priority = Some(list.default_priority);
             }
             if due.is_none() && new.start.is_none() && list.default_due_today {
-                due = Some(w.today().format(DATE_FMT).to_string());
+                due = Some(w.today().strftime(DATE_FMT).to_string());
             }
             // R164: after the list, so that its "due today" stays and the start does not pass it.
             if start.is_none() && start_preset {
@@ -2970,11 +2995,48 @@ pub(crate) fn hex(bytes: &[u8]) -> String {
 pub fn days_between(from: String, to: String) -> Option<i64> {
     let (a, _) = recur::split(&from)?;
     let (b, _) = recur::split(&to)?;
-    Some((b - a).num_days())
+    Some(i64::from((b - a).get_days()))
 }
 
 /// The date `days` after `date`, keeping its time part.
 #[uniffi::export]
 pub fn shift_date(date: String, days: i64) -> Option<String> {
     recur::shift(&date, days)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn r135_a_fixed_offset_converts_an_instant_across_midnight() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path().to_string_lossy().into_owned()).unwrap();
+        let utc = "2026-10-05T00:15:30Z".parse().unwrap();
+        store.in_zone(330, || {
+            assert_eq!(local_time(utc), "2026-10-05T05:45:30".parse().unwrap());
+            store.in_zone(-210, || {
+                assert_eq!(local_time(utc), "2026-10-04T20:45:30".parse().unwrap());
+            });
+            assert_eq!(local_time(utc), "2026-10-05T05:45:30".parse().unwrap());
+        });
+    }
+
+    #[test]
+    fn r68_day_boundaries_use_the_first_midnight_or_advance_past_a_skipped_hour() {
+        let santiago = TimeZone::get("America/Santiago").unwrap();
+        let skipped = "2024-09-08T00:00:00".parse().unwrap();
+        assert_eq!(local_timestamp(&santiago, skipped), None);
+        assert_eq!(
+            local_day_boundary(&santiago, skipped),
+            Some("2024-09-08T04:00:00Z".parse().unwrap()),
+        );
+
+        let havana = TimeZone::get("America/Havana").unwrap();
+        let repeated = "2024-11-03T00:00:00".parse().unwrap();
+        assert_eq!(
+            local_day_boundary(&havana, repeated),
+            Some("2024-11-03T04:00:00Z".parse().unwrap()),
+        );
+    }
 }

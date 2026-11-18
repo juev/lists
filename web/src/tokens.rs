@@ -93,7 +93,7 @@ fn digest(secret: &str) -> String {
 }
 
 fn minute() -> String {
-    chrono::Utc::now().format("%Y-%m-%dT%H:%M").to_string()
+    jiff::Timestamp::now().strftime("%Y-%m-%dT%H:%M").to_string()
 }
 
 pub struct Tokens {

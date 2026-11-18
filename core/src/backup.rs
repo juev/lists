@@ -11,7 +11,7 @@ use std::collections::BTreeSet;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
-use chrono::NaiveDateTime;
+use jiff::{civil::DateTime, SignedDuration};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -68,11 +68,11 @@ fn invalid(msg: impl Into<String>) -> AppError {
     AppError::invalid(msg)
 }
 
-pub(crate) fn created_of(name: &str) -> Option<NaiveDateTime> {
+pub(crate) fn created_of(name: &str) -> Option<DateTime> {
     let stem = name.strip_prefix(PREFIX)?.strip_suffix(EXT)?;
     // A second backup within one second carries a counter after the bracket.
     let (moment, _) = stem.split_once(')')?;
-    NaiveDateTime::parse_from_str(moment, NAME_FMT).ok()
+    DateTime::strptime(NAME_FMT, moment).ok()
 }
 
 /// R142: `backups/` and the copies in it, as an earlier version may have left them, closed from
@@ -108,7 +108,7 @@ impl Store {
         let dir = self.backups_dir();
         crate::store::make_private_dir(&dir)?;
         let now = self.lock().now();
-        let moment = now.format(NAME_FMT).to_string();
+        let moment = now.strftime(NAME_FMT).to_string();
         let mut name = format!("{PREFIX}{moment}){EXT}");
         let mut n = 1;
         while dir.join(&name).exists() {
@@ -132,7 +132,7 @@ impl Store {
         Ok(Backup {
             size: std::fs::metadata(&target)?.len(),
             path: target.to_string_lossy().into_owned(),
-            created: now.format("%Y-%m-%dT%H:%M").to_string(),
+            created: now.strftime("%Y-%m-%dT%H:%M").to_string(),
             name,
         })
     }
@@ -147,11 +147,11 @@ impl Store {
         let written = self.write_archive(&snapshot, part, &now, false);
         let _ = std::fs::remove_file(&snapshot);
         written?;
-        Ok(format!("{PREFIX}{}){EXT}", now.format(NAME_FMT)))
+        Ok(format!("{PREFIX}{}){EXT}", now.strftime(NAME_FMT)))
     }
 
     /// `content`: whether the attachment content on the device goes into the archive.
-    fn write_archive(&self, snapshot: &Path, part: &Path, now: &NaiveDateTime, content: bool) -> Result<()> {
+    fn write_archive(&self, snapshot: &Path, part: &Path, now: &DateTime, content: bool) -> Result<()> {
         // The registers and the list of content are taken at one moment.
         let (fields, hashes): (u64, BTreeSet<String>) = {
             let inner = self.lock();
@@ -181,7 +181,7 @@ impl Store {
             .collect();
         let manifest = Manifest {
             format: FORMAT,
-            created: now.format(SECONDS_FMT).to_string(),
+            created: now.strftime(SECONDS_FMT).to_string(),
             fields,
             blobs: present.len() as u64,
         };
@@ -248,7 +248,7 @@ impl Store {
             found.push(Backup {
                 size: entry.metadata()?.len(),
                 path: entry.path().to_string_lossy().into_owned(),
-                created: created.format("%Y-%m-%dT%H:%M").to_string(),
+                created: created.strftime("%Y-%m-%dT%H:%M").to_string(),
                 name,
             });
         }
@@ -279,16 +279,18 @@ impl Store {
             }
             let (now, last) = {
                 let inner = self.lock();
-                let last = db::meta_get(&inner.conn, "backup_last")?
-                    .and_then(|v| NaiveDateTime::parse_from_str(&v, SECONDS_FMT).ok());
+                let last =
+                    db::meta_get(&inner.conn, "backup_last")?.and_then(|v| DateTime::strptime(SECONDS_FMT, &v).ok());
                 (inner.now(), last)
             };
             // A clock set back does not hold the backups off for good.
-            if last.is_some_and(|last| last <= now && now - last < chrono::Duration::hours(every.into())) {
+            if last
+                .is_some_and(|last| last <= now && now.duration_since(last) < SignedDuration::from_hours(every.into()))
+            {
                 return Ok(None);
             }
             let backup = self.create_backup().inspect_err(|_| said = true)?;
-            db::meta_set(&self.lock().conn, "backup_last", &now.format(SECONDS_FMT).to_string())?;
+            db::meta_set(&self.lock().conn, "backup_last", &now.strftime(SECONDS_FMT).to_string())?;
             Ok(Some(backup))
         })();
         if let Err(e) = &due {

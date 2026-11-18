@@ -83,7 +83,9 @@ impl Store {
         let message = message().replace(['\n', '\r'], " ");
         let line = format!(
             "{} {label} {source}: {message}\n",
-            chrono::Local::now().format("%Y-%m-%dT%H:%M:%S")
+            crate::store::system_time_zone()
+                .to_datetime(jiff::Timestamp::now())
+                .strftime("%Y-%m-%dT%H:%M:%S")
         );
         let _writing = self.log_lock.lock().unwrap_or_else(|p| p.into_inner());
         let path = self.log_file(FILE);

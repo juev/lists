@@ -1097,7 +1097,7 @@ impl App {
                     let data = written
                         .and_then(|()| std::fs::read(&file).map_err(|e| AppError::Storage { msg: e.to_string() }));
                     let _ = std::fs::remove_dir_all(&dir);
-                    let day = chrono::Local::now().format("%Y-%m-%d");
+                    let day = jiff::ZonedDateTime::now().strftime("%Y-%m-%d");
                     let (kind, name) = if markdown {
                         ("text/markdown; charset=utf-8", format!("Lists-{day}.md"))
                     } else {
@@ -1152,7 +1152,7 @@ impl App {
                         Err(r) => return Ok(r),
                     };
                     let endpoint = args["endpoint"].as_str().unwrap_or_default();
-                    match self.notifier.test(endpoint, chrono::Utc::now()) {
+                    match self.notifier.test(endpoint, jiff::Timestamp::now()) {
                         Some(notify::Sent::Ok) => json_reply(200, json!({ "ok": true })),
                         Some(notify::Sent::Gone) => fail(410, "the browser no longer has this subscription"),
                         Some(notify::Sent::Failed(e)) => fail(502, e),
@@ -1417,7 +1417,7 @@ pub fn start(config: Config) -> Result<Running, Box<dyn std::error::Error>> {
     {
         let app = app.clone();
         std::thread::spawn(move || loop {
-            app.notifier.tick(&app.store, chrono::Utc::now());
+            app.notifier.tick(&app.store, jiff::Timestamp::now());
             std::thread::sleep(Duration::from_secs(30));
         });
     }

@@ -4,7 +4,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use base64::Engine;
-use chrono::{Local, NaiveDate, NaiveDateTime, TimeZone, Utc};
+use jiff::civil::{Date, DateTime};
+use jiff::tz::Offset;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -13,7 +14,7 @@ use super::ical::{self, Component, Prop};
 use crate::db::{self, is_sha256};
 use crate::hlc;
 use crate::model::{Freq, Repeat};
-use crate::tag;
+use crate::{store, tag};
 
 pub const STATE: &str = "X-LISTS-STATE";
 pub const SHA_PARAM: &str = "X-LISTS-SHA256";
@@ -191,7 +192,7 @@ pub fn render(
     state: &TaskState,
     base: Option<&Component>,
     blob: &dyn Fn(&str) -> Option<Vec<u8>>,
-    now: NaiveDateTime,
+    now: DateTime,
 ) -> Component {
     let mut calendar = base.cloned().unwrap_or_else(|| {
         let mut c = Component::new("VCALENDAR");
@@ -247,7 +248,7 @@ pub fn render(
     }
     let done = state
         .text("done")
-        .and_then(|d| NaiveDateTime::parse_from_str(d, "%Y-%m-%dT%H:%M").ok());
+        .and_then(|d| DateTime::strptime("%Y-%m-%dT%H:%M", d).ok());
     todo.set(
         Some(Prop::new(
             "STATUS",
@@ -367,15 +368,13 @@ pub fn fingerprint(calendar: &Component) -> String {
 
 // ---- dates ----
 
-fn to_utc_stamp(utc: NaiveDateTime) -> String {
-    utc.format("%Y%m%dT%H%M%SZ").to_string()
+fn to_utc_stamp(utc: DateTime) -> String {
+    utc.strftime("%Y%m%dT%H%M%SZ").to_string()
 }
 
-fn local_to_utc_stamp(local: NaiveDateTime) -> String {
-    let utc = Local
-        .from_local_datetime(&local)
-        .earliest()
-        .map(|d| d.with_timezone(&Utc).naive_utc())
+fn local_to_utc_stamp(local: DateTime) -> String {
+    let utc = store::local_timestamp(&store::system_time_zone(), local)
+        .map(|instant| Offset::UTC.to_datetime(instant))
         .unwrap_or(local);
     to_utc_stamp(utc)
 }
@@ -383,11 +382,11 @@ fn local_to_utc_stamp(local: NaiveDateTime) -> String {
 /// `2026-10-05` → `DUE;VALUE=DATE:20261005`, `2026-10-05T18:30` → `DUE:20261005T183000` (floating).
 fn moment_to_ical(name: &str, value: &str) -> Option<Prop> {
     if value.len() == 10 {
-        let date = NaiveDate::parse_from_str(value, "%Y-%m-%d").ok()?;
-        return Some(Prop::new(name, date.format("%Y%m%d").to_string()).with("VALUE", "DATE"));
+        let date = Date::strptime("%Y-%m-%d", value).ok()?;
+        return Some(Prop::new(name, date.strftime("%Y%m%d").to_string()).with("VALUE", "DATE"));
     }
-    let moment = NaiveDateTime::parse_from_str(value, "%Y-%m-%dT%H:%M").ok()?;
-    Some(Prop::new(name, moment.format("%Y%m%dT%H%M%S").to_string()))
+    let moment = DateTime::strptime("%Y-%m-%dT%H:%M", value).ok()?;
+    Some(Prop::new(name, moment.strftime("%Y%m%dT%H%M%S").to_string()))
 }
 
 /// Reads DATE, floating, zoned and UTC values. A UTC value becomes local time;
@@ -395,18 +394,20 @@ fn moment_to_ical(name: &str, value: &str) -> Option<Prop> {
 fn moment_from_ical(prop: &Prop) -> Option<String> {
     let value = prop.value.trim();
     if value.len() == 8 {
-        let date = NaiveDate::parse_from_str(value, "%Y%m%d").ok()?;
-        return Some(date.format("%Y-%m-%d").to_string());
+        let date = Date::strptime("%Y%m%d", value).ok()?;
+        return Some(date.strftime("%Y-%m-%d").to_string());
     }
     let (body, utc) = match value.strip_suffix('Z') {
         Some(body) => (body, true),
         None => (value, false),
     };
-    let mut moment = NaiveDateTime::parse_from_str(body, "%Y%m%dT%H%M%S").ok()?;
-    if utc {
-        moment = Utc.from_utc_datetime(&moment).with_timezone(&Local).naive_local();
-    }
-    Some(moment.format("%Y-%m-%dT%H:%M").to_string())
+    let moment = DateTime::strptime("%Y%m%dT%H%M%S", body).ok()?;
+    let moment = if utc {
+        store::system_time_zone().to_datetime(Offset::UTC.to_timestamp(moment).ok()?)
+    } else {
+        moment
+    };
+    Some(moment.strftime("%Y-%m-%dT%H:%M").to_string())
 }
 
 // ---- recurrence ----
@@ -455,12 +456,8 @@ pub fn to_rrule(rule: &Repeat) -> String {
     if let Some(count) = rule.count {
         parts.push(format!("COUNT={count}"));
     }
-    if let Some(until) = rule
-        .until
-        .as_deref()
-        .and_then(|u| NaiveDate::parse_from_str(u, "%Y-%m-%d").ok())
-    {
-        parts.push(format!("UNTIL={}", until.format("%Y%m%d")));
+    if let Some(until) = rule.until.as_deref().and_then(|u| Date::strptime("%Y-%m-%d", u).ok()) {
+        parts.push(format!("UNTIL={}", until.strftime("%Y%m%d")));
     }
     parts.join(";")
 }
@@ -495,8 +492,8 @@ pub fn from_rrule(value: &str) -> Option<Repeat> {
             "INTERVAL" => rule.interval = val.parse().ok().filter(|n| *n >= 1)?,
             "COUNT" => rule.count = Some(val.parse().ok()?),
             "UNTIL" => {
-                let date = NaiveDate::parse_from_str(val.get(..8)?, "%Y%m%d").ok()?;
-                rule.until = Some(date.format("%Y-%m-%d").to_string());
+                let date = Date::strptime("%Y%m%d", val.get(..8)?).ok()?;
+                rule.until = Some(date.strftime("%Y-%m-%d").to_string());
             }
             "BYDAY" => {
                 for item in val.split(',') {
@@ -568,8 +565,8 @@ mod tests {
         }
     }
 
-    fn now() -> NaiveDateTime {
-        NaiveDateTime::parse_from_str("2026-10-05T10:00", "%Y-%m-%dT%H:%M").unwrap()
+    fn now() -> DateTime {
+        DateTime::strptime("%Y-%m-%dT%H:%M", "2026-10-05T10:00").unwrap()
     }
 
     fn weekly_rule() -> Repeat {
@@ -809,7 +806,7 @@ mod tests {
     fn fingerprint_ignores_order_folding_and_timestamps_but_not_content() {
         let s = state(&[("title", json!("x")), ("due", json!("2026-10-05"))]);
         let a = render("t", &s, None, &|_| None, now());
-        let later = render("t", &s, None, &|_| None, now() + chrono::Duration::hours(5));
+        let later = render("t", &s, None, &|_| None, now() + jiff::SignedDuration::from_hours(5));
         assert_eq!(fingerprint(&a), fingerprint(&later));
 
         let mut shuffled = a.clone();

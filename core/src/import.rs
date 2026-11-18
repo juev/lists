@@ -9,7 +9,9 @@ use std::collections::{BTreeMap, HashMap};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use chrono::{DateTime, NaiveDate, NaiveDateTime, TimeZone, Utc};
+use jiff::civil::{Date, DateTime, Time};
+use jiff::tz::Offset;
+use jiff::{SignedDuration, Timestamp};
 use rusqlite::{Connection, OpenFlags};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -77,8 +79,8 @@ fn invalid(msg: impl Into<String>) -> AppError {
     AppError::invalid(msg)
 }
 
-fn local_moment(utc: DateTime<Utc>) -> String {
-    store::local_time(utc).format("%Y-%m-%dT%H:%M").to_string()
+fn local_moment(utc: Timestamp) -> String {
+    store::local_time(utc).strftime("%Y-%m-%dT%H:%M").to_string()
 }
 
 fn rule(freq: Freq, interval: u32) -> Repeat {
@@ -107,12 +109,14 @@ fn twodo_date(seconds: f64, time_of_day: f64) -> Option<String> {
     if seconds <= 0.0 || seconds >= TWODO_NO_DATE {
         return None;
     }
-    let date = Utc.timestamp_opt(seconds as i64, 0).single()?.date_naive();
+    let date = Offset::UTC
+        .to_datetime(Timestamp::from_second(seconds as i64).ok()?)
+        .date();
     let (h, m) = ((time_of_day as i64) / 100, (time_of_day as i64) % 100);
     if (0.0..2400.0).contains(&time_of_day) && h < 24 && m < 60 {
-        return Some(format!("{}T{h:02}:{m:02}", date.format("%Y-%m-%d")));
+        return Some(format!("{}T{h:02}:{m:02}", date.strftime("%Y-%m-%d")));
     }
-    Some(date.format("%Y-%m-%d").to_string())
+    Some(date.strftime("%Y-%m-%d").to_string())
 }
 
 /// A start date: one instant whose UTC fields are the local date and time;
@@ -121,13 +125,13 @@ fn twodo_start(seconds: f64) -> Option<String> {
     if seconds <= 0.0 || seconds >= TWODO_NO_DATE {
         return None;
     }
-    let moment = Utc.timestamp_opt(seconds as i64, 0).single()?.naive_utc();
-    let format = if moment.time() == chrono::NaiveTime::MIN {
+    let moment = Offset::UTC.to_datetime(Timestamp::from_second(seconds as i64).ok()?);
+    let format = if moment.time() == Time::MIN {
         "%Y-%m-%d"
     } else {
         "%Y-%m-%dT%H:%M"
     };
-    Some(moment.format(format).to_string())
+    Some(moment.strftime(format).to_string())
 }
 
 /// The repeat rule of a 2Do task. Every code here was read from tasks created
@@ -142,13 +146,13 @@ fn twodo_start(seconds: f64) -> Option<String> {
 ///
 /// `mode` 2 counts from the completion date. `end` is the end type (1 on a
 /// date, 2 after a number of repeats), the repeats left, and the end date.
-fn twodo_repeat(kind: i64, value: i64, mode: i64, end: (i64, i64, f64), due: Option<NaiveDate>) -> Option<Repeat> {
+fn twodo_repeat(kind: i64, value: i64, mode: i64, end: (i64, i64, f64), due: Option<Date>) -> Option<Repeat> {
     let mut out = match kind {
         1..=127 => {
             // Monday first, as the rest of the app counts them.
             let bits = [64, 32, 16, 8, 4, 2, 1];
             let days: Vec<u32> = (0..7).filter(|i| kind & bits[*i] != 0).map(|i| i as u32 + 1).collect();
-            let same_as_due = due.is_some_and(|d| days == [chrono::Datelike::weekday(&d).number_from_monday()]);
+            let same_as_due = due.is_some_and(|d| days == [d.weekday().to_monday_one_offset() as u32]);
             // "Every week on the weekday of the due date" is the plain weekly rule.
             Repeat {
                 weekdays: if same_as_due { vec![] } else { days },
@@ -303,11 +307,10 @@ fn parse_2do(archive: &Path, work: &Path) -> Result<Parsed> {
         };
         if r.get::<_, bool>(8)? {
             let at: f64 = r.get(9)?;
-            let when = Utc
-                .timestamp_opt(at as i64, 0)
-                .single()
+            let when = Timestamp::from_second(at as i64)
+                .ok()
                 .filter(|_| at > 0.0)
-                .unwrap_or_else(Utc::now);
+                .unwrap_or_else(Timestamp::now);
             task.done = Some(local_moment(when));
         }
         // One tag is eight fields; the first is its name.
@@ -330,7 +333,7 @@ fn parse_2do(archive: &Path, work: &Path) -> Result<Parsed> {
                 .due
                 .as_deref()
                 .or(task.start.as_deref())
-                .and_then(|d| NaiveDate::parse_from_str(&d[..10], "%Y-%m-%d").ok());
+                .and_then(|d| Date::strptime("%Y-%m-%d", &d[..10]).ok());
             match twodo_repeat(repeat_type, r.get(15)?, r.get(16)?, end, due_day) {
                 Some(rule) => {
                     converted += 1;
@@ -429,7 +432,7 @@ fn parse_todoist(text: &str, name: &str) -> Result<Parsed> {
         color: String::new(),
         ..List::default()
     });
-    let today = store::local_time(Utc::now()).date();
+    let today = store::local_time(Timestamp::now()).date();
     let mut stack: Vec<String> = Vec::new();
     let mut undated = 0u32;
     for (n, row) in rows.iter().enumerate().skip(1) {
@@ -465,8 +468,8 @@ fn parse_todoist(text: &str, name: &str) -> Result<Parsed> {
                 if !date.is_empty() {
                     let iso = date
                         .get(..10)
-                        .and_then(|d| NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
-                        .map(|d| d.format("%Y-%m-%d").to_string());
+                        .and_then(|d| Date::strptime("%Y-%m-%d", d).ok())
+                        .map(|d| d.strftime("%Y-%m-%d").to_string());
                     task.due = iso.or_else(|| quickadd::parse(&date, today).due);
                     if task.due.is_none() || date.to_lowercase().contains("every") {
                         undated += 1;
@@ -504,26 +507,28 @@ fn ticktick_header(row: &[String]) -> bool {
         .all(|name| row.iter().any(|h| h.trim() == *name))
 }
 
-fn ticktick_instant(text: &str) -> Option<DateTime<Utc>> {
-    DateTime::parse_from_str(text.trim(), "%Y-%m-%dT%H:%M:%S%z")
+fn ticktick_instant(text: &str) -> Option<Timestamp> {
+    let text = text.trim();
+    Timestamp::strptime("%Y-%m-%dT%H:%M:%S%z", text)
+        .or_else(|_| Timestamp::strptime("%Y-%m-%dT%H:%M:%S%:z", text))
         .ok()
-        .map(|d| d.with_timezone(&Utc))
 }
 
 /// The day of a task without a time: TickTick writes midnight in the zone of
-/// the task as UTC. With no zone database here, an instant from 11:00 UTC on
+/// the task as UTC. The importer infers the date: an instant from 11:00 UTC on
 /// is the midnight of the next day (right for zones from -10:00 to +13:00).
-fn ticktick_day(utc: DateTime<Utc>) -> NaiveDate {
-    let date = utc.date_naive();
-    if chrono::Timelike::hour(&utc) >= 11 {
-        date.succ_opt().unwrap_or(date)
+fn ticktick_day(utc: Timestamp) -> Date {
+    let utc = Offset::UTC.to_datetime(utc);
+    let date = utc.date();
+    if utc.hour() >= 11 {
+        date.tomorrow().unwrap_or(date)
     } else {
         date
     }
 }
 
 /// An ISO 8601 duration as a reminder offset: `PT0S`, `-PT30M`, `P0DT9H30M0S`.
-fn ticktick_offset(text: &str) -> Option<chrono::Duration> {
+fn ticktick_offset(text: &str) -> Option<SignedDuration> {
     let text = text.trim();
     let (sign, rest) = match text.strip_prefix('-') {
         Some(rest) => (-1, rest),
@@ -553,7 +558,7 @@ fn ticktick_offset(text: &str) -> Option<chrono::Duration> {
     if !number.is_empty() || parts == 0 {
         return None;
     }
-    chrono::Duration::try_seconds(sign * seconds)
+    Some(SignedDuration::from_secs(sign * seconds))
 }
 
 /// Start, due and reminder of a TickTick task, as the app writes them.
@@ -564,9 +569,9 @@ fn ticktick_dates(
     reminder: &str,
 ) -> (Option<String>, Option<String>, Option<String>) {
     let (start, due) = (ticktick_instant(start), ticktick_instant(due));
-    let write = |utc: DateTime<Utc>| {
+    let write = |utc: Timestamp| {
         if all_day {
-            ticktick_day(utc).format("%Y-%m-%d").to_string()
+            ticktick_day(utc).strftime("%Y-%m-%d").to_string()
         } else {
             local_moment(utc)
         }
@@ -575,11 +580,11 @@ fn ticktick_dates(
     let remind = start.or(due).and_then(|anchor| {
         let offset = ticktick_offset(reminder.lines().next()?)?;
         let moment = if all_day {
-            ticktick_day(anchor).and_hms_opt(0, 0, 0)?.checked_add_signed(offset)?
+            ticktick_day(anchor).to_datetime(Time::MIN).checked_add(offset).ok()?
         } else {
-            store::local_time(anchor.checked_add_signed(offset)?)
+            store::local_time(anchor.checked_add(offset).ok()?)
         };
-        Some(moment.format("%Y-%m-%dT%H:%M").to_string())
+        Some(moment.strftime("%Y-%m-%dT%H:%M").to_string())
     });
     let due_text = due.or(start).map(write);
     let start_text = start.filter(|s| due.is_some_and(|d| d != *s)).map(write);
@@ -645,7 +650,7 @@ fn parse_ticktick(rows: &[Vec<String>]) -> Result<Parsed> {
         );
         let finished = ticktick_instant(&get(row, "Completed Time"))
             .map(local_moment)
-            .unwrap_or_else(|| local_moment(Utc::now()));
+            .unwrap_or_else(|| local_moment(Timestamp::now()));
         let status = get(row, "Status");
         let kind = get(row, "Kind");
         if kind == "NOTE" {
@@ -765,9 +770,10 @@ fn parse_omnifocus(rows: &[Vec<String>], name: &str) -> Result<Parsed> {
             .unwrap_or_default()
     };
     let moment = |text: &str| {
-        DateTime::parse_from_str(text, "%Y-%m-%d %H:%M:%S %z")
+        Timestamp::strptime("%Y-%m-%d %H:%M:%S %z", text)
+            .or_else(|_| Timestamp::strptime("%Y-%m-%d %H:%M:%S %:z", text))
             .ok()
-            .map(|d| local_moment(d.with_timezone(&Utc)))
+            .map(local_moment)
     };
     let mut out = Parsed {
         source: "OmniFocus",
@@ -822,7 +828,7 @@ fn parse_omnifocus(rows: &[Vec<String>], name: &str) -> Result<Parsed> {
             due: moment(&get(row, "Due Date")),
             priority: if get(row, "Flagged") == "1" { 3 } else { 0 },
             tags: tags.split(',').map(str::to_string).collect(),
-            done: finished.then(|| moment(&completed).unwrap_or_else(|| local_moment(Utc::now()))),
+            done: finished.then(|| moment(&completed).unwrap_or_else(|| local_moment(Timestamp::now()))),
             wont: status == "dropped",
             project: kind == "Project",
             ..Task::default()
@@ -854,13 +860,13 @@ const THINGS_VERSION: i64 = 29;
 const THINGS_NEVER: f64 = 64_092_211_200.0;
 
 /// A date of a Things database: `year << 16 | month << 12 | day << 7`; year 4001 is "none".
-fn things_date(value: Option<i64>) -> Option<NaiveDate> {
+fn things_date(value: Option<i64>) -> Option<Date> {
     let v = value.filter(|v| *v > 0)?;
-    let year = (v >> 16) as i32;
+    let year = i16::try_from(v >> 16).ok()?;
     if year >= 4000 {
         return None;
     }
-    NaiveDate::from_ymd_opt(year, ((v >> 12) & 15) as u32, ((v >> 7) & 31) as u32)
+    Date::new(year, ((v >> 12) & 15) as i8, ((v >> 7) & 31) as i8).ok()
 }
 
 /// A reminder time of a Things database: `hour << 26 | minute << 20`.
@@ -969,10 +975,9 @@ fn things_rule(plist: &Value) -> Option<Repeat> {
     out.from_done = int("tp") == Some(1);
     let end = plist.get("ed").and_then(Value::as_f64).unwrap_or(THINGS_NEVER);
     if end < THINGS_NEVER {
-        out.until = Utc
-            .timestamp_opt(end as i64, 0)
-            .single()
-            .map(|d| d.date_naive().format("%Y-%m-%d").to_string());
+        out.until = Timestamp::from_second(end as i64)
+            .ok()
+            .map(|d| d.strftime("%Y-%m-%d").to_string());
     }
     Some(out)
 }
@@ -1166,21 +1171,21 @@ fn parse_things(db: &Path, work: &Path) -> Result<Parsed> {
         });
         let remind = start_date
             .zip(things_time(row.reminder))
-            .and_then(|(d, (h, m))| d.and_hms_opt(h, m, 0))
-            .map(|d| d.format("%Y-%m-%dT%H:%M").to_string());
+            .map(|(d, (h, m))| d.at(h as i8, m as i8, 0, 0))
+            .map(|d| d.strftime("%Y-%m-%dT%H:%M").to_string());
         let finished = row
             .stop
-            .and_then(|s| Utc.timestamp_opt(s as i64, 0).single())
+            .and_then(|s| Timestamp::from_second(s as i64).ok())
             .map(local_moment)
-            .unwrap_or_else(|| local_moment(Utc::now()));
+            .unwrap_or_else(|| local_moment(Timestamp::now()));
         let mut task = Task {
             key: row.uuid.clone(),
             list: area,
             parent: project.filter(|p| by_id.contains_key(p.as_str())),
             title: row.title.clone(),
             notes: row.notes.trim().to_string(),
-            start: start_date.map(|d| d.format("%Y-%m-%d").to_string()),
-            due: things_date(row.deadline).map(|d| d.format("%Y-%m-%d").to_string()),
+            start: start_date.map(|d| d.strftime("%Y-%m-%d").to_string()),
+            due: things_date(row.deadline).map(|d| d.strftime("%Y-%m-%d").to_string()),
             remind,
             tags: tags.remove(&row.uuid).unwrap_or_default(),
             done: matches!(row.status, 2 | 3).then(|| finished.clone()),
@@ -1220,7 +1225,7 @@ fn parse_things(db: &Path, work: &Path) -> Result<Parsed> {
             continue;
         };
         let finished = stop
-            .and_then(|s| Utc.timestamp_opt(s as i64, 0).single())
+            .and_then(|s| Timestamp::from_second(s as i64).ok())
             .map(local_moment)
             .unwrap_or_else(|| fallback.clone());
         out.tasks.push(Task {
@@ -1276,9 +1281,7 @@ fn parse_things(db: &Path, work: &Path) -> Result<Parsed> {
 // ---------------------------------------------------------------- Trello
 
 fn iso_instant(value: &Value) -> Option<String> {
-    DateTime::parse_from_rfc3339(value.as_str()?)
-        .ok()
-        .map(|d| local_moment(d.with_timezone(&Utc)))
+    value.as_str()?.parse::<Timestamp>().ok().map(local_moment)
 }
 
 /// A Trello board exported as JSON: lists become lists, cards tasks, checklist items subtasks.
@@ -1339,7 +1342,7 @@ fn parse_trello(board: &Value) -> Result<Parsed> {
             notes: text(&card, "desc"),
             due: card.get("due").and_then(iso_instant),
             start: card.get("start").and_then(iso_instant).map(|s| s[..10].to_string()),
-            done: complete.then(|| local_moment(Utc::now())),
+            done: complete.then(|| local_moment(Timestamp::now())),
             tags: card
                 .get("idLabels")
                 .and_then(Value::as_array)
@@ -1370,7 +1373,7 @@ fn parse_trello(board: &Value) -> Result<Parsed> {
                     parent: Some(id.clone()),
                     title: text(&item, "name"),
                     due: item.get("due").and_then(iso_instant),
-                    done: (text(&item, "state") == "complete").then(|| local_moment(Utc::now())),
+                    done: (text(&item, "state") == "complete").then(|| local_moment(Timestamp::now())),
                     ..Task::default()
                 });
             }
@@ -1391,18 +1394,18 @@ fn parse_trello(board: &Value) -> Result<Parsed> {
 fn graph_moment(value: Option<&Value>, date_only: bool) -> Option<String> {
     let value = value?;
     let text = value.get("dateTime").and_then(Value::as_str)?;
-    let moment = NaiveDateTime::parse_from_str(text.get(..19)?, "%Y-%m-%dT%H:%M:%S").ok()?;
+    let moment = DateTime::strptime("%Y-%m-%dT%H:%M:%S", text.get(..19)?).ok()?;
     if date_only {
-        return Some(moment.date().format("%Y-%m-%d").to_string());
+        return Some(moment.date().strftime("%Y-%m-%d").to_string());
     }
     let utc = value
         .get("timeZone")
         .and_then(Value::as_str)
         .is_none_or(|z| z.eq_ignore_ascii_case("UTC"));
     Some(if utc {
-        local_moment(Utc.from_utc_datetime(&moment))
+        local_moment(Offset::UTC.to_timestamp(moment).ok()?)
     } else {
-        moment.format("%Y-%m-%dT%H:%M").to_string()
+        moment.strftime("%Y-%m-%dT%H:%M").to_string()
     })
 }
 
@@ -1484,7 +1487,7 @@ fn parse_mstodo(root: &Value) -> Result<Parsed> {
                 odd_repeat += 1;
             }
             let done = (text(&task, "status") == "completed").then(|| {
-                graph_moment(task.get("completedDateTime"), false).unwrap_or_else(|| local_moment(Utc::now()))
+                graph_moment(task.get("completedDateTime"), false).unwrap_or_else(|| local_moment(Timestamp::now()))
             });
             out.tasks.push(Task {
                 key: id.clone(),
@@ -1527,7 +1530,7 @@ fn parse_mstodo(root: &Value) -> Result<Parsed> {
                         .get("isChecked")
                         .and_then(Value::as_bool)
                         .unwrap_or(false)
-                        .then(|| local_moment(Utc::now())),
+                        .then(|| local_moment(Timestamp::now())),
                     ..Task::default()
                 });
             }
@@ -1961,7 +1964,7 @@ mod tests {
     #[test]
     fn twodo_repeat_codes() {
         let none = (0, 0, 0.0);
-        let monday = NaiveDate::from_ymd_opt(2026, 12, 7);
+        let monday = Date::new(2026, 12, 7).ok();
         let get = |kind, value| twodo_repeat(kind, value, 1, none, monday).unwrap();
         let unit = |kind, value| (get(kind, value).freq, get(kind, value).interval);
         assert_eq!(unit(256, 1), (Freq::Daily, 1));
@@ -2029,7 +2032,7 @@ mod tests {
         assert_eq!(day("2024-04-15T10:00:00+0000"), "2024-04-15", "Pacific/Honolulu");
         assert_eq!(day("2024-04-14T11:00:00+0000"), "2024-04-15", "Pacific/Tongatapu");
 
-        let minutes = |text: &str| ticktick_offset(text).map(|d| d.num_minutes());
+        let minutes = |text: &str| ticktick_offset(text).map(|d| d.as_mins());
         assert_eq!(minutes("PT0S"), Some(0));
         assert_eq!(minutes("-PT0S"), Some(0));
         assert_eq!(minutes("-PT30M"), Some(-30));

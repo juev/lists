@@ -13,12 +13,6 @@ ignore = [
     # through askama 0.16.1, the latest of both; drop this once uniffi moves to
     # an askama without it.
     { id = "RUSTSEC-2026-0374", reason = "build-time only, no maintained upgrade yet" },
-    # chrono and chrono-tz are unmaintained (announced 2026-09-14, no fixed
-    # version). They hold the dates in lists-core and the timezone table in
-    # lists-web; the move to jiff or time is a change of its own. Drop these two
-    # entries once that change lands.
-    { id = "RUSTSEC-2026-0543", reason = "date handling still on chrono" },
-    { id = "RUSTSEC-2026-0555", reason = "timezone table still on chrono-tz" },
 ]
 
 [licenses]

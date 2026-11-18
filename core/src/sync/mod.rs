@@ -25,7 +25,7 @@ use std::io::Write;
 use std::path::Path;
 use std::sync::Arc;
 
-use chrono::NaiveDateTime;
+use jiff::{civil::DateTime, SignedDuration};
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
@@ -368,15 +368,15 @@ enum Trouble {
 /// What is known of a file that did not move: since when, when an error line
 /// last said so, and the reason it was given.
 struct BlobTrouble {
-    since: NaiveDateTime,
-    said: Option<NaiveDateTime>,
+    since: DateTime,
+    said: Option<DateTime>,
     message: String,
 }
 
 impl BlobTrouble {
     fn parse(value: &str) -> Option<Self> {
         let mut parts = value.splitn(3, '\t');
-        let time = |s: &str| NaiveDateTime::parse_from_str(s, TROUBLE_FMT).ok();
+        let time = |s: &str| DateTime::strptime(TROUBLE_FMT, s).ok();
         let since = time(parts.next()?)?;
         let said = parts.next().and_then(time);
         Some(BlobTrouble {
@@ -387,16 +387,15 @@ impl BlobTrouble {
     }
 
     fn value(&self) -> String {
-        let said = self.said.map(|t| t.format(TROUBLE_FMT).to_string()).unwrap_or_default();
-        format!("{}\t{said}\t{}", self.since.format(TROUBLE_FMT), self.message)
+        let said = self
+            .said
+            .map(|t| t.strftime(TROUBLE_FMT).to_string())
+            .unwrap_or_default();
+        format!("{}\t{said}\t{}", self.since.strftime(TROUBLE_FMT), self.message)
     }
 }
 
 /// A failure that goes on is said again at the error level after this long.
-fn trouble_repeat() -> chrono::Duration {
-    chrono::Duration::hours(1)
-}
-
 /// How a file is named in the log: its folder and the start of the hash.
 fn blob_label(sha256: &str) -> String {
     format!("blobs/{}/{}", &sha256[..2], short_hash(sha256))
@@ -1095,7 +1094,7 @@ impl Store {
         let trouble = match outcome {
             Ok(()) => {
                 if let Some(before) = before {
-                    let since = before.since.format(TROUBLE_FMT);
+                    let since = before.since.strftime(TROUBLE_FMT);
                     self.note(LogLevel::Info, "attachments", || {
                         format!("{target}: went through after failing since {since}")
                     });
@@ -1110,7 +1109,7 @@ impl Store {
             Trouble::Failed(e) => format!("{target}: {}", hide_hash(e, sha256)),
             Trouble::Missing => format!("{target}: the storage does not have it"),
         };
-        let due = |since: NaiveDateTime| now < since || now - since >= trouble_repeat();
+        let due = |since: DateTime| now < since || now.duration_since(since) >= SignedDuration::from_hours(1);
         let record = match before.filter(|b| b.message == message) {
             None => {
                 match trouble {
@@ -1125,7 +1124,7 @@ impl Store {
                 }
             }
             Some(mut known) => {
-                let since = known.since.format(TROUBLE_FMT).to_string();
+                let since = known.since.strftime(TROUBLE_FMT).to_string();
                 if due(known.said.unwrap_or(known.since)) {
                     match trouble {
                         Trouble::Failed(_) => self.note(LogLevel::Error, "attachments", || {
@@ -1914,7 +1913,7 @@ impl Store {
                 db::meta_set(
                     &inner.conn,
                     "sync_ok",
-                    &inner.now().format("%Y-%m-%dT%H:%M").to_string(),
+                    &inner.now().strftime("%Y-%m-%dT%H:%M").to_string(),
                 )?;
                 // A run that got through may still have left something unread (C23).
                 match crate::caldav::engine::unreadable(&inner.conn)? {

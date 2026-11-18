@@ -14,6 +14,8 @@ Identifiers: the bundle id and the Android application id are `org.evsyukov.list
 
 The web server `lists-web` (directory `web/`) is written in the same Rust and uses the core directly, without bindings; its page is one HTML file with JavaScript.
 
+Both Rust workspaces use Jiff for calendar arithmetic and time zone conversion. The web binary bundles the IANA time zone database so browser reminders can follow clock changes in the `scratch` image.
+
 | Layer | Language | What lives in it |
 |---|---|---|
 | Core | Rust | data model, SQLite, merging of changes, sync, repeats, parsing of the quick entry line |
