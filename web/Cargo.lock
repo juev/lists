@@ -902,7 +902,7 @@ checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
 
 [[package]]
 name = "lists-core"
-version = "0.8.6-rc.1"
+version = "0.8.6"
 dependencies = [
  "argon2",
  "base64 0.23.1",
@@ -926,7 +926,7 @@ dependencies = [
 
 [[package]]
 name = "lists-web"
-version = "0.8.6-rc.1"
+version = "0.8.6"
 dependencies = [
  "aes-gcm",
  "base64 0.23.1",
