@@ -97,6 +97,13 @@ jobs:
       - name: Install cargo-ndk
         run: cargo install cargo-ndk --version 4.1.2 --locked
       - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+      # Robolectric fetches its android-all jars at test time, hundreds of megabytes from
+      # Maven Central, and rate limits there (HTTP 429) fail the tests (#477). Gradle's own
+      # cache does not hold the local Maven repository, so the jars are cached here.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.m2/repository/org/robolectric
+          key: robolectric-${{ runner.os }}-${{ hashFiles('android/app/build.gradle.kts') }}
       - name: Build the debug APK
         run: make android
       # The release goes through R8, and a rule missing from proguard-rules.pro is a crash at run

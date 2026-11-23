@@ -104,7 +104,8 @@ dependencies {
     testImplementation(composeBom)
     testImplementation("androidx.compose.ui:ui-test-junit4")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
-    testImplementation("org.robolectric:robolectric:4.17")
+    // 4.18.1 fetches the SDK jars from Google's Maven Central mirror when Central answers 429 (#477).
+    testImplementation("org.robolectric:robolectric:4.18.1")
     testImplementation("io.github.takahirom.roborazzi:roborazzi:1.75.0")
     testImplementation("io.github.takahirom.roborazzi:roborazzi-compose:1.75.0")
     // Previews of the building blocks in the IDE (ui/Catalog.kt).
