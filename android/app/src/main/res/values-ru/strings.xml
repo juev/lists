@@ -202,6 +202,9 @@
     <string name="every_n_months">Каждые %1$s мес.</string>
     <string name="every_n_years">Каждые %1$s г.</string>
     <string name="base_on_monthday">%1$s, %2$s-го</string>
+    <string name="base_on_weekday">%1$s, %2$s %3$s</string>
+    <string name="base_on_weekdays">%1$s: %2$s</string>
+    <string name="weekday_separator">", "</string>
     <string name="after_completion">" после выполнения"</string>
     <string name="n_left">, осталось %1$s</string>
     <string name="until_suffix">, до %1$s</string>

@@ -193,9 +193,42 @@ const RU = {
   "Revoke this token? Scripts that use it stop working.": "Отозвать токен? Сценарии, которые им пользуются, перестанут работать.",
   "A token lets a script reach this server without a password: send it as Authorization: Bearer <token>.": "Токен даёт сценарию доступ к серверу без пароля: передайте его заголовком Authorization: Bearer <токен>."
 };
-const ru = (navigator.language || "en").toLowerCase().startsWith("ru");
-const t = s => (ru && RU[s]) || s;
-const locale = ru ? "ru" : "en";
+const ZH = {
+  "Inbox": "收件箱", "Today": "今天", "Upcoming": "待安排", "All": "全部", "Completed": "已完成", "Won't do": "不做", "Trash": "回收站",
+  "Lists": "清单", "Tags": "标签", "New list": "新建清单", "List name": "清单名称", "New project": "新建项目", "Project name": "项目名称", "Search": "搜索",
+  "New task": "新建任务", "Overdue": "已逾期", "Tomorrow": "明天", "Yesterday": "昨天", "Title": "标题", "Notes": "备注", "Due": "到期日",
+  "Start": "开始", "Reminder": "提醒", "Priority": "优先级", "No priority": "无优先级", "Low": "低", "Medium": "中", "High": "高",
+  "Repeat": "重复", "Does not repeat": "不重复", "Every day": "每天", "On weekdays": "工作日", "Every week": "每周", "Every two weeks": "每两周", "Every month": "每月",
+  "Every quarter": "每季度", "Every year": "每年", "Custom": "自定义", "Custom…": "自定义…", "Every": "每", "days": "天", "weeks": "周",
+  "months": "个月", "years": "年", "Days of the week": "星期几", "On a weekday instead of a date": "按星期几而非日期", "Count from the completion date": "从完成日算起", "Ends": "结束", "Never": "从不",
+  "After a number of repeats": "重复指定次数后", "On a date": "在指定日期", "first": "第1个", "second": "第2个", "third": "第3个", "fourth": "第4个", "fifth": "第5个",
+  "last": "最后一个", "Tag": "标签", "Subtask": "子任务", "Attach file": "附加文件", "Move to": "移到", "Duplicate": "复制", "Delete": "删除",
+  "Restore": "恢复", "Empty Trash": "清空回收站", "Delete everything in the trash for good?": "要永久删除回收站中的所有内容吗？", "Clear…": "清除…", "Older than a month": "超过一个月", "Older than a year": "超过一年", "Everything": "全部",
+  "Delete completed tasks older than a month for good?": "要永久删除一个月前已完成的任务吗？", "Delete completed tasks older than a year for good?": "要永久删除一年前已完成的任务吗？", "Delete all completed tasks for good?": "要永久删除所有已完成的任务吗？", "Password": "密码", "Sign in": "登录", "Wrong password": "密码错误", "Sign out": "退出登录",
+  "All done for today": "今天的都完成了", "No tasks": "没有任务", "Nothing found": "没有找到结果", "Synced": "已同步", "Sync failed": "同步失败", "waiting": "项等待上传", "Deleted": "已删除",
+  "Undo": "撤销", "Created": "已创建", "Task completed": "任务已完成", "Moved to the next occurrence": "已移到下一次", "not downloaded yet": "尚未下载", "downloading…": "正在下载…", "could not download, try later": "下载失败，请稍后再试",
+  "Attachments waiting to sync": "等待同步的附件", "Download": "下载", "Close": "关闭", "from": "从", "Delete list": "删除清单", "Delete this list and move its tasks to the trash?": "要删除此清单并把其中的任务移到回收站吗？", "Sort": "排序",
+  "Manually": "手动", "By due date": "按到期日", "By priority": "按优先级", "By title": "按标题", "Rename": "重命名", "time": "时间", "Sign in with single sign-on": "使用单点登录",
+  "Import…": "导入…", "tasks": "任务", "attachments": "附件", "Projects": "项目", "Filters": "筛选器", "New filter": "新建筛选器", "Make it a project": "转为项目",
+  "Turn back into a task": "改回任务", "Complete project": "完成项目", "Project completed": "项目已完成", "Filter": "筛选器", "Date": "日期", "Any": "任意", "The coming days": "未来几天",
+  "No date": "无日期", "Days": "天", "Priority at least": "优先级不低于", "Status": "状态", "Open": "未完成", "Contains": "包含", "Save": "保存",
+  "Cancel": "取消", "Delete filter": "删除筛选器", "Edit": "编辑", "all of these, separated by spaces": "全部包含，用空格分隔", "Next 7 days": "未来 7 天", "High priority": "高优先级", "Any list unless some are checked": "未勾选任何清单时表示所有清单",
+  "Completed tasks leave the view": "已完成任务离开视图", "at once": "立即", "after an hour": "一小时后", "after": "延迟", "min": "分钟", "s": "秒", "at the end of the day": "在当天结束时",
+  "Select": "选择", "Selected": "已选择", "Done": "完成", "Complete": "完成", "Move to list": "移到清单", "More": "更多", "Moved": "已移动",
+  "Changed": "已更改", "Restored": "已恢复", "Settings": "设置", "Appearance": "外观", "Same as the system": "跟随系统", "Light": "浅色", "Dark": "深色",
+  "Notifications…": "通知…", "Notifications": "通知", "Show notifications in this browser": "在此浏览器中显示通知", "Task due at a time": "按时间到期的任务", "Task due on a day": "按日期到期的任务", "Summary of the day": "每日摘要", "At the due time": "到期时",
+  "5 minutes before": "提前 5 分钟", "15 minutes before": "提前 15 分钟", "30 minutes before": "提前 30 分钟", "1 hour before": "提前 1 小时", "2 hours before": "提前 2 小时", "1 day before": "提前 1 天", "Leave a time empty to turn it off.": "时间留空即关闭该项。",
+  "Send a test notification": "发送测试通知", "Sent": "已发送", "Notifications work over HTTPS only.": "通知仅在 HTTPS 下可用。", "This browser cannot get notifications.": "此浏览器无法接收通知。", "On iPhone and iPad, add Lists to the Home Screen first.": "在 iPhone 和 iPad 上，请先将 Lists 添加到主屏幕。", "The browser does not allow notifications for this site.": "浏览器不允许此站点发送通知。", "The server cannot be reached.": "无法连接到服务器。",
+  "Try again": "重试", "API tokens…": "API 令牌…", "API tokens": "API 令牌", "Read": "只读", "Read and write": "读写", "Name": "名称", "Scope": "范围",
+  "Create": "创建", "New token": "新建令牌", "Export…": "导出…", "Export": "导出", "Format": "格式", "What": "内容", "JSON, which Lists and scripts can read back": "JSON：Lists 和脚本都能读回",
+  "Markdown, for reading": "Markdown：便于阅读", "This list": "此清单", "Attachment content is not exported; the JSON names each file.": "附件内容不会导出；JSON 中会列出每个文件名。", "Revoke": "撤销", "Copy": "复制", "Copied": "已复制", "Last used": "上次使用",
+  "never": "从未", "Copy it now: it is not shown again.": "请立即复制：之后不会再显示。", "Revoke this token? Scripts that use it stop working.": "要撤销此令牌吗？使用它的脚本将无法工作。", "A token lets a script reach this server without a password: send it as Authorization: Bearer <token>.": "令牌让脚本无需密码即可访问此服务器：以 Authorization: Bearer <令牌> 的形式发送。"
+};
+const lang = (navigator.language || "en").toLowerCase();
+const ru = lang.startsWith("ru");
+const zh = lang.startsWith("zh");
+const t = s => (zh && ZH[s]) || (ru && RU[s]) || s;
+const locale = zh ? "zh-CN" : ru ? "ru" : "en";
 const $ = (tag, props = {}, ...kids) => {
   const el = document.createElement(tag);
   for (const [k, v] of Object.entries(props)) {

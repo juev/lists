@@ -203,6 +203,9 @@
     <string name="every_n_months">Every %1$s months</string>
     <string name="every_n_years">Every %1$s years</string>
     <string name="base_on_monthday">%1$s, on day %2$s</string>
+    <string name="base_on_weekday">%1$s, %2$s %3$s</string>
+    <string name="base_on_weekdays">%1$s: %2$s</string>
+    <string name="weekday_separator">", "</string>
     <string name="after_completion">" after completion"</string>
     <string name="n_left">, %1$s left</string>
     <string name="until_suffix">, until %1$s</string>

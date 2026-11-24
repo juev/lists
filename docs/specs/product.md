@@ -7,7 +7,7 @@ Sources: the request of the author of the project of 2026-10-05; the list of 2Do
 
 A personal task list for one person on several devices: macOS and Android now, iOS later. The model is 2Do, but with fewer entities and actions.
 
-The interface language is English, with a Russian localisation; the app follows the system language.
+The interface language is English, with a Russian and a Chinese (Simplified) localisation; each app follows the system language.
 
 Out of scope: shared lists, location reminders, "call/message" actions, duration estimates, groups of lists and groups of tags, a smart list builder, sync with Dropbox and Apple Reminders.
 
@@ -662,6 +662,6 @@ Web: the test `r155_r156_the_export_downloads_as_a_file`; in headless Chromium t
 
 - R24, R25: receiving files through "Share" is written, not checked live.
 - Sync with a folder is not offered on Android: the app has no access to shared folders.
-- The texts of sync errors come from the core and are shown in English in both interface languages.
+- The texts of sync errors come from the core and are shown in English in every interface language.
 - Web: no drag and drop (a custom repeat is set there since #374); the server is meant for one user (everyone signed in sees the same data). Sign-in is a password and/or OpenID Connect with a list of allowed addresses; checked by the tests `web/tests/oidc.rs` with a fake provider, not run with a real provider. The signature of the ID token is not verified: the token comes directly from the provider over TLS, which OpenID Connect Core 3.1.3.7 allows.
 - iOS: there is no build target, nothing was built or run; a phone without Android is served by the web interface. The quick entry window, the menu bar, the keychain and opening files are written in AppKit and will need replacing.

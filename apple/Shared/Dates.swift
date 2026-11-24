@@ -131,15 +131,16 @@ extension Repeat {
         case .weekly:
             text = n == 1 ? L("Every week") : L("Every %@ weeks", "\(n)")
             if !weekdays.isEmpty {
-                text += ": " + weekdays.sorted().compactMap { d in
+                let days = weekdays.sorted().compactMap { d in
                     (1...7).contains(Int(d)) ? Repeat.weekdayNames[Int(d) - 1] : nil
-                }.joined(separator: ", ")
+                }.joined(separator: L(", "))
+                text += L(": %@", days)
             }
         case .monthly:
             text = n == 1 ? L("Every month") : L("Every %@ months", "\(n)")
             if let nth, let wd = nthWeekday, (1...7).contains(Int(wd)) {
                 let which = nth < 0 ? L("last") : ordinal(Int(nth))
-                text += ", \(which) \(Repeat.weekdayNames[Int(wd) - 1])"
+                text += L(", %@ %@", which, Repeat.weekdayNames[Int(wd) - 1])
             } else if let monthday {
                 text += L(", on day %@", "\(monthday)")
             }

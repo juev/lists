@@ -114,14 +114,14 @@ fun Repeat.summary(): String {
         Freq.WEEKLY -> {
             val base = if (n == 1u) str(R.string.every_week) else str(R.string.every_n_weeks, n)
             val days = weekdays.sorted().mapNotNull { weekdayNames.getOrNull(it.toInt() - 1) }
-            if (days.isEmpty()) base else "$base: ${days.joinToString(", ")}"
+            if (days.isEmpty()) base else str(R.string.base_on_weekdays, base, days.joinToString(str(R.string.weekday_separator)))
         }
         Freq.MONTHLY -> {
             val base = if (n == 1u) str(R.string.every_month) else str(R.string.every_n_months, n)
             val which = nth
             val weekday = nthWeekday?.let { weekdayNames.getOrNull(it.toInt() - 1) }
             when {
-                which != null && weekday != null -> "$base, ${if (which < 0) lastWord() else ordinal(which)} $weekday"
+                which != null && weekday != null -> str(R.string.base_on_weekday, base, if (which < 0) lastWord() else ordinal(which), weekday)
                 monthday != null -> str(R.string.base_on_monthday, base, monthday)
                 else -> base
             }
