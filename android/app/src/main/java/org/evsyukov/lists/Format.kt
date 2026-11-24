@@ -6,6 +6,7 @@ import uniffi.lists_core.Repeat
 import uniffi.lists_core.TaskList
 import java.time.LocalDate
 import java.time.LocalDateTime
+import java.time.YearMonth
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
 import java.util.Locale
@@ -21,9 +22,11 @@ fun ordinal(n: Int): String =
     str(listOf(R.string.ordinal_1, R.string.ordinal_2, R.string.ordinal_3, R.string.ordinal_4, R.string.ordinal_5)[n.coerceIn(1, 5) - 1])
 
 // Formatters follow the current locale, so they are built on use, not cached.
-private fun shortDay() = DateTimeFormatter.ofPattern("EEE, d MMM", Locale.getDefault())
-private fun longDay() = DateTimeFormatter.ofPattern("EEEE, d MMMM", Locale.getDefault())
-private fun withYear() = DateTimeFormatter.ofPattern("d MMM yyyy", Locale.getDefault())
+// The field order and punctuation are resources: Chinese writes 2000年10月9日 星期一.
+private fun datePattern(pattern: Int) = DateTimeFormatter.ofPattern(str(pattern), Locale.getDefault())
+private fun shortDay() = datePattern(R.string.date_short)
+private fun longDay() = datePattern(R.string.date_long)
+private fun withYear() = datePattern(R.string.date_short_with_year)
 private val moment = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm")
 
 fun today(): String = LocalDate.now().toString()
@@ -60,7 +63,7 @@ fun dateLabel(value: String): String {
         -1L -> str(R.string.yesterday)
         else -> date.format(if (date.year == now.year) shortDay() else withYear())
     }
-    return if (hasTime(value)) "$text, ${value.takeLast(5)}" else text
+    return if (hasTime(value)) str(R.string.date_with_time, text, value.takeLast(5)) else text
 }
 
 /**
@@ -81,6 +84,10 @@ fun dayHeading(day: String): String {
     val text = date.format(longDay()).replaceFirstChar { it.titlecase(Locale.getDefault()) }
     return if (ChronoUnit.DAYS.between(LocalDate.now(), date) == 1L) str(R.string.tomorrow_heading, text) else text
 }
+
+/** Month and year in the calendar header; the name of a month alone is lower case in some languages. */
+fun monthTitle(month: YearMonth): String =
+    month.format(datePattern(R.string.month_year)).replaceFirstChar { it.titlecase(Locale.getDefault()) }
 
 val weekdayNames: List<String> get() = listOf(str(R.string.mon), str(R.string.tue), str(R.string.wed), str(R.string.thu), str(R.string.fri), str(R.string.sat), str(R.string.sun))
 

@@ -191,7 +191,9 @@ const RU = {
   "Attachment content is not exported; the JSON names each file.": "Содержимое вложений не выгружается; в JSON названо каждое вложение.", "Revoke": "Отозвать", "Copy": "Скопировать", "Copied": "Скопировано", "Last used": "Использован", "never": "никогда",
   "Copy it now: it is not shown again.": "Скопируйте его сейчас: больше он не показывается.",
   "Revoke this token? Scripts that use it stop working.": "Отозвать токен? Сценарии, которые им пользуются, перестанут работать.",
-  "A token lets a script reach this server without a password: send it as Authorization: Bearer <token>.": "Токен даёт сценарию доступ к серверу без пароля: передайте его заголовком Authorization: Bearer <токен>."
+  "A token lets a script reach this server without a password: send it as Authorization: Bearer <token>.": "Токен даёт сценарию доступ к серверу без пароля: передайте его заголовком Authorization: Bearer <токен>.",
+  "after %@ s": "через %@ с", "after %@ min": "через %@ мин",
+  "Imported from %@: %@ lists, %@ tasks, %@ attachments.": "Импорт из %1$@: списков — %2$@, задач — %3$@, вложений — %4$@."
 };
 const ZH = {
   "Inbox": "收件箱", "Today": "今天", "Upcoming": "待安排", "All": "全部", "Completed": "已完成", "Won't do": "不做", "Trash": "回收站",
@@ -222,12 +224,19 @@ const ZH = {
   "Try again": "重试", "API tokens…": "API 令牌…", "API tokens": "API 令牌", "Read": "只读", "Read and write": "读写", "Name": "名称", "Scope": "范围",
   "Create": "创建", "New token": "新建令牌", "Export…": "导出…", "Export": "导出", "Format": "格式", "What": "内容", "JSON, which Lists and scripts can read back": "JSON：Lists 和脚本都能读回",
   "Markdown, for reading": "Markdown：便于阅读", "This list": "此清单", "Attachment content is not exported; the JSON names each file.": "附件内容不会导出；JSON 中会列出每个文件名。", "Revoke": "撤销", "Copy": "复制", "Copied": "已复制", "Last used": "上次使用",
-  "never": "从未", "Copy it now: it is not shown again.": "请立即复制：之后不会再显示。", "Revoke this token? Scripts that use it stop working.": "要撤销此令牌吗？使用它的脚本将无法工作。", "A token lets a script reach this server without a password: send it as Authorization: Bearer <token>.": "令牌让脚本无需密码即可访问此服务器：以 Authorization: Bearer <令牌> 的形式发送。"
+  "never": "从未", "Copy it now: it is not shown again.": "请立即复制：之后不会再显示。", "Revoke this token? Scripts that use it stop working.": "要撤销此令牌吗？使用它的脚本将无法工作。", "A token lets a script reach this server without a password: send it as Authorization: Bearer <token>.": "令牌让脚本无需密码即可访问此服务器：以 Authorization: Bearer <令牌> 的形式发送。",
+  "after %@ s": "%@秒后", "after %@ min": "%@分钟后",
+  "Imported from %@: %@ lists, %@ tasks, %@ attachments.": "已从 %1$@ 导入：%2$@ 个清单、%3$@ 个任务、%4$@ 个附件。"
 };
 const lang = (navigator.language || "en").toLowerCase();
 const ru = lang.startsWith("ru");
 const zh = lang.startsWith("zh");
 const t = s => (zh && ZH[s]) || (ru && RU[s]) || s;
+// Same positional placeholders as the apps: %@ takes the next value, %2$@ the second one.
+const format = (template, values) => {
+  let next = 0;
+  return template.replace(/%(\d+\$)?@/g, (_, position) => String(values[position ? Number(position.slice(0, -1)) - 1 : next++]));
+};
 const locale = zh ? "zh-CN" : ru ? "ru" : "en";
 const $ = (tag, props = {}, ...kids) => {
   const el = document.createElement(tag);
@@ -808,7 +817,8 @@ function render() {
     const f = e.target.files[0];
     if (!f) return;
     const r = await api("/api/import?name=" + encodeURIComponent(f.name), { method: "POST", headers: { "X-Lists": "1" }, body: f });
-    alert([`${r.source}: ${t("Lists")} ${r.lists}, ${t("tasks")} ${r.tasks}, ${t("attachments")} ${r.attachments}`, ...r.notes].join("\n\n"));
+    const summary = format(t("Imported from %@: %@ lists, %@ tasks, %@ attachments."), [r.source, r.lists, r.tasks, r.attachments]);
+    alert([summary, ...r.notes].join("\n\n"));
     load();
   } });
   const add = $("input", { type: "text", placeholder: t("New task"), enterkeyhint: "done", onkeydown: async e => { if (e.key === "Enter" && e.target.value.trim()) { const text = e.target.value; e.target.value = ""; await act("quickAdd", { text, scope: state.scope }); document.querySelector("#add input").focus(); } } });
@@ -868,7 +878,7 @@ function render() {
 function keepChoices(current) {
   // Seconds, or "day"; a whole number of minutes is what an earlier version offered.
   const name = s => s === "day" ? t("at the end of the day") : s === 0 ? t("at once") : s === 3600 ? t("after an hour")
-    : t("after") + " " + (s % 60 ? s + " " + t("s") : s / 60 + " " + t("min"));
+    : format(t(s % 60 ? "after %@ s" : "after %@ min"), [s % 60 ? s : s / 60]);
   const seconds = [...new Set([0, 5, 15, current])].filter(s => s !== "day").sort((a, b) => a - b);
   return [...seconds, "day"].map(s => [s, name(s)]);
 }

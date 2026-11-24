@@ -48,6 +48,7 @@ import androidx.compose.ui.unit.dp
 import org.evsyukov.lists.R
 import org.evsyukov.lists.hasTime
 import org.evsyukov.lists.momentString
+import org.evsyukov.lists.monthTitle
 import org.evsyukov.lists.parseMoment
 import org.evsyukov.lists.str
 import java.time.DayOfWeek
@@ -163,8 +164,7 @@ private fun MonthGrid(month: YearMonth, selected: LocalDate, today: LocalDate, o
                 Icon(Icons.AutoMirrored.Outlined.KeyboardArrowLeft, str(R.string.previous_month))
             }
             Text(
-                // The name of a month alone is in lower case in some languages.
-                month.format(DateTimeFormatter.ofPattern("LLLL yyyy", locale)).replaceFirstChar { it.titlecase(locale) },
+                monthTitle(month),
                 Modifier.weight(1f),
                 style = MaterialTheme.typography.titleSmall,
                 textAlign = TextAlign.Center,

@@ -1798,7 +1798,7 @@ private fun SectionRow(icon: ImageVector, title: String, onClick: () -> Unit) {
     }
 }
 
-/** R160: the version and the author under the sections; the name is the same in both languages. */
+/** R160: the version and the author under the sections; the name is the same in all interface languages. */
 @Composable
 fun AboutLine(version: String) {
     val uriHandler = LocalUriHandler.current

@@ -73,7 +73,7 @@ enum Moment {
             text = f.string(from: date)
         }
         if hasTime(value) {
-            text += ", " + String(value.suffix(5))
+            text = L("%@, %@", text, String(value.suffix(5)))
         }
         return text
     }
