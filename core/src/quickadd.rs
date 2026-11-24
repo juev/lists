@@ -160,6 +160,21 @@ mod tests {
     }
 
     #[test]
+    fn chinese_example_keeps_english_parser_words() {
+        let p = parse("报告 friday 10:00 !! #工作 @项目", today());
+        assert_eq!(
+            (p.title, p.due, p.priority, p.tags, p.list_name),
+            (
+                "报告".to_string(),
+                Some("2026-10-09T10:00".to_string()),
+                Priority::Medium,
+                vec!["工作".to_string()],
+                Some("项目".to_string()),
+            )
+        );
+    }
+
+    #[test]
     fn plain_text_is_untouched() {
         let p = parse("Позвонить в банк", today());
         assert_eq!(p.title, "Позвонить в банк");

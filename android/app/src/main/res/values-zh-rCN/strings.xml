@@ -27,6 +27,11 @@
     <string name="reopen">重新打开</string>
     <string name="complete">完成</string>
     <string name="from_date">从 %1$s 起</string>
+    <string name="date_short">M月d日 EEE</string>
+    <string name="date_long">M月d日 EEEE</string>
+    <string name="date_short_with_year">yyyy年M月d日</string>
+    <string name="month_year">yyyy年M月</string>
+    <string name="date_with_time">%1$s %2$s</string>
     <string name="restore">恢复</string>
     <string name="delete_record">删除记录</string>
     <string name="due">到期日</string>

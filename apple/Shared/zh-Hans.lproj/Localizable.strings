@@ -217,6 +217,7 @@
 "%1$@, on day %2$@" = "%1$@，%2$@ 日";
 ", %@ %@" = "%1$@%2$@";
 ": %@" = "：%@";
+"%@, %@" = "%1$@ %2$@";
 ", " = "、";
 " after completion" = "，从完成日算起";
 ", %@ left" = "，还剩 %@ 次";
@@ -371,7 +372,7 @@
 "Start the note with the clipboard in quick entry" = "快速添加时用剪贴板内容作为备注开头";
 "Text or a link copied just before the quick-entry window is opened becomes the note. Each copy is used once." = "在打开快速添加窗口之前复制的文字或链接会成为备注。每次复制只使用一次。";
 "Remove the text taken from the clipboard" = "移除从剪贴板取来的文字";
-"“report friday 10:00 !! #work @Projects” sets the due date, the priority, a tag and the list. Off: the title is kept as typed." = "“明天报告 10:00 !! #工作 @项目”会设置到期日、优先级、标签和清单。关闭时，标题按输入内容保存。";
+"“report friday 10:00 !! #work @Projects” sets the due date, the priority, a tag and the list. Off: the title is kept as typed." = "“报告 friday 10:00 !! #工作 @项目”会设置到期日、优先级、标签和清单。关闭时，标题按输入内容保存。";
 "Start date (⌘S)" = "开始日期（⌘S）";
 "Due date (⌘D)" = "到期日（⌘D）";
 "Repeat (⇧⌘R)" = "重复（⇧⌘R）";

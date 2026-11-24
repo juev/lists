@@ -28,6 +28,11 @@
     <string name="reopen">Reopen</string>
     <string name="complete">Complete</string>
     <string name="from_date">from %1$s</string>
+    <string name="date_short">EEE, d MMM</string>
+    <string name="date_long">EEEE, d MMMM</string>
+    <string name="date_short_with_year">d MMM yyyy</string>
+    <string name="month_year">LLLL yyyy</string>
+    <string name="date_with_time">%1$s, %2$s</string>
     <string name="restore">Restore</string>
     <string name="delete_record">Delete record</string>
     <string name="due">Due</string>
