@@ -16,7 +16,7 @@ docker run -d --name lists \
   -v lists-data:/data \
   -e LISTS_WEB_PASSWORD='choose a password' \
   -e LISTS_TRUST_PROXY=1 \
-  ghcr.io/juev/lists:0.8.6
+  ghcr.io/juev/lists:0.8.7
 ```
 
 The container listens on port 8080, keeps its data in `/data` and runs as user 10001. A directory mounted over `/data` must be writable by that user. Uploads and imports are written to `/data/tmp` first (`TMPDIR`), so the server needs nothing outside `/data` and runs with a read-only root filesystem.
@@ -30,7 +30,7 @@ The repository carries a ready [`compose.yaml`](../compose.yaml) that reads its 
 ```yaml
 services:
   lists:
-    image: ghcr.io/juev/lists:0.8.6
+    image: ghcr.io/juev/lists:0.8.7
     restart: unless-stopped
     read_only: true
     cap_drop: [ALL]
