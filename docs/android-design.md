@@ -6,6 +6,8 @@ How the Android screens take their measures and colours, and how a change to the
 
 `ListsTheme(dark, dynamic)` is the theme of every screen. It takes the colour scheme of the look chosen in the settings (system, light or dark). With `dynamic`, Android 12 and later take the palette of the wallpaper; before Android 12 the Material baseline is used. `AppTheme` in `MainActivity.kt` is `ListsTheme` with the look of the settings and the colour of the system bars. Type and shapes are the Material ones: the text size of the settings (R100) and of the system scales every role.
 
+Before Compose draws, the platform uses `Theme.Lists` from `res/values/themes.xml`. Its variant in `res/values-night/themes.xml` has the dark Material parent, so the starting window follows the system appearance (#485).
+
 ## Tokens
 
 `Tokens.kt` holds the measures; a screen does not write a number of its own for a measure that is listed here.
